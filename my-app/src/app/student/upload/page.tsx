@@ -3,12 +3,14 @@
 import React, { useCallback, useState } from 'react';
 import { Upload, FileText, Check, AlertCircle, Eye, Sparkles, Award } from 'lucide-react';
 
-// Mock type for demonstration
+// OCR extraction result type matching the API
 type OcrExtractionResult = {
   title?: string;
   institution?: string;
   date_issued?: string;
   description?: string;
+  raw_text?: string;
+  confidence?: number;
 };
 
 export default function StudentUploadPage() {
@@ -59,30 +61,90 @@ export default function StudentUploadPage() {
     setError(null);
     setSuccess(null);
     
-    // Simulate OCR processing
-    setTimeout(() => {
-      setPublicUrl('https://example.com/certificate.pdf');
-      setOcr({
-        title: 'Certificate of Excellence',
-        institution: 'Tech University',
-        date_issued: '2024-03-15',
-        description: 'Awarded for outstanding performance in Advanced React Development course'
+    try {
+      // Create FormData for file upload
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      // Call OCR API endpoint
+      const response = await fetch('/api/certificates/ocr', {
+        method: 'POST',
+        body: formData,
       });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'OCR processing failed');
+      }
+      
+      const result = await response.json();
+      
+      // Set the extracted data and public URL
+      setPublicUrl(result.data.publicUrl);
+      setOcr({
+        title: result.data.ocr.title || 'Untitled Certificate',
+        institution: result.data.ocr.institution || '',
+        date_issued: result.data.ocr.date_issued || new Date().toISOString().split('T')[0],
+        description: result.data.ocr.description || result.data.ocr.raw_text || ''
+      });
+      
+    } catch (err) {
+      console.error('OCR Error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to process certificate');
+    } finally {
       setUploading(false);
-    }, 2000);
+    }
   }, [file]);
 
   const handleSave = useCallback(async () => {
-    if (!publicUrl) return;
+    if (!publicUrl || !ocr) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     
-    // Simulate save
-    setTimeout(() => {
-      setSuccess('Certificate saved successfully! Awaiting faculty approval.');
+    try {
+      // Call create API endpoint with extracted data
+      const response = await fetch('/api/certificates/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          publicUrl,
+          ocr: {
+            title: ocr.title,
+            institution: ocr.institution,
+            date_issued: ocr.date_issued,
+            description: ocr.description,
+            raw_text: ocr.raw_text,
+            confidence: ocr.confidence
+          }
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save certificate');
+      }
+      
+      const result = await response.json();
+      
+      if (result.data?.status === 'created') {
+        setSuccess('Certificate saved successfully! Awaiting faculty approval.');
+        // Reset form after successful save
+        setFile(null);
+        setOcr(null);
+        setPublicUrl(null);
+      } else {
+        throw new Error('Unexpected response from server');
+      }
+      
+    } catch (err) {
+      console.error('Save Error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save certificate');
+    } finally {
       setSaving(false);
-    }, 1500);
+    }
   }, [publicUrl, ocr]);
 
   return (
