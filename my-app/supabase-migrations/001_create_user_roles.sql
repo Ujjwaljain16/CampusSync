@@ -20,44 +20,28 @@ ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can read their own role" ON user_roles
   FOR SELECT USING (auth.uid() = user_id);
 
--- Policy: Admins can read all roles
+-- Policy: Admins can read all roles (using auth.jwt() to avoid recursion)
 CREATE POLICY "Admins can read all roles" ON user_roles
   FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM user_roles ur 
-      WHERE ur.user_id = auth.uid() 
-      AND ur.role = 'admin'
-    )
+    (auth.jwt() ->> 'role')::text = 'admin'
   );
 
--- Policy: Admins can insert roles
+-- Policy: Admins can insert roles (using auth.jwt() to avoid recursion)
 CREATE POLICY "Admins can insert roles" ON user_roles
   FOR INSERT WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM user_roles ur 
-      WHERE ur.user_id = auth.uid() 
-      AND ur.role = 'admin'
-    )
+    (auth.jwt() ->> 'role')::text = 'admin'
   );
 
--- Policy: Admins can update roles
+-- Policy: Admins can update roles (using auth.jwt() to avoid recursion)
 CREATE POLICY "Admins can update roles" ON user_roles
   FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM user_roles ur 
-      WHERE ur.user_id = auth.uid() 
-      AND ur.role = 'admin'
-    )
+    (auth.jwt() ->> 'role')::text = 'admin'
   );
 
--- Policy: Admins can delete roles
+-- Policy: Admins can delete roles (using auth.jwt() to avoid recursion)
 CREATE POLICY "Admins can delete roles" ON user_roles
   FOR DELETE USING (
-    EXISTS (
-      SELECT 1 FROM user_roles ur 
-      WHERE ur.user_id = auth.uid() 
-      AND ur.role = 'admin'
-    )
+    (auth.jwt() ->> 'role')::text = 'admin'
   );
 
 -- Function to automatically assign 'student' role to new users

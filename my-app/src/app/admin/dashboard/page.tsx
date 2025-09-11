@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle } from 'lucide-react';
+import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, UserPlus, Mail } from 'lucide-react';
 
 interface UserWithRole {
   user_id: string;
@@ -20,6 +20,10 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actioning, setActioning] = useState<string | null>(null);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('student');
+  const [inviting, setInviting] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -76,6 +80,31 @@ export default function AdminDashboardPage() {
     }
   }, [fetchUsers]);
 
+  const sendInvitation = useCallback(async () => {
+    if (!inviteEmail.trim()) return;
+    
+    setInviting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to send invitation');
+      
+      setShowInviteForm(false);
+      setInviteEmail('');
+      setInviteRole('student');
+      await fetchUsers();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to send invitation');
+    } finally {
+      setInviting(false);
+    }
+  }, [inviteEmail, inviteRole, fetchUsers]);
+
   const getRoleColor = (role: string) => {
     switch (role) {
       case 'admin': return 'bg-red-100 text-red-800 border-red-200';
@@ -130,16 +159,68 @@ export default function AdminDashboardPage() {
           <div className="px-8 py-6 border-b border-white/10">
             <div className="flex items-center justify-between">
               <h2 className="text-white text-xl font-bold">User Management</h2>
-              <button
-                onClick={fetchUsers}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowInviteForm(!showInviteForm)}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Invite User
+                </button>
+                <button
+                  onClick={fetchUsers}
+                  disabled={loading}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* Invite User Form */}
+          {showInviteForm && (
+            <div className="px-8 py-6 border-b border-white/10 bg-white/5">
+              <h3 className="text-white text-lg font-semibold mb-4">Invite New User</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-white/80 text-sm font-medium mb-2">Email Address</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-white/60" />
+                    <input
+                      type="email"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      className="w-full pl-10 pr-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-white/80 text-sm font-medium mb-2">Role</label>
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value)}
+                    className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                  >
+                    <option value="student" className="bg-gray-800">Student</option>
+                    <option value="faculty" className="bg-gray-800">Faculty</option>
+                    <option value="admin" className="bg-gray-800">Admin</option>
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={sendInvitation}
+                    disabled={!inviteEmail.trim() || inviting}
+                    className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {inviting ? 'Sending...' : 'Send Invitation'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-left">

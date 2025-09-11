@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 				},
 				setAll(cookies) {
 					cookies.forEach(({ name, value, options }) => {
-						response.cookies.set({ name, value, ...options });
+						response.cookies.set(name, value, ...options);
 					});
 				},
 			},
@@ -39,9 +39,35 @@ export async function GET(request: NextRequest) {
 		return new NextResponse(null, { status: 302, headers: response.headers });
 	}
 
+	// Handle role assignment for invited users
+	const { data: { user } } = await supabase.auth.getUser();
+	if (user?.user_metadata?.invited_role) {
+		const invitedRole = user.user_metadata.invited_role;
+		const invitedBy = user.user_metadata.invited_by;
+		
+		// Assign the invited role
+		const { error: roleError } = await supabase
+			.from('user_roles')
+			.upsert({
+				user_id: user.id,
+				role: invitedRole,
+				assigned_by: invitedBy,
+				updated_at: new Date().toISOString()
+			});
+		
+		if (!roleError) {
+			// Clean up the metadata
+			await supabase.auth.admin.updateUserById(user.id, {
+				user_metadata: {
+					...user.user_metadata,
+					invited_role: undefined,
+					invited_by: undefined
+				}
+			});
+		}
+	}
+
 	const dest = redirectTo.startsWith('http') ? redirectTo : `${base}${redirectTo}`;
 	response.headers.set('Location', dest);
 	return new NextResponse(null, { status: 302, headers: response.headers });
 }
-
-
