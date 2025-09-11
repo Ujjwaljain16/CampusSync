@@ -136,3 +136,75 @@ export interface FormState {
   errors: ValidationError[];
   isSubmitting: boolean;
 }
+
+// Verification Engine Types
+export interface TrustedIssuer {
+  id: string;
+  name: string;
+  domain?: string;
+  logo_hash?: string;
+  template_patterns: string[]; // This will be parsed from JSONB
+  confidence_threshold: number;
+  qr_verification_url?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VerificationRule {
+  id: string;
+  name: string;
+  rule_type: 'qr_verification' | 'logo_match' | 'template_match' | 'ai_confidence';
+  weight: number;
+  threshold: number;
+  config: Record<string, any>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CertificateMetadata {
+  id: string;
+  certificate_id: string;
+  qr_code_data?: string;
+  qr_verified: boolean;
+  logo_hash?: string;
+  logo_match_score?: number;
+  template_match_score?: number;
+  ai_confidence_score?: number;
+  verification_method?: string;
+  verification_details: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VerificationResult {
+  certificate_id: string;
+  is_verified: boolean;
+  confidence_score: number;
+  verification_method: string;
+  details: {
+    qr_verification?: {
+      verified: boolean;
+      data?: string;
+      issuer?: string;
+    };
+    logo_match?: {
+      matched: boolean;
+      score: number;
+      issuer?: string;
+    };
+    template_match?: {
+      matched: boolean;
+      score: number;
+      patterns_matched: string[];
+    };
+    ai_confidence?: {
+      score: number;
+      factors: string[];
+    };
+  };
+  auto_approved: boolean;
+  requires_manual_review: boolean;
+  created_at: string;
+}

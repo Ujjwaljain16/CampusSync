@@ -34,7 +34,21 @@ export async function getServerUserWithRole() {
 	const supabase = await createSupabaseServerClient();
 	const { data } = await supabase.auth.getUser();
 	const user = data.user ?? null;
-	const role = (user?.user_metadata?.role as string | undefined) ?? 'student';
+	
+	if (!user) {
+		return { user: null, role: null } as const;
+	}
+
+	// Query user_roles table to get the actual role
+	const { data: roleData, error } = await supabase
+		.from('user_roles')
+		.select('role')
+		.eq('user_id', user.id)
+		.single();
+
+	// If no role found or error, default to 'student'
+	const role = roleData?.role ?? 'student';
+	
 	return { user, role } as const;
 }
 
