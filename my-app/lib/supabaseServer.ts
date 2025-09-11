@@ -30,3 +30,23 @@ export async function getServerUser() {
 }
 
 
+export async function getServerUserWithRole() {
+	const supabase = await createSupabaseServerClient();
+	const { data } = await supabase.auth.getUser();
+	const user = data.user ?? null;
+	const role = (user?.user_metadata?.role as string | undefined) ?? 'student';
+	return { user, role } as const;
+}
+
+export async function requireRole(allowedRoles: string[]) {
+	const { user, role } = await getServerUserWithRole();
+	if (!user) {
+		return { authorized: false, status: 401, message: 'Unauthorized' } as const;
+	}
+	if (!allowedRoles.includes(role)) {
+		return { authorized: false, status: 403, message: 'Forbidden' } as const;
+	}
+	return { authorized: true, user, role } as const;
+}
+
+
