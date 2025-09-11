@@ -7,7 +7,11 @@ export default async function DashboardRedirectPage() {
     redirect('/login');
   }
 
-  if (role === 'faculty' || role === 'admin') {
+  if (role === 'admin') {
+    redirect('/admin/dashboard');
+  }
+  
+  if (role === 'faculty') {
     redirect('/faculty/dashboard');
   }
 
