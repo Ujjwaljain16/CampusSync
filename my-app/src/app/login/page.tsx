@@ -249,6 +249,7 @@ export default function LoginPage() {
             <div className="mt-6 grid grid-cols-2 gap-4">
               <button
                 type="button"
+                onClick={handleGoogleSignIn}
                 className="cv-btn bg-white/10 border border-white/30 text-white hover:bg-white hover:text-gray-900 transition-all duration-200 py-3"
               >
                 Google

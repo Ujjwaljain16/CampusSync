@@ -5,6 +5,7 @@ import type { CredentialSubject } from '../../../../types';
 
 export async function POST(req: NextRequest) {
 	const supabase = await createSupabaseServerClient();
+
 	const { user, role } = await getServerUserWithRole();
 	if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
