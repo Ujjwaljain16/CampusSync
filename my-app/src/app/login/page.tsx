@@ -15,6 +15,10 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const handleGoogleSignIn = useCallback(() => {
+    const redirectTo = '/dashboard';
+    window.location.href = `/api/auth/oauth/google?redirectTo=${encodeURIComponent(redirectTo)}`;
+  }, []);
   const handleSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
@@ -35,7 +39,7 @@ export default function LoginPage() {
         if (signUpError) throw signUpError;
       }
 
-      router.replace("/");
+      router.replace("/dashboard");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setError(message);
