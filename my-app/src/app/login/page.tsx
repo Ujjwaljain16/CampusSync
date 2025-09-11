@@ -15,6 +15,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const handleGoogleSignIn = useCallback(() => {
+    const redirectTo = '/';
+    window.location.href = `/api/auth/oauth/google?redirectTo=${encodeURIComponent(redirectTo)}`;
+  }, []);
+
   const handleSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
@@ -245,6 +250,7 @@ export default function LoginPage() {
             <div className="mt-6 grid grid-cols-2 gap-4">
               <button
                 type="button"
+                onClick={handleGoogleSignIn}
                 className="cv-btn bg-white/10 border border-white/30 text-white hover:bg-white hover:text-gray-900 transition-all duration-200 py-3"
               >
                 Google
