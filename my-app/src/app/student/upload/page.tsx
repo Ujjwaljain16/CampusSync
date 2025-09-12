@@ -3,12 +3,46 @@
 import React, { useCallback, useState } from 'react';
 import { Upload, FileText, Check, AlertCircle, Eye, Sparkles, Award } from 'lucide-react';
 
-// Mock type for demonstration
+// OCR extraction result type matching the API
 type OcrExtractionResult = {
   title?: string;
   institution?: string;
   date_issued?: string;
   description?: string;
+  raw_text?: string;
+  confidence?: number;
+};
+
+// Verification result type
+type VerificationResult = {
+  certificate_id: string;
+  is_verified: boolean;
+  confidence_score: number;
+  verification_method: string;
+  details: {
+    qr_verification?: {
+      verified: boolean;
+      data?: string;
+      issuer?: string;
+    };
+    logo_match?: {
+      matched: boolean;
+      score: number;
+      issuer?: string;
+    };
+    template_match?: {
+      matched: boolean;
+      score: number;
+      patterns_matched: string[];
+    };
+    ai_confidence?: {
+      score: number;
+      factors: string[];
+    };
+  };
+  auto_approved: boolean;
+  requires_manual_review: boolean;
+  created_at: string;
 };
 
 export default function StudentUploadPage() {
@@ -20,11 +54,14 @@ export default function StudentUploadPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [enableSmartVerification, setEnableSmartVerification] = useState(true);
+  const [verification, setVerification] = useState<VerificationResult | null>(null);
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setFile(e.target.files?.[0] ?? null);
     setOcr(null);
     setPublicUrl(null);
+    setVerification(null);
     setError(null);
     setSuccess(null);
   }, []);
@@ -48,6 +85,7 @@ export default function StudentUploadPage() {
       setFile(e.dataTransfer.files[0]);
       setOcr(null);
       setPublicUrl(null);
+      setVerification(null);
       setError(null);
       setSuccess(null);
     }
@@ -59,30 +97,96 @@ export default function StudentUploadPage() {
     setError(null);
     setSuccess(null);
     
-    // Simulate OCR processing
-    setTimeout(() => {
-      setPublicUrl('https://example.com/certificate.pdf');
-      setOcr({
-        title: 'Certificate of Excellence',
-        institution: 'Tech University',
-        date_issued: '2024-03-15',
-        description: 'Awarded for outstanding performance in Advanced React Development course'
+    try {
+      // Create FormData for file upload
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('enableSmartVerification', enableSmartVerification.toString());
+      
+      // Call OCR API endpoint
+      const response = await fetch('/api/certificates/ocr', {
+        method: 'POST',
+        body: formData,
       });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'OCR processing failed');
+      }
+      
+      const result = await response.json();
+      
+      // Set the extracted data and public URL
+      setPublicUrl(result.data.publicUrl);
+      setOcr({
+        title: result.data.ocr.title || 'Untitled Certificate',
+        institution: result.data.ocr.institution || '',
+        date_issued: result.data.ocr.date_issued || new Date().toISOString().split('T')[0],
+        description: result.data.ocr.description || result.data.ocr.raw_text || ''
+      });
+      
+      // Set verification result if available
+      if (result.data.verification) {
+        setVerification(result.data.verification);
+      }
+      
+    } catch (err) {
+      console.error('OCR Error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to process certificate');
+    } finally {
       setUploading(false);
-    }, 2000);
-  }, [file]);
+    }
+  }, [file, enableSmartVerification]);
 
   const handleSave = useCallback(async () => {
-    if (!publicUrl) return;
+    if (!publicUrl || !ocr) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
     
-    // Simulate save
-    setTimeout(() => {
-      setSuccess('Certificate saved successfully! Awaiting faculty approval.');
+    try {
+      // Call create API endpoint with extracted data
+      const response = await fetch('/api/certificates/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          publicUrl,
+          ocr: {
+            title: ocr.title,
+            institution: ocr.institution,
+            date_issued: ocr.date_issued,
+            description: ocr.description,
+            raw_text: ocr.raw_text,
+            confidence: ocr.confidence
+          }
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save certificate');
+      }
+      
+      const result = await response.json();
+      
+      if (result.data?.status === 'created') {
+        setSuccess('Certificate saved successfully! Awaiting faculty approval.');
+        // Reset form after successful save
+        setFile(null);
+        setOcr(null);
+        setPublicUrl(null);
+      } else {
+        throw new Error('Unexpected response from server');
+      }
+      
+    } catch (err) {
+      console.error('Save Error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save certificate');
+    } finally {
       setSaving(false);
-    }, 1500);
+    }
   }, [publicUrl, ocr]);
 
   return (
@@ -204,6 +308,126 @@ export default function StudentUploadPage() {
                 </div>
               </div>
 
+              {/* Smart Verification Toggle */}
+              <div className="mt-6 p-4 bg-white/5 rounded-2xl border border-white/10">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-purple-500/20 rounded-xl flex items-center justify-center">
+                      <Sparkles className="w-5 h-5 text-purple-300" />
+                    </div>
+                    <div>
+                      <p className="text-white font-medium">Smart Verification</p>
+                      <p className="text-white/60 text-sm">Enable AI-powered certificate verification</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableSmartVerification}
+                      onChange={(e) => setEnableSmartVerification(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-white/20 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Verification Results */}
+              {verification && (
+                <div className="mt-6 p-6 bg-white/5 rounded-2xl border border-white/10">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                      verification.auto_approved 
+                        ? 'bg-emerald-500/20' 
+                        : verification.requires_manual_review 
+                        ? 'bg-yellow-500/20' 
+                        : 'bg-red-500/20'
+                    }`}>
+                      {verification.auto_approved ? (
+                        <Check className="w-5 h-5 text-emerald-300" />
+                      ) : verification.requires_manual_review ? (
+                        <AlertCircle className="w-5 h-5 text-yellow-300" />
+                      ) : (
+                        <AlertCircle className="w-5 h-5 text-red-300" />
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-white font-semibold">
+                        {verification.auto_approved 
+                          ? 'Certificate Auto-Approved!' 
+                          : verification.requires_manual_review 
+                          ? 'Requires Manual Review' 
+                          : 'Verification Failed'}
+                      </h3>
+                      <p className="text-white/60 text-sm">
+                        Confidence: {(verification.confidence_score * 100).toFixed(1)}% • 
+                        Method: {verification.verification_method.replace('_', ' ')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Verification Details */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {verification.details.qr_verification && (
+                      <div className="p-3 bg-white/5 rounded-xl">
+                        <p className="text-white/80 text-sm font-medium mb-1">QR Verification</p>
+                        <p className={`text-sm ${
+                          verification.details.qr_verification.verified 
+                            ? 'text-emerald-300' 
+                            : 'text-red-300'
+                        }`}>
+                          {verification.details.qr_verification.verified 
+                            ? `✓ Verified by ${verification.details.qr_verification.issuer}` 
+                            : '✗ No valid QR code found'}
+                        </p>
+                      </div>
+                    )}
+
+                    {verification.details.logo_match && (
+                      <div className="p-3 bg-white/5 rounded-xl">
+                        <p className="text-white/80 text-sm font-medium mb-1">Logo Match</p>
+                        <p className={`text-sm ${
+                          verification.details.logo_match.matched 
+                            ? 'text-emerald-300' 
+                            : 'text-red-300'
+                        }`}>
+                          {verification.details.logo_match.matched 
+                            ? `✓ Matched ${verification.details.logo_match.issuer} (${(verification.details.logo_match.score * 100).toFixed(1)}%)` 
+                            : `✗ No logo match (${(verification.details.logo_match.score * 100).toFixed(1)}%)`}
+                        </p>
+                      </div>
+                    )}
+
+                    {verification.details.template_match && (
+                      <div className="p-3 bg-white/5 rounded-xl">
+                        <p className="text-white/80 text-sm font-medium mb-1">Template Match</p>
+                        <p className={`text-sm ${
+                          verification.details.template_match.matched 
+                            ? 'text-emerald-300' 
+                            : 'text-red-300'
+                        }`}>
+                          {verification.details.template_match.matched 
+                            ? `✓ Pattern matched (${(verification.details.template_match.score * 100).toFixed(1)}%)` 
+                            : `✗ No pattern match (${(verification.details.template_match.score * 100).toFixed(1)}%)`}
+                        </p>
+                      </div>
+                    )}
+
+                    {verification.details.ai_confidence && (
+                      <div className="p-3 bg-white/5 rounded-xl">
+                        <p className="text-white/80 text-sm font-medium mb-1">AI Confidence</p>
+                        <p className="text-emerald-300 text-sm">
+                          ✓ {(verification.details.ai_confidence.score * 100).toFixed(1)}% confidence
+                        </p>
+                        <p className="text-white/60 text-xs mt-1">
+                          Factors: {verification.details.ai_confidence.factors.join(', ')}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="flex gap-4 mt-8">
                 <button 
@@ -217,12 +441,12 @@ export default function StudentUploadPage() {
                     {uploading ? (
                       <>
                         <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        <span>Processing Magic...</span>
+                        <span>{enableSmartVerification ? 'Processing & Verifying...' : 'Processing Magic...'}</span>
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-5 h-5" />
-                        <span>Extract with AI</span>
+                        <span>{enableSmartVerification ? 'Extract & Verify' : 'Extract with AI'}</span>
                       </>
                     )}
                   </div>
