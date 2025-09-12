@@ -1,0 +1,5 @@
+[33m23b039c[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfrontend[m[33m, [m[1;31morigin/frontend[m[33m)[m Resolve merge conflicts: role-aware issuance in route.ts; Google redirect to /dashboard
+[33mb24317b[m Add complete UI flow: student upload, faculty dashboard, public portfolio with consistent styling
+[33m6472420[m[33m ([m[1;31morigin/main[m[33m)[m Merge pull request #1 from Ujjwaljain16/backend
+[33mfa6484b[m[33m ([m[1;31morigin/backend[m[33m, [m[1;32mbackend[m[33m)[m commit after rebase and stash pop
+[33m60f1217[m wrote oAuth

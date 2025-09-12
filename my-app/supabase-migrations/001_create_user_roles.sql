@@ -48,8 +48,9 @@ CREATE POLICY "Admins can delete roles" ON user_roles
 CREATE OR REPLACE FUNCTION assign_default_role()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO user_roles (user_id, role)
-  VALUES (NEW.id, 'student');
+  INSERT INTO user_roles (user_id, role, created_at, updated_at)
+  VALUES (NEW.id, 'student', NOW(), NOW())
+  ON CONFLICT (user_id) DO NOTHING;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
