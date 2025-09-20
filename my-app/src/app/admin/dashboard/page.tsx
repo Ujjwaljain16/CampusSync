@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, UserPlus, Mail } from 'lucide-react';
+import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, UserPlus, Mail, BarChart3 } from 'lucide-react';
+import LogoutButton from '../../../components/LogoutButton';
 
 interface UserWithRole {
   user_id: string;
@@ -135,15 +136,30 @@ export default function AdminDashboardPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-10">
       <div className="max-w-6xl mx-auto px-6">
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-3 bg-gradient-to-r from-red-500/20 to-orange-500/20 rounded-2xl backdrop-blur-sm border border-white/10">
-              <Shield className="w-8 h-8 text-red-300" />
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-gradient-to-r from-red-500/20 to-orange-500/20 rounded-2xl backdrop-blur-sm border border-white/10">
+                <Shield className="w-8 h-8 text-red-300" />
+              </div>
+              <div>
+                <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-red-200 to-orange-200 bg-clip-text text-transparent">
+                  Admin Dashboard
+                </h1>
+                <p className="text-white/70 text-lg">Manage user roles and system analytics</p>
+              </div>
             </div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-red-200 to-orange-200 bg-clip-text text-transparent">
-              Admin Dashboard
-            </h1>
+            
+            <div className="flex items-center gap-3">
+              <a
+                href="/admin/analytics"
+                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-colors flex items-center gap-2"
+              >
+                <BarChart3 className="w-5 h-5" />
+                View Analytics
+              </a>
+              <LogoutButton variant="danger" />
+            </div>
           </div>
-          <p className="text-white/70 text-lg">Manage user roles and permissions</p>
         </div>
 
         {error && (
