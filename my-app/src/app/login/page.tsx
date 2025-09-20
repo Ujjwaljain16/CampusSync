@@ -97,24 +97,26 @@ export default function LoginPage() {
         if (data.user) {
           console.log('Signup successful, user data:', data.user);
           
-          // Wait longer for the session and role assignment to be properly established
-          console.log('Waiting for role assignment...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Wait for the session to be properly established
+          console.log('Waiting for session establishment...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
           
-          // Try to get the user role to ensure it's assigned
-          try {
-            const { data: { user: currentUser } } = await supabase.auth.getUser();
-            console.log('Current user after signup:', currentUser);
-            
-            // Force a full page reload to ensure cookies are properly set
-            // This is necessary for the middleware to see the session
-            console.log('Redirecting to dashboard with full page reload...');
-            window.location.href = "/dashboard";
-          } catch (roleError) {
-            console.error('Error getting user after signup:', roleError);
-            // Still redirect, the server-side will handle role assignment
-            window.location.href = "/dashboard";
+          // Refresh the session to ensure it's properly set
+          const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+          if (sessionError) {
+            console.error('Session refresh error:', sessionError);
+          } else {
+            console.log('Session refreshed successfully:', !!session);
           }
+          
+          // Wait a bit more for role assignment
+          console.log('Waiting for role assignment...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Force a full page reload to ensure cookies are properly set
+          // This is necessary for the middleware to see the session
+          console.log('Redirecting to dashboard with full page reload...');
+          window.location.href = "/dashboard";
         } else {
           throw new Error('Signup failed');
         }
