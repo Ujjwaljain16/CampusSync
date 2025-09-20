@@ -63,7 +63,7 @@ export async function getServerUserWithRole() {
 		// Fallback to email-based role assignment for existing admins
 		const adminEmails = [
 			'jainujjwal1609@gmail.com',
-			'test@university.edu',
+			'test@university.edu'
 			// Add more admin emails here as needed
 		];
 		

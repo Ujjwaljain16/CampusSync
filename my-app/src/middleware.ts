@@ -31,18 +31,17 @@ export async function middleware(req: NextRequest) {
 		}
 	);
 
-	// Get session instead of user for better cookie handling
-	const { data: { session } } = await supabase.auth.getSession();
-	const user = session?.user;
+	// Use getUser() for secure authentication - this validates the user with Supabase Auth server
+	const { data: { user }, error: userError } = await supabase.auth.getUser();
 	
-	// Fallback: try getUser if session doesn't work
+	// If getUser fails, try getSession as fallback
 	let fallbackUser = null;
-	if (!user) {
+	if (userError || !user) {
 		try {
-			const { data: { user: userData } } = await supabase.auth.getUser();
-			fallbackUser = userData;
+			const { data: { session } } = await supabase.auth.getSession();
+			fallbackUser = session?.user;
 		} catch (error) {
-			// Ignore error, continue with session user
+			// Ignore error, continue without user
 		}
 	}
 	
