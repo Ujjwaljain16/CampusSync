@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
+import { validateStudentEmailSync } from "../../../lib/emailValidation";
 import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Check } from "lucide-react";
 
 export default function LoginPage() {
@@ -14,6 +15,26 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  // Email validation for student signup - Using flexible validation system
+  const validateStudentEmail = useCallback((email: string) => {
+    return validateStudentEmailSync(email);
+  }, []);
+
+  const handleEmailChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newEmail = e.target.value;
+    setEmail(newEmail);
+    setEmailError(null);
+    
+    // Only validate on signup mode and if email is not empty
+    if (mode === 'signup' && newEmail.trim()) {
+      const validation = validateStudentEmail(newEmail);
+      if (!validation.isValid) {
+        setEmailError(validation.error || 'Invalid email');
+      }
+    }
+  }, [mode, validateStudentEmail]);
 
   const handleGoogleSignIn = useCallback(() => {
     const redirectTo = '/dashboard';
@@ -22,9 +43,20 @@ export default function LoginPage() {
   const handleSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setEmailError(null);
     setLoading(true);
 
     try {
+      // Validate email for signup
+      if (mode === "signup") {
+        const validation = validateStudentEmail(email);
+        if (!validation.isValid) {
+          setEmailError(validation.error || 'Invalid email');
+          setLoading(false);
+          return;
+        }
+      }
+
       if (mode === "login") {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: email.trim(),
@@ -46,7 +78,7 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  }, [mode, email, password, router]);
+  }, [mode, email, password, router, validateStudentEmail]);
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
@@ -163,12 +195,20 @@ export default function LoginPage() {
                   autoComplete="email"
                   required
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
-                  placeholder="student@university.edu"
-                  aria-invalid={Boolean(error)}
+                  onChange={handleEmailChange}
+                  className={`cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white ${
+                    emailError ? 'border-red-300 focus:border-red-500' : ''
+                  }`}
+                  placeholder={mode === 'signup' ? 'student@university.edu' : 'your@email.com'}
+                  aria-invalid={Boolean(error || emailError)}
                 />
               </div>
+              {emailError && (
+                <p className="text-red-300 text-sm mt-1 flex items-center gap-1">
+                  <span>⚠️</span>
+                  {emailError}
+                </p>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -216,7 +256,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (mode === 'signup' && (!!emailError || !email.trim()))}
               className="w-full group bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-4 rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-purple-500/25 transform hover:-translate-y-1 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
             >
               {loading ? (
