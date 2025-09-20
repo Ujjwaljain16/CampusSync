@@ -5,9 +5,17 @@ import { createClient } from '@supabase/supabase-js';
 export async function createSupabaseServerClient() {
 	const cookieStore = await cookies();
 
+	// Check if environment variables are available
+	const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+	const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+	if (!supabaseUrl || !supabaseAnonKey) {
+		throw new Error('Missing Supabase environment variables. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY');
+	}
+
 	return createServerClient(
-		process.env.NEXT_PUBLIC_SUPABASE_URL!,
-		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+		supabaseUrl,
+		supabaseAnonKey,
 		{
 			cookies: {
 				getAll() {
@@ -40,18 +48,54 @@ export async function getServerUserWithRole() {
 		return { user: null, role: null } as const;
 	}
 
-	// For now, use email-based role assignment to avoid RLS issues
-	const adminEmails = [
-		'jainujjwal1609@gmail.com',
-		// Add more admin emails here as needed
-	];
-	
-	if (user.email && adminEmails.includes(user.email)) {
-		return { user, role: 'admin' } as const;
-	}
+	try {
+		// Try to get role from database first
+		const { data: roleData, error: roleError } = await supabase
+			.from('user_roles')
+			.select('role')
+			.eq('user_id', user.id)
+			.single();
 
-	// Default to 'student' for all other users
-	return { user, role: 'student' } as const;
+		if (roleData && !roleError) {
+			return { user, role: roleData.role } as const;
+		}
+
+		// Fallback to email-based role assignment for existing admins
+		const adminEmails = [
+			'jainujjwal1609@gmail.com',
+			'test@university.edu',
+			// Add more admin emails here as needed
+		];
+		
+		if (user.email && adminEmails.includes(user.email)) {
+			// Assign admin role in database
+			const { error: upsertError } = await supabase
+				.from('user_roles')
+				.upsert({
+					user_id: user.id,
+					role: 'admin',
+					assigned_by: 'system',
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString()
+				}, {
+					onConflict: 'user_id'
+				});
+			
+			if (upsertError) {
+				console.error('Error assigning admin role:', upsertError);
+			} else {
+				console.log(`Assigned admin role to ${user.email}`);
+			}
+			return { user, role: 'admin' } as const;
+		}
+
+		// Default to 'student' for all other users
+		return { user, role: 'student' } as const;
+	} catch (error) {
+		console.error('Error fetching user role:', error);
+		// Fallback to student role on error
+		return { user, role: 'student' } as const;
+	}
 }
 
 export async function requireRole(allowedRoles: string[]) {

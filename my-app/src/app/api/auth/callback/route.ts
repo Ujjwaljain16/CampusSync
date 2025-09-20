@@ -113,6 +113,7 @@ export async function GET(request: NextRequest) {
 		// List of admin emails - you can add more here
 		const adminEmails = [
 			'jainujjwal1609@gmail.com',
+			'test@university.edu',
 			// Add more admin emails here as needed
 		];
 		
