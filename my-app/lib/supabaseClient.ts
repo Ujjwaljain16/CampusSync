@@ -10,5 +10,33 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createBrowserClient(
   supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-key'
+  supabaseAnonKey || 'placeholder-key',
+  {
+    cookies: {
+      get(name: string) {
+        if (typeof document !== 'undefined') {
+          const value = document.cookie
+            .split('; ')
+            .find(row => row.startsWith(`${name}=`))
+            ?.split('=')[1];
+          return value;
+        }
+        return undefined;
+      },
+      set(name: string, value: string, options: any) {
+        if (typeof document !== 'undefined') {
+          document.cookie = `${name}=${value}; ${Object.entries(options || {})
+            .map(([key, val]) => `${key}=${val}`)
+            .join('; ')}`;
+        }
+      },
+      remove(name: string, options: any) {
+        if (typeof document !== 'undefined') {
+          document.cookie = `${name}=; ${Object.entries({ ...options, maxAge: 0 })
+            .map(([key, val]) => `${key}=${val}`)
+            .join('; ')}`;
+        }
+      }
+    }
+  }
 )

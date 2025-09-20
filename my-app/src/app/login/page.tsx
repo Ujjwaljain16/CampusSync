@@ -101,12 +101,12 @@ export default function LoginPage() {
           console.log('Waiting for session establishment...');
           await new Promise(resolve => setTimeout(resolve, 1000));
           
-          // Refresh the session to ensure it's properly set
-          const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+          // Get the current session to ensure it's established
+          const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
           if (sessionError) {
-            console.error('Session refresh error:', sessionError);
+            console.error('Session get error:', sessionError);
           } else {
-            console.log('Session refreshed successfully:', !!session);
+            console.log('Current session:', !!currentSession, 'User:', !!currentSession?.user);
           }
           
           // Wait a bit more for role assignment
