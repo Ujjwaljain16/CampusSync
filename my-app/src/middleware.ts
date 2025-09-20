@@ -34,14 +34,27 @@ export async function middleware(req: NextRequest) {
 	// Use getUser() for secure authentication - this validates the user with Supabase Auth server
 	const { data: { user }, error: userError } = await supabase.auth.getUser();
 	
+	// Debug logging for authentication
+	console.log('Middleware - getUser result:', {
+		hasUser: !!user,
+		userEmail: user?.email,
+		userError: userError?.message,
+		path: req.nextUrl.pathname
+	});
+	
 	// If getUser fails, try getSession as fallback
 	let fallbackUser = null;
 	if (userError || !user) {
 		try {
 			const { data: { session } } = await supabase.auth.getSession();
 			fallbackUser = session?.user;
+			console.log('Middleware - getSession fallback:', {
+				hasSession: !!session,
+				hasUser: !!fallbackUser,
+				userEmail: fallbackUser?.email
+			});
 		} catch (error) {
-			// Ignore error, continue without user
+			console.log('Middleware - getSession error:', error);
 		}
 	}
 	
