@@ -64,6 +64,14 @@ export default function EnhancedLandingPage() {
     handleSmoothScroll('features');
   };
 
+  const handleAdminSetup = () => {
+    router.push('/admin/setup');
+  };
+
+  const handleSetup = () => {
+    router.push('/setup');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-x-hidden">
       {/* Navigation */}
@@ -123,6 +131,12 @@ export default function EnhancedLandingPage() {
                 className="text-white/80 hover:text-white font-medium transition-all duration-200 hover:scale-105"
               >
                 Sign In
+              </button>
+              <button 
+                onClick={handleSetup}
+                className="text-white/80 hover:text-white font-medium transition-all duration-200 hover:scale-105"
+              >
+                Setup
               </button>
               <button 
                 onClick={handleGetStarted}
@@ -194,6 +208,15 @@ export default function EnhancedLandingPage() {
                   className="block w-full text-left text-white/80 hover:text-white font-medium py-2 transition-colors"
                 >
                   Sign In
+                </button>
+                <button 
+                  onClick={() => {
+                    handleSetup();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="block w-full text-left text-white/80 hover:text-white font-medium py-2 transition-colors"
+                >
+                  Setup
                 </button>
                 <button 
                   onClick={() => {

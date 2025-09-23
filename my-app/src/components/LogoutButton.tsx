@@ -61,3 +61,4 @@ export default function LogoutButton({ className = '', variant = 'default' }: Lo
     </button>
   );
 }
+

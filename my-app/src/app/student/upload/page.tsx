@@ -1,7 +1,9 @@
+
 'use client';
 
 import React, { useCallback, useState } from 'react';
 import { Upload, FileText, Check, AlertCircle, Eye, Sparkles, Award } from 'lucide-react';
+import Tesseract from 'tesseract.js';
 
 // OCR extraction result type matching the API
 type OcrExtractionResult = {
@@ -11,6 +13,8 @@ type OcrExtractionResult = {
   description?: string;
   raw_text?: string;
   confidence?: number;
+  recipient?: string;
+  certificate_id?: string;
 };
 
 // Verification result type
@@ -56,6 +60,8 @@ export default function StudentUploadPage() {
   const [dragActive, setDragActive] = useState(false);
   const [enableSmartVerification, setEnableSmartVerification] = useState(true);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
+  const [recipient, setRecipient] = useState<string>('');
+  const [certificateId, setCertificateId] = useState<string>('');
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setFile(e.target.files?.[0] ?? null);
@@ -88,6 +94,8 @@ export default function StudentUploadPage() {
       setVerification(null);
       setError(null);
       setSuccess(null);
+      setRecipient('');
+      setCertificateId('');
     }
   }, []);
 
@@ -103,6 +111,41 @@ export default function StudentUploadPage() {
       formData.append('file', file);
       formData.append('enableSmartVerification', enableSmartVerification.toString());
       
+      // Try client-side OCR for instant autofill; send raw text to server
+      // Skip client OCR for PDFs as Tesseract.js doesn't support them
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (!isPdf) {
+        try {
+          console.log('Starting client-side OCR...');
+          const { data } = await Tesseract.recognize(file, 'eng', {
+            logger: m => console.log('OCR Progress:', m)
+          });
+          const rawText = data?.text || '';
+          const confidence = data?.confidence ? (data.confidence / 100).toString() : '';
+          
+          console.log('Client OCR Results:');
+          console.log('- Text length:', rawText.length);
+          console.log('- Confidence:', confidence);
+          console.log('- Text preview:', rawText.substring(0, 100) + '...');
+          
+          if (rawText && rawText.trim().length > 10) { // Ensure we have meaningful text
+            formData.append('rawText', rawText);
+            console.log('✅ Client OCR text added to request');
+          } else {
+            console.warn('⚠️ Client OCR produced insufficient text, server will handle');
+          }
+          
+          if (confidence) {
+            formData.append('ocrConfidence', confidence);
+          }
+        } catch (e) {
+          // Non-blocking if browser OCR fails
+          console.warn('Client OCR failed, continuing with server upload:', e);
+        }
+      } else {
+        console.log('PDF file detected, skipping client OCR (server will handle)');
+      }
+      
       // Call OCR API endpoint
       const response = await fetch('/api/certificates/ocr', {
         method: 'POST',
@@ -110,8 +153,15 @@ export default function StudentUploadPage() {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'OCR processing failed');
+        const text = await response.text();
+        let msg = 'OCR processing failed';
+        try {
+          const j = JSON.parse(text);
+          msg = j?.error || msg;
+        } catch {
+          if (text) msg = text;
+        }
+        throw new Error(msg);
       }
       
       const result = await response.json();
@@ -122,8 +172,12 @@ export default function StudentUploadPage() {
         title: result.data.ocr.title || 'Untitled Certificate',
         institution: result.data.ocr.institution || '',
         date_issued: result.data.ocr.date_issued || new Date().toISOString().split('T')[0],
-        description: result.data.ocr.description || result.data.ocr.raw_text || ''
+        description: result.data.ocr.description || result.data.ocr.raw_text || '',
+        recipient: result.data.ocr.recipient || '',
+        certificate_id: result.data.ocr.certificate_id || ''
       });
+      if (result.data.ocr?.recipient) setRecipient(result.data.ocr.recipient);
+      if (result.data.ocr?.certificate_id) setCertificateId(result.data.ocr.certificate_id);
       
       // Set verification result if available
       if (result.data.verification) {
@@ -145,23 +199,27 @@ export default function StudentUploadPage() {
     setSuccess(null);
     
     try {
+      const payload = {
+        publicUrl,
+        ocr: {
+          title: ocr.title,
+          institution: ocr.institution,
+          date_issued: ocr.date_issued,
+          description: ocr.description,
+          raw_text: ocr.raw_text,
+          recipient: ocr.recipient,
+          certificate_id: ocr.certificate_id,
+          confidence: ocr.confidence
+        }
+      };
+
       // Call create API endpoint with extracted data
       const response = await fetch('/api/certificates/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          publicUrl,
-          ocr: {
-            title: ocr.title,
-            institution: ocr.institution,
-            date_issued: ocr.date_issued,
-            description: ocr.description,
-            raw_text: ocr.raw_text,
-            confidence: ocr.confidence
-          }
-        }),
+        body: JSON.stringify(payload),
       });
       
       if (!response.ok) {
@@ -532,26 +590,40 @@ export default function StudentUploadPage() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Certificate Title */}
                     <div className="space-y-2">
                       <label className="block text-sm font-medium text-white/70">Certificate Title</label>
                       <input 
                         className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-400/50 focus:border-transparent transition-all hover:bg-white/10" 
                         value={ocr.title ?? ''} 
                         onChange={e => setOcr({ ...ocr, title: e.target.value })}
-                        placeholder="Enter certificate title..."
+                        placeholder="e.g., Machine Learning Certificate"
                       />
                     </div>
 
+                    {/* Institution */}
                     <div className="space-y-2">
                       <label className="block text-sm font-medium text-white/70">Institution</label>
                       <input 
                         className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-400/50 focus:border-transparent transition-all hover:bg-white/10" 
                         value={ocr.institution ?? ''} 
                         onChange={e => setOcr({ ...ocr, institution: e.target.value })}
-                        placeholder="Enter institution name..."
+                        placeholder="e.g., Stanford University"
                       />
                     </div>
 
+                    {/* Recipient Name */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-white/70">Recipient Name</label>
+                      <input 
+                        className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-400/50 focus:border-transparent transition-all hover:bg-white/10" 
+                        value={ocr.recipient ?? ''} 
+                        onChange={e => setOcr({ ...ocr, recipient: e.target.value })}
+                        placeholder="e.g., John Doe"
+                      />
+                    </div>
+
+                    {/* Date Issued */}
                     <div className="space-y-2">
                       <label className="block text-sm font-medium text-white/70">Date Issued</label>
                       <input 
@@ -562,17 +634,72 @@ export default function StudentUploadPage() {
                       />
                     </div>
 
-                    <div className="space-y-2 md:col-span-1">
+                    {/* Certificate ID */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-white/70">Certificate ID</label>
+                      <input 
+                        className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-400/50 focus:border-transparent transition-all hover:bg-white/10" 
+                        value={ocr.certificate_id ?? ''} 
+                        onChange={e => setOcr({ ...ocr, certificate_id: e.target.value })}
+                        placeholder="e.g., CERT-2023-001 (if available)"
+                      />
+                    </div>
+
+                    {/* Confidence Score (Read-only) */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-white/70">
+                        AI Confidence Score
+                        {typeof ocr.confidence === 'number' && (
+                          <span className={`ml-2 px-2 py-1 rounded-full text-xs ${
+                            ocr.confidence > 0.8 ? 'bg-emerald-500/20 text-emerald-300' :
+                            ocr.confidence > 0.6 ? 'bg-yellow-500/20 text-yellow-300' :
+                            'bg-red-500/20 text-red-300'
+                          }`}>
+                            {(ocr.confidence * 100).toFixed(1)}%
+                          </span>
+                        )}
+                      </label>
+                      <div className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-white/60 text-sm">
+                        {typeof ocr.confidence === 'number' ? 
+                          `${(ocr.confidence * 100).toFixed(1)}% - ${
+                            ocr.confidence > 0.8 ? 'High confidence' :
+                            ocr.confidence > 0.6 ? 'Medium confidence' :
+                            'Low confidence - please review carefully'
+                          }` : 
+                          'No confidence score available'
+                        }
+                      </div>
+                    </div>
+
+                    {/* Description - Full width */}
+                    <div className="space-y-2 md:col-span-2">
                       <label className="block text-sm font-medium text-white/70">Description</label>
                       <textarea 
                         className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-400/50 focus:border-transparent transition-all hover:bg-white/10 resize-none" 
-                        rows={4} 
+                        rows={3} 
                         value={ocr.description ?? ''} 
                         onChange={e => setOcr({ ...ocr, description: e.target.value })}
-                        placeholder="Enter certificate description..."
+                        placeholder="Brief description of the certificate or achievement..."
                       />
                     </div>
                   </div>
+
+                  {/* OCR Quality Indicator */}
+                  {ocr.raw_text && (
+                    <div className="mt-6 p-4 bg-white/5 rounded-xl border border-white/10">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-white/70">Raw OCR Text</label>
+                        <span className="text-xs text-white/40">
+                          {ocr.raw_text.length} characters extracted
+                        </span>
+                      </div>
+                      <div className="max-h-32 overflow-y-auto bg-black/20 rounded-lg p-3">
+                        <pre className="text-xs text-white/60 whitespace-pre-wrap font-mono">
+                          {ocr.raw_text}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

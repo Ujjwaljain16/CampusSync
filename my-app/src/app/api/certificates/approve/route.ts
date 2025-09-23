@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRole, createSupabaseServerClient, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { emailService } from '../../../../../lib/emailService';
 
 export async function POST(req: NextRequest) {
 	const auth = await requireRole(['faculty', 'admin']);
@@ -18,6 +19,21 @@ export async function POST(req: NextRequest) {
 
 	const supabase = await createSupabaseServerClient();
 
+	// Get certificate details for email notification
+	const { data: certificate, error: certError } = await supabase
+		.from('certificates')
+		.select('title, institution, user_id, description')
+		.eq('id', body.certificateId)
+		.single();
+
+	if (certError) {
+		return NextResponse.json({ error: 'Certificate not found' }, { status: 404 });
+	}
+
+	// Get user email for notification
+	const { data: user, error: userError } = await supabase.auth.admin.getUserById(certificate.user_id);
+	const userEmail = user?.user?.email;
+
 	// Update certificate status in your DB table `certificates`
 	const { error: updateErr } = await supabase
 		.from('certificates')
@@ -32,6 +48,27 @@ export async function POST(req: NextRequest) {
 			.from('certificate_metadata')
 			.update({ verification_method: 'manual' })
 			.eq('id', body.metadataId);
+	}
+
+	// Send email notification
+	if (userEmail) {
+		try {
+			const notificationData = {
+				studentName: user?.user?.user_metadata?.full_name || 'Student',
+				certificateTitle: certificate.title,
+				institution: certificate.institution,
+				portfolioUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${certificate.user_id}`,
+			};
+
+			if (body.status === 'approved') {
+				await emailService.sendCertificateApproved(userEmail, notificationData);
+			} else {
+				await emailService.sendCertificateRejected(userEmail, notificationData);
+			}
+		} catch (emailError) {
+			console.error('Failed to send email notification:', emailError);
+			// Don't fail the request if email fails
+		}
 	}
 
 	// Write audit log if possible

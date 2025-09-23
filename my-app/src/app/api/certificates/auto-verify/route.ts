@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '../../../../../lib/supabaseServer';
 import { VerificationEngine } from '../../../../../lib/verificationEngine';
+import { emailService } from '../../../../../lib/emailService';
 import type { OcrExtractionResult } from '../../../../types';
 
 export async function POST(req: NextRequest) {
@@ -135,6 +136,32 @@ export async function POST(req: NextRequest) {
       } catch (error) {
         console.error('Error issuing verifiable credential:', error);
       }
+    }
+
+    // Send email notification for auto-approval or manual review requirement
+    try {
+      const { data: userData, error: userError } = await supabase.auth.admin.getUserById(certificate.user_id);
+      const userEmail = userData?.user?.email;
+
+      if (userEmail) {
+        const notificationData = {
+          studentName: userData?.user?.user_metadata?.full_name || 'Student',
+          certificateTitle: certificate.title,
+          institution: certificate.institution,
+          confidenceScore: verificationResult.confidence_score,
+          verificationMethod: verificationResult.verification_method,
+          portfolioUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${certificate.user_id}`,
+        };
+
+        if (decision === 'auto_approved') {
+          await emailService.sendCertificateAutoApproved(userEmail, notificationData);
+        } else if (decision === 'manual_review_required') {
+          await emailService.sendManualReviewRequired(userEmail, notificationData);
+        }
+      }
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError);
+      // Don't fail the request if email fails
     }
 
     return NextResponse.json({ 
