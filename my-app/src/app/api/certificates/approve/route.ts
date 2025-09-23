@@ -18,10 +18,13 @@ export async function POST(req: NextRequest) {
 
 	const supabase = await createSupabaseServerClient();
 
+	// Map API status to database verification_status
+	const verificationStatus = body.status === 'approved' ? 'verified' : 'rejected';
+
 	// Update certificate status in your DB table `certificates`
 	const { error: updateErr } = await supabase
 		.from('certificates')
-		.update({ verification_status: body.status, updated_at: new Date().toISOString() })
+		.update({ verification_status: verificationStatus, updated_at: new Date().toISOString() })
 		.eq('id', body.certificateId);
 
 	if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
