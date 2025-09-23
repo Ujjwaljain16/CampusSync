@@ -31,30 +31,32 @@ export async function middleware(req: NextRequest) {
 		}
 	);
 
-	// Use getUser() for secure authentication - this validates the user with Supabase Auth server
-	const { data: { user }, error: userError } = await supabase.auth.getUser();
+	// Try getSession first as it's more reliable for middleware
+	const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+	const user = session?.user;
 	
 	// Debug logging for authentication
-	console.log('Middleware - getUser result:', {
+	console.log('Middleware - getSession result:', {
+		hasSession: !!session,
 		hasUser: !!user,
 		userEmail: user?.email,
-		userError: userError?.message,
+		sessionError: sessionError?.message,
 		path: req.nextUrl.pathname
 	});
 	
-	// If getUser fails, try getSession as fallback
+	// If getSession fails, try getUser as fallback
 	let fallbackUser = null;
-	if (userError || !user) {
+	if (sessionError || !user) {
 		try {
-			const { data: { session } } = await supabase.auth.getSession();
-			fallbackUser = session?.user;
-			console.log('Middleware - getSession fallback:', {
-				hasSession: !!session,
+			const { data: { user: userData }, error: userError } = await supabase.auth.getUser();
+			fallbackUser = userData;
+			console.log('Middleware - getUser fallback:', {
 				hasUser: !!fallbackUser,
-				userEmail: fallbackUser?.email
+				userEmail: fallbackUser?.email,
+				userError: userError?.message
 			});
 		} catch (error) {
-			console.log('Middleware - getSession error:', error);
+			console.log('Middleware - getUser error:', error);
 		}
 	}
 	
@@ -63,7 +65,8 @@ export async function middleware(req: NextRequest) {
 	// Protect app routes except public ones
 	const isAuthRoute = req.nextUrl.pathname.startsWith('/login');
 	const isSetupRoute = req.nextUrl.pathname.startsWith('/setup') || req.nextUrl.pathname.startsWith('/admin/setup');
-	const isPublic = isAuthRoute || req.nextUrl.pathname === '/' || req.nextUrl.pathname.startsWith('/public') || isSetupRoute;
+	const isDebugRoute = req.nextUrl.pathname.startsWith('/debug-') || req.nextUrl.pathname.startsWith('/test-');
+	const isPublic = isAuthRoute || req.nextUrl.pathname === '/' || req.nextUrl.pathname.startsWith('/public') || isSetupRoute || isDebugRoute;
 
 	// If user is authenticated and trying to access login, redirect to dashboard
 	if (finalUser && isAuthRoute) {

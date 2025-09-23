@@ -12,6 +12,7 @@
     "test:comprehensive": "node test-comprehensive.js",
     "test:verification": "node test-verification-engine.js",
     "test:complete": "node test-complete-workflow.js",
+    "test:gemini": "node test-gemini-integration.js",
     "admin:setup": "node scripts/create-first-admin.js",
     "db:reset": "node scripts/reset-database.js",
     "db:quick-reset": "node scripts/quick-reset.js"
@@ -34,6 +35,7 @@
     "next": "15.5.3",
     "nodemailer": "^7.0.6",
     "pdf-lib": "^1.17.1",
+    "pdf2pic": "^3.2.0",
     "qrcode-reader": "^1.0.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",

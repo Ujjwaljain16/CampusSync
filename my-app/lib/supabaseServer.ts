@@ -60,32 +60,6 @@ export async function getServerUserWithRole() {
 			return { user, role: roleData.role } as const;
 		}
 
-		// Check if user has invitation metadata (for invited users)
-		if (user.user_metadata?.invited_role) {
-			const invitedRole = user.user_metadata.invited_role;
-			const invitedBy = user.user_metadata.invited_by;
-			
-			// Assign the invited role in database
-			const { error: upsertError } = await supabase
-				.from('user_roles')
-				.upsert({
-					user_id: user.id,
-					role: invitedRole,
-					assigned_by: invitedBy || 'system',
-					created_at: new Date().toISOString(),
-					updated_at: new Date().toISOString()
-				}, {
-					onConflict: 'user_id'
-				});
-			
-			if (upsertError) {
-				console.error('Error assigning invited role:', upsertError);
-			} else {
-				console.log(`Assigned ${invitedRole} role to ${user.email}`);
-			}
-			return { user, role: invitedRole } as const;
-		}
-
 		// Fallback to email-based role assignment for existing admins
 		const adminEmails = [
 			'jainujjwal1609@gmail.com',
@@ -116,25 +90,6 @@ export async function getServerUserWithRole() {
 		}
 
 		// Default to 'student' for all other users
-		// Assign student role in database for new users
-		const { error: upsertError } = await supabase
-			.from('user_roles')
-			.upsert({
-				user_id: user.id,
-				role: 'student',
-				assigned_by: 'system',
-				created_at: new Date().toISOString(),
-				updated_at: new Date().toISOString()
-			}, {
-				onConflict: 'user_id'
-			});
-		
-		if (upsertError) {
-			console.error('Error assigning default student role:', upsertError);
-		} else {
-			console.log(`Assigned default student role to ${user.email}`);
-		}
-		
 		return { user, role: 'student' } as const;
 	} catch (error) {
 		console.error('Error fetching user role:', error);

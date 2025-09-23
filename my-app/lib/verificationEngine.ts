@@ -1,5 +1,5 @@
 import { Jimp } from 'jimp';
-import { BrowserQRCodeReader } from '@zxing/library';
+import { QRCodeReader, BinaryBitmap, HybridBinarizer, RGBLuminanceSource } from '@zxing/library';
 import { createHash } from 'crypto';
 import { createSupabaseServerClient } from './supabaseServer';
 import type { 
@@ -12,13 +12,13 @@ import type {
 
 export class VerificationEngine {
   private supabase: any;
-  private qrReader: BrowserQRCodeReader;
+  private qrReader: QRCodeReader;
   private trustedIssuers: TrustedIssuer[] = [];
   private verificationRules: VerificationRule[] = [];
 
   constructor() {
     this.supabase = null; // Will be initialized in initialize()
-    this.qrReader = new BrowserQRCodeReader();
+    this.qrReader = new QRCodeReader();
   }
 
   /**
@@ -73,7 +73,11 @@ export class VerificationEngine {
         verificationDetails.ai_confidence = aiResult;
 
         // Calculate weighted confidence score
-        confidenceScore = this.calculateWeightedConfidence(logoResult, templateResult, aiResult);
+        confidenceScore = this.calculateWeightedConfidence(
+          verificationDetails.logo_match!,
+          verificationDetails.template_match!,
+          verificationDetails.ai_confidence!
+        );
         
         // Determine verification method and auto-approval
         if (confidenceScore >= 0.9) {
@@ -124,35 +128,39 @@ export class VerificationEngine {
   /**
    * QR Code Verification
    */
-  private async verifyQRCode(fileBuffer: Buffer): Promise<VerificationResult['details']['qr_verification']> {
+  private async verifyQRCode(fileBuffer: Buffer): Promise<NonNullable<VerificationResult['details']['qr_verification']>> {
     try {
-      // Convert buffer to image
+      // Convert buffer to Jimp image
       const image = await Jimp.read(fileBuffer);
-      const imageData = {
-        data: new Uint8ClampedArray(image.bitmap.data),
-        width: image.bitmap.width,
-        height: image.bitmap.height
-      };
+      const { width, height, data } = image.bitmap as { width: number; height: number; data: Buffer };
 
-      // Try to decode QR code
-      const result = await this.qrReader.decodeFromImage(imageData);
-      
-      if (result) {
-        const qrData = result.getText();
-        
-        // Check if QR data matches any trusted issuer's verification URL
-        const matchingIssuer = this.trustedIssuers.find(issuer => 
-          issuer.qr_verification_url && qrData.includes(issuer.qr_verification_url)
-        );
-
-        return {
-          verified: !!matchingIssuer,
-          data: qrData,
-          issuer: matchingIssuer?.name
-        };
+      // Convert RGBA buffer to grayscale luminance array
+      const luminances = new Uint8ClampedArray(width * height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+          // Standard luminance conversion
+          luminances[y * width + x] = (0.2126 * r + 0.7152 * g + 0.0722 * b) | 0;
+        }
       }
 
-      return { verified: false };
+      const source = new RGBLuminanceSource(luminances, width, height);
+      const bitmap = new BinaryBitmap(new HybridBinarizer(source));
+      const result = this.qrReader.decode(bitmap);
+
+      const qrData = result.getText();
+      const matchingIssuer = this.trustedIssuers.find(issuer => 
+        issuer.qr_verification_url && qrData.includes(issuer.qr_verification_url)
+      );
+
+      return {
+        verified: !!matchingIssuer,
+        data: qrData,
+        issuer: matchingIssuer?.name
+      };
     } catch (error) {
       console.log('QR code not found or invalid:', error);
       return { verified: false };
@@ -162,15 +170,15 @@ export class VerificationEngine {
   /**
    * Logo Matching using Perceptual Hashing
    */
-  private async verifyLogoMatch(fileBuffer: Buffer): Promise<VerificationResult['details']['logo_match']> {
+  private async verifyLogoMatch(fileBuffer: Buffer): Promise<NonNullable<VerificationResult['details']['logo_match']>> {
     try {
       const image = await Jimp.read(fileBuffer);
       
       // Resize to standard size for consistent hashing
-      image.resize(32, 32);
+      (image as any).resize(32, 32);
       
       // Convert to grayscale
-      image.grayscale();
+      (image as any).greyscale();
       
       // Calculate perceptual hash
       const logoHash = this.calculatePerceptualHash(image);
@@ -203,7 +211,7 @@ export class VerificationEngine {
   /**
    * Template Pattern Matching
    */
-  private async verifyTemplateMatch(ocrResult: OcrExtractionResult): Promise<VerificationResult['details']['template_match']> {
+  private async verifyTemplateMatch(ocrResult: OcrExtractionResult): Promise<NonNullable<VerificationResult['details']['template_match']>> {
     const text = ocrResult.raw_text || '';
     const patternsMatched: string[] = [];
     let bestScore = 0;
@@ -249,9 +257,9 @@ export class VerificationEngine {
    */
   private async calculateAIConfidence(
     ocrResult: OcrExtractionResult,
-    logoResult: VerificationResult['details']['logo_match'],
-    templateResult: VerificationResult['details']['template_match']
-  ): Promise<VerificationResult['details']['ai_confidence']> {
+    logoResult: NonNullable<VerificationResult['details']['logo_match']>,
+    templateResult: NonNullable<VerificationResult['details']['template_match']>
+  ): Promise<NonNullable<VerificationResult['details']['ai_confidence']>> {
     const factors: string[] = [];
     let score = 0;
 
@@ -299,9 +307,9 @@ export class VerificationEngine {
    * Calculate weighted confidence score
    */
   private calculateWeightedConfidence(
-    logoResult: VerificationResult['details']['logo_match'],
-    templateResult: VerificationResult['details']['template_match'],
-    aiResult: VerificationResult['details']['ai_confidence']
+    logoResult: NonNullable<VerificationResult['details']['logo_match']>,
+    templateResult: NonNullable<VerificationResult['details']['template_match']>,
+    aiResult: NonNullable<VerificationResult['details']['ai_confidence']>
   ): number {
     const weights = {
       logo: 0.25,
@@ -319,7 +327,7 @@ export class VerificationEngine {
   /**
    * Calculate perceptual hash for image
    */
-  private calculatePerceptualHash(image: Jimp): string {
+  private calculatePerceptualHash(image: any): string {
     const hash = createHash('md5');
     const pixels = image.bitmap.data;
     
