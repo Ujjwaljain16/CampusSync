@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
   const { error } = await admin.from('certificates').insert({
     user_id: user.id,
+    student_id: user.id,
     title: body.ocr?.title ?? 'Untitled Certificate',
     institution: body.ocr?.institution ?? '',
     date_issued: body.ocr?.date_issued ?? now,
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
     updated_at: now,
   });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: error.message.includes('student_id') ? 'Student not found for this user. Please run setup to create student profile.' : error.message }, { status: 500 });
 
   return NextResponse.json({ data: { status: 'created' } });
 }
