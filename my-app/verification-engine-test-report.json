@@ -1,0 +1,71 @@
+{
+  "timestamp": "2025-09-23T15:54:05.572Z",
+  "testSuite": "Verification Engine",
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "successRate": 100,
+    "totalTime": 1076
+  },
+  "details": [
+    {
+      "status": "PASS",
+      "message": "OCR endpoint should be available"
+    },
+    {
+      "status": "PASS",
+      "message": "Logo hash calculation should work"
+    },
+    {
+      "status": "PASS",
+      "message": "Hamming distance calculation should work correctly"
+    },
+    {
+      "status": "PASS",
+      "message": "Confidence score calculation should be accurate"
+    },
+    {
+      "status": "PASS",
+      "message": "Confidence thresholds should be properly configured"
+    },
+    {
+      "status": "PASS",
+      "message": "Auto-approval threshold should be >= 0.90"
+    },
+    {
+      "status": "PASS",
+      "message": "Manual review threshold should be >= 0.70"
+    },
+    {
+      "status": "PASS",
+      "message": "Auto-rejection threshold should be < 0.70"
+    },
+    {
+      "status": "PASS",
+      "message": "Empty certificate list should return error"
+    },
+    {
+      "status": "PASS",
+      "message": "Verification metadata should be stored in database"
+    },
+    {
+      "status": "PASS",
+      "message": "Verification results should be stored in database"
+    },
+    {
+      "status": "PASS",
+      "message": "Error handling should work properly"
+    }
+  ],
+  "config": {
+    "baseUrl": "http://localhost:3000",
+    "testImagePath": "C:\\Users\\ujjwa\\OneDrive\\Desktop\\CampusSync\\my-app\\test-assets\\sample-certificate.jpg",
+    "mockCertificateData": {
+      "title": "Python Programming Certificate",
+      "institution": "Coursera",
+      "date_issued": "2024-01-15T00:00:00Z",
+      "description": "This is to certify that John Doe has successfully completed the Python Programming course from Coursera."
+    }
+  }
+}

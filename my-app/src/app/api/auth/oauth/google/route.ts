@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
 				},
 				setAll(cookies) {
 					cookies.forEach(({ name, value, options }) => {
-						response.cookies.set({ name, value, ...options });
+						response.cookies.set(name, value, options);
 					});
 				},
 			},
