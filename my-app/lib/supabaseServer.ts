@@ -90,6 +90,23 @@ export async function getServerUserWithRole() {
 		}
 
 		// Default to 'student' for all other users
+		// Assign student role in database for new users
+		const { error: upsertError } = await supabase
+			.from('user_roles')
+			.upsert({
+				user_id: user.id,
+				role: 'student',
+				assigned_by: 'system',
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString()
+			}, {
+				onConflict: 'user_id'
+			});
+		
+		if (upsertError) {
+			console.error('Error assigning default student role:', upsertError);
+		}
+		
 		return { user, role: 'student' } as const;
 	} catch (error) {
 		console.error('Error fetching user role:', error);
