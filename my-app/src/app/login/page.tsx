@@ -76,49 +76,68 @@ export default function LoginPage() {
         if (data.user) {
           console.log('Login successful, user data:', data.user);
           
-          // Wait a moment for the session to be properly established
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          // Force a full page reload to ensure cookies are properly set
-          // This is necessary for the middleware to see the session
-          console.log('Redirecting to dashboard with full page reload...');
+          // Ensure server sets auth cookies so middleware can see session
+          if (data.session?.access_token && data.session?.refresh_token) {
+            await fetch('/api/auth/set-session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                access_token: data.session.access_token,
+                refresh_token: data.session.refresh_token
+              })
+            });
+          }
           window.location.href = "/dashboard";
         } else {
           throw new Error('Authentication failed');
         }
       } else {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-        });
-        if (signUpError) throw signUpError;
-        
-        // For signup, show success message and redirect
-        if (data.user) {
-          console.log('Signup successful, user data:', data.user);
-          
-          // Wait for the session to be properly established
-          console.log('Waiting for session establishment...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Get the current session to ensure it's established
-          const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
-          if (sessionError) {
-            console.error('Session get error:', sessionError);
-          } else {
-            console.log('Current session:', !!currentSession, 'User:', !!currentSession?.user);
+        if (process.env.NODE_ENV === 'development') {
+          // Bypass Supabase signUp entirely in development
+          try {
+            const resp = await fetch('/api/auth/dev-upsert-user', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: email.trim(), password, role: 'student' })
+            });
+            const payload = await resp.json();
+            if (!resp.ok || !payload.ok) {
+              throw new Error(payload?.error || 'Dev upsert failed');
+            }
+            const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+              email: email.trim(),
+              password,
+            });
+            if (signInErr || !signInData.user) {
+              throw new Error(signInErr?.message || 'Sign-in failed');
+            }
+            if (signInData.session?.access_token && signInData.session?.refresh_token) {
+              await fetch('/api/auth/set-session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  access_token: signInData.session.access_token,
+                  refresh_token: signInData.session.refresh_token
+                })
+              });
+            }
+            window.location.href = '/dashboard';
+            return;
+          } catch (e: any) {
+            setError(e?.message || 'Signup failed');
+            return;
           }
-          
-          // Wait a bit more for role assignment
-          console.log('Waiting for role assignment...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Force a full page reload to ensure cookies are properly set
-          // This is necessary for the middleware to see the session
-          console.log('Redirecting to dashboard with full page reload...');
-          window.location.href = "/dashboard";
         } else {
-          throw new Error('Signup failed');
+          const { data, error: signUpError } = await supabase.auth.signUp({
+            email: email.trim(),
+            password,
+          });
+          if (signUpError) throw signUpError;
+          if (data.user && !data.user.email_confirmed_at) {
+            setError('Account created! Please check your email and click the confirmation link to complete your registration. After confirming, you can sign in with your credentials.');
+            return;
+          }
+          window.location.href = '/dashboard';
         }
       }
     } catch (err: unknown) {
