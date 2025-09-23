@@ -1,0 +1,34 @@
+{
+  "timestamp": "2025-09-23T15:54:07.093Z",
+  "totalSuites": 5,
+  "passed": 5,
+  "failed": 0,
+  "successRate": 100,
+  "results": [
+    {
+      "name": "Comprehensive API",
+      "success": true,
+      "duration": 12874
+    },
+    {
+      "name": "Verification Engine",
+      "success": true,
+      "duration": 1173
+    },
+    {
+      "name": "OCR Extraction",
+      "success": true,
+      "duration": 971
+    },
+    {
+      "name": "OCR Extractor Unit",
+      "success": true,
+      "duration": 232
+    },
+    {
+      "name": "OCR Extractor API",
+      "success": true,
+      "duration": 300
+    }
+  ]
+}

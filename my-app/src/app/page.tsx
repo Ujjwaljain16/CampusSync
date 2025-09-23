@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Shield, Zap, Palette, GraduationCap, Smartphone, Star, ChevronRight, Play, Check, ArrowRight, Globe, Users, Award, Lock, Eye, Upload, Menu, X } from 'lucide-react';
 
 interface ScrollPosition {
@@ -8,6 +9,7 @@ interface ScrollPosition {
 }
 
 export default function EnhancedLandingPage() {
+  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [scrollY, setScrollY] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(false);
@@ -40,6 +42,36 @@ export default function EnhancedLandingPage() {
     }
   };
 
+  const handleSignIn = () => {
+    router.push('/login');
+  };
+
+  const handleGetStarted = () => {
+    router.push('/login');
+  };
+
+  const handleUploadCertificate = () => {
+    router.push('/login');
+  };
+
+  const handleWatchDemo = () => {
+    // For now, just scroll to features section
+    handleSmoothScroll('features');
+  };
+
+  const handleScheduleDemo = () => {
+    // For now, just scroll to features section
+    handleSmoothScroll('features');
+  };
+
+  const handleAdminSetup = () => {
+    router.push('/admin/setup');
+  };
+
+  const handleSetup = () => {
+    router.push('/setup');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-x-hidden">
       {/* Navigation */}
@@ -57,7 +89,7 @@ export default function EnhancedLandingPage() {
                 <Shield className="w-5 h-5 text-white" />
               </div>
               <span className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                CredentiVault
+                CampusSync
               </span>
             </div>
 
@@ -94,10 +126,22 @@ export default function EnhancedLandingPage() {
             </div>
 
             <div className="hidden md:flex items-center space-x-4">
-              <button className="text-white/80 hover:text-white font-medium transition-all duration-200 hover:scale-105">
+              <button 
+                onClick={handleSignIn}
+                className="text-white/80 hover:text-white font-medium transition-all duration-200 hover:scale-105"
+              >
                 Sign In
               </button>
-              <button className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-2.5 rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-purple-500/25 transform hover:-translate-y-1 hover:scale-105 flex items-center gap-2 group">
+              <button 
+                onClick={handleSetup}
+                className="text-white/80 hover:text-white font-medium transition-all duration-200 hover:scale-105"
+              >
+                Setup
+              </button>
+              <button 
+                onClick={handleGetStarted}
+                className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-2.5 rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-purple-500/25 transform hover:-translate-y-1 hover:scale-105 flex items-center gap-2 group"
+              >
                 <Upload className="w-4 h-4 transition-transform group-hover:scale-110" />
                 Get Started
               </button>
@@ -156,10 +200,31 @@ export default function EnhancedLandingPage() {
                 About
               </button>
               <div className="pt-4 border-t border-white/10 space-y-3">
-                <button className="block w-full text-left text-white/80 hover:text-white font-medium py-2 transition-colors">
+                <button 
+                  onClick={() => {
+                    handleSignIn();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="block w-full text-left text-white/80 hover:text-white font-medium py-2 transition-colors"
+                >
                   Sign In
                 </button>
-                <button className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:shadow-lg transition-all">
+                <button 
+                  onClick={() => {
+                    handleSetup();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="block w-full text-left text-white/80 hover:text-white font-medium py-2 transition-colors"
+                >
+                  Setup
+                </button>
+                <button 
+                  onClick={() => {
+                    handleGetStarted();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:shadow-lg transition-all"
+                >
                   Get Started
                 </button>
               </div>
@@ -222,13 +287,19 @@ export default function EnhancedLandingPage() {
 
               {/* Enhanced CTA Buttons */}
               <div className="flex flex-col sm:flex-row gap-6 justify-center items-center pt-12 animate-fade-in-up" style={{ animationDelay: '0.8s' }}>
-                <button className="group bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-purple-500/25 transform hover:-translate-y-1 hover:scale-105 flex items-center gap-3 w-full sm:w-auto sm:min-w-[280px] justify-center relative overflow-hidden">
+                <button 
+                  onClick={handleUploadCertificate}
+                  className="group bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-purple-500/25 transform hover:-translate-y-1 hover:scale-105 flex items-center gap-3 w-full sm:w-auto sm:min-w-[280px] justify-center relative overflow-hidden"
+                >
                   <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 transform -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
                   <Upload className="w-5 h-5 transition-all duration-300 group-hover:scale-110 relative z-10" />
                   <span className="relative z-10">Upload Your First Certificate</span>
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform duration-300 relative z-10" />
                 </button>
-                <button className="group bg-white/10 backdrop-blur-sm text-white px-8 py-4 rounded-xl font-semibold text-lg border border-white/20 hover:bg-white/20 hover:border-white/30 transition-all duration-300 hover:scale-105 flex items-center gap-3 w-full sm:w-auto sm:min-w-[280px] justify-center">
+                <button 
+                  onClick={handleWatchDemo}
+                  className="group bg-white/10 backdrop-blur-sm text-white px-8 py-4 rounded-xl font-semibold text-lg border border-white/20 hover:bg-white/20 hover:border-white/30 transition-all duration-300 hover:scale-105 flex items-center gap-3 w-full sm:w-auto sm:min-w-[280px] justify-center"
+                >
                   <Play className="w-5 h-5 group-hover:scale-110 transition-transform" />
                   Watch Demo
                 </button>
@@ -277,7 +348,7 @@ export default function EnhancedLandingPage() {
           <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-20">
               <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-8 opacity-0 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
-                Why Choose CredentiVault?
+                Why Choose CampusSync?
               </h2>
               <p className="text-lg sm:text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed opacity-0 animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
                 Our comprehensive platform provides everything you need to manage, verify, 
@@ -454,18 +525,24 @@ export default function EnhancedLandingPage() {
               Ready to Secure Your Future?
             </h2>
             <p className="text-xl text-white/80 mb-10 leading-relaxed max-w-3xl mx-auto hover:text-white transition-colors duration-300">
-              Join thousands of students who trust CredentiVault to manage and showcase 
+              Join thousands of students who trust CampusSync to manage and showcase 
               their academic achievements. Get started in less than 2 minutes.
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <button className="group bg-white text-gray-900 px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-2 hover:scale-105 flex items-center gap-3 justify-center relative overflow-hidden">
+              <button 
+                onClick={handleGetStarted}
+                className="group bg-white text-gray-900 px-8 py-4 rounded-lg font-semibold text-lg hover:bg-gray-100 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-2 hover:scale-105 flex items-center gap-3 justify-center relative overflow-hidden"
+              >
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-gray-200/50 to-transparent transform -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
                 <Upload className="w-5 h-5 group-hover:rotate-12 transition-transform relative z-10" />
                 <span className="relative z-10">Get Started Free</span>
                 <ChevronRight className="w-5 h-5 group-hover:translate-x-2 transition-transform relative z-10" />
               </button>
-              <button className="group bg-white/10 backdrop-blur-sm text-white px-8 py-4 rounded-lg font-semibold text-lg border border-white/20 hover:bg-white/20 hover:border-white/30 transition-all duration-300 hover:scale-105 flex items-center gap-3 justify-center">
+              <button 
+                onClick={handleScheduleDemo}
+                className="group bg-white/10 backdrop-blur-sm text-white px-8 py-4 rounded-lg font-semibold text-lg border border-white/20 hover:bg-white/20 hover:border-white/30 transition-all duration-300 hover:scale-105 flex items-center gap-3 justify-center"
+              >
                 <Play className="w-5 h-5 group-hover:scale-110 transition-transform" />
                 Schedule Demo
               </button>
@@ -498,7 +575,7 @@ export default function EnhancedLandingPage() {
                     <Shield className="w-5 h-5 text-white" />
                   </div>
                   <span className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent group-hover:scale-105 transition-transform">
-                    CredentiVault
+                    CampusSync
                   </span>
                 </div>
                 <p className="text-gray-400 leading-relaxed group-hover:text-gray-300 transition-colors">
@@ -548,7 +625,7 @@ export default function EnhancedLandingPage() {
             
             <div className="border-t border-gray-800 pt-8 flex flex-col md:flex-row justify-between items-center">
               <p className="text-gray-400 text-center md:text-left hover:text-gray-300 transition-colors">
-                &copy; 2024 CredentiVault. All rights reserved.
+                &copy; 2024 CampusSync. All rights reserved.
               </p>
               <div className="flex space-x-6 mt-4 md:mt-0">
                 {['Twitter', 'LinkedIn', 'GitHub'].map((social) => (
