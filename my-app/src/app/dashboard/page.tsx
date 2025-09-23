@@ -16,7 +16,8 @@ export default async function DashboardRedirectPage() {
     redirect('/faculty/dashboard');
   }
 
-  redirect('/student/upload');
+  console.log('Student user, redirecting to student dashboard');
+  redirect('/student/dashboard');
 }
 
 
