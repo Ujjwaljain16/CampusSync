@@ -26,7 +26,29 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ data: users });
+  // Get user details separately since we can't join auth.users directly
+  const userIds = users?.map(u => u.user_id) || [];
+  const { data: authUsers, error: authError } = await adminSupabase.auth.admin.listUsers();
+
+  if (authError) {
+    console.error('Error fetching auth users:', authError);
+    // Return users without email details if auth fetch fails
+    return NextResponse.json({ data: users });
+  }
+
+  // Merge user roles with auth user data
+  const usersWithAuth = users?.map(userRole => {
+    const authUser = authUsers.users.find(au => au.id === userRole.user_id);
+    return {
+      ...userRole,
+      auth_users: authUser ? {
+        email: authUser.email,
+        created_at: authUser.created_at
+      } : null
+    };
+  }) || [];
+
+  return NextResponse.json({ data: usersWithAuth });
 }
 
 // POST /api/admin/roles - Assign or update user role

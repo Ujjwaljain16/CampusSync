@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square } from 'lucide-react';
+import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 
 interface PendingCert {
@@ -19,6 +19,32 @@ interface PendingCert {
   verification_details?: any;
 }
 
+interface Analytics {
+  overview: {
+    totalCertificates: number;
+    autoApproved: number;
+    pending: number;
+    verified: number;
+    rejected: number;
+    autoApprovalRate: number;
+    averageConfidence: number;
+  };
+  confidenceDistribution: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+  verificationMethods: {
+    qr_verified: number;
+    logo_match: number;
+    template_match: number;
+    ai_confidence: number;
+    manual_review: number;
+  };
+  dailyActivity: Record<string, { total: number; verified: number; pending: number; rejected: number }>;
+  topInstitutions: Array<{ institution: string; count: number }>;
+}
+
 export default function FacultyDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<PendingCert[]>([]);
@@ -28,6 +54,9 @@ export default function FacultyDashboardPage() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'low_confidence' | 'manual_review'>('low_confidence');
   const [showFilters, setShowFilters] = useState(false);
   const [batchActioning, setBatchActioning] = useState(false);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -65,9 +94,25 @@ export default function FacultyDashboardPage() {
     }
   }, []);
 
+  const fetchAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true);
+    try {
+      const res = await fetch('/api/analytics/faculty');
+      const json = await res.json();
+      if (res.ok) {
+        setAnalytics(json.data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch analytics:', e);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchRows();
-  }, [fetchRows]);
+    fetchAnalytics();
+  }, [fetchRows, fetchAnalytics]);
 
   const onApprove = useCallback(async (certificateId: string, cert: PendingCert) => {
     setActioning(certificateId);
@@ -159,42 +204,24 @@ export default function FacultyDashboardPage() {
     try {
       const certIds = Array.from(selectedCerts);
       
-      // Approve all selected certificates
-      for (const certId of certIds) {
-        const cert = rows.find(r => r.id === certId);
-        if (!cert) continue;
-        
-        // Approve certificate
-        await fetch('/api/certificates/approve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ certificateId: certId, status: 'approved' }),
-        });
-        
-        // Issue VC
-        const subject = {
-          id: cert.user_id,
-          certificateId: cert.id,
-          title: cert.title,
-          institution: cert.institution,
-          dateIssued: cert.date_issued,
-          description: cert.description,
-        };
-        await fetch('/api/certificates/issue', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentialSubject: subject }),
-        });
-      }
+      const res = await fetch('/api/certificates/batch-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ certificateIds: certIds, action: 'approve' }),
+      });
+      
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Batch approval failed');
       
       await fetchRows();
+      await fetchAnalytics(); // Refresh analytics
       setSelectedCerts(new Set());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unexpected error');
     } finally {
       setBatchActioning(false);
     }
-  }, [selectedCerts, rows, fetchRows]);
+  }, [selectedCerts, fetchRows, fetchAnalytics]);
 
   const batchReject = useCallback(async () => {
     if (selectedCerts.size === 0) return;
@@ -204,22 +231,24 @@ export default function FacultyDashboardPage() {
     try {
       const certIds = Array.from(selectedCerts);
       
-      for (const certId of certIds) {
-        await fetch('/api/certificates/approve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ certificateId: certId, status: 'rejected' }),
-        });
-      }
+      const res = await fetch('/api/certificates/batch-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ certificateIds: certIds, action: 'reject' }),
+      });
+      
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Batch rejection failed');
       
       await fetchRows();
+      await fetchAnalytics(); // Refresh analytics
       setSelectedCerts(new Set());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unexpected error');
     } finally {
       setBatchActioning(false);
     }
-  }, [selectedCerts, fetchRows]);
+  }, [selectedCerts, fetchRows, fetchAnalytics]);
 
   const getFilteredRows = useCallback(() => {
     switch (filterStatus) {
@@ -483,7 +512,7 @@ export default function FacultyDashboardPage() {
                     onChange={(e) => setFilterStatus(e.target.value as any)}
                     className="bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="low_confidence">Low Confidence (< 90%)</option>
+                    <option value="low_confidence">Low Confidence (&lt; 90%)</option>
                     <option value="manual_review">Manual Review Required</option>
                     <option value="all">All Certificates</option>
                   </select>
@@ -519,7 +548,7 @@ export default function FacultyDashboardPage() {
                 <div>
                   <p className="text-white/60 text-sm">Pending Review</p>
                   <p className="text-2xl font-bold text-white">
-                    {rows.filter(r => !r.auto_approved).length}
+                    {analytics?.overview.pending || rows.filter(r => !r.auto_approved).length}
                   </p>
                 </div>
               </div>
@@ -533,7 +562,7 @@ export default function FacultyDashboardPage() {
                 <div>
                   <p className="text-white/60 text-sm">Low Confidence</p>
                   <p className="text-2xl font-bold text-white">
-                    {rows.filter(r => (r.confidence_score || 0) < 0.9).length}
+                    {analytics?.confidenceDistribution.low || rows.filter(r => (r.confidence_score || 0) < 0.7).length}
                   </p>
                 </div>
               </div>
@@ -547,7 +576,7 @@ export default function FacultyDashboardPage() {
                 <div>
                   <p className="text-white/60 text-sm">Auto-Approved</p>
                   <p className="text-2xl font-bold text-white">
-                    {rows.filter(r => r.auto_approved).length}
+                    {analytics?.overview.autoApproved || rows.filter(r => r.auto_approved).length}
                   </p>
                 </div>
               </div>
@@ -560,10 +589,116 @@ export default function FacultyDashboardPage() {
                 </div>
                 <div>
                   <p className="text-white/60 text-sm">Total</p>
-                  <p className="text-2xl font-bold text-white">{rows.length}</p>
+                  <p className="text-2xl font-bold text-white">
+                    {analytics?.overview.totalCertificates || rows.length}
+                  </p>
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Analytics Section */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-semibold text-white">Analytics Dashboard</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={fetchAnalytics}
+                  disabled={analyticsLoading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-4 h-4 ${analyticsLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                <button
+                  onClick={() => setShowAnalytics(!showAnalytics)}
+                  className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  {showAnalytics ? 'Hide' : 'Show'} Analytics
+                </button>
+              </div>
+            </div>
+
+            {showAnalytics && analytics && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Auto-Approval Rate */}
+                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-2 bg-green-500/20 rounded-lg">
+                      <TrendingUp className="w-5 h-5 text-green-400" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-white">Auto-Approval Rate</h3>
+                  </div>
+                  <div className="text-3xl font-bold text-white mb-2">
+                    {analytics.overview.autoApprovalRate}%
+                  </div>
+                  <div className="w-full bg-gray-700 rounded-full h-3">
+                    <div 
+                      className="bg-gradient-to-r from-green-500 to-emerald-500 h-3 rounded-full transition-all duration-500"
+                      style={{ width: `${analytics.overview.autoApprovalRate}%` }}
+                    />
+                  </div>
+                  <p className="text-white/60 text-sm mt-2">
+                    {analytics.overview.autoApproved} of {analytics.overview.totalCertificates} certificates auto-approved
+                  </p>
+                </div>
+
+                {/* Average Confidence */}
+                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-2 bg-blue-500/20 rounded-lg">
+                      <Target className="w-5 h-5 text-blue-400" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-white">Average Confidence</h3>
+                  </div>
+                  <div className="text-3xl font-bold text-white mb-2">
+                    {Math.round(analytics.overview.averageConfidence * 100)}%
+                  </div>
+                  <div className="w-full bg-gray-700 rounded-full h-3">
+                    <div 
+                      className="bg-gradient-to-r from-blue-500 to-cyan-500 h-3 rounded-full transition-all duration-500"
+                      style={{ width: `${analytics.overview.averageConfidence * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-white/60 text-sm mt-2">
+                    Based on {analytics.overview.totalCertificates} certificates
+                  </p>
+                </div>
+
+                {/* Confidence Distribution */}
+                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Confidence Distribution</h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/70 text-sm">High (≥90%)</span>
+                      <span className="text-emerald-400 font-semibold">{analytics.confidenceDistribution.high}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/70 text-sm">Medium (70-89%)</span>
+                      <span className="text-yellow-400 font-semibold">{analytics.confidenceDistribution.medium}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/70 text-sm">Low (&lt;70%)</span>
+                      <span className="text-red-400 font-semibold">{analytics.confidenceDistribution.low}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Top Institutions */}
+                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Top Institutions</h3>
+                  <div className="space-y-2">
+                    {analytics.topInstitutions.map((inst, index) => (
+                      <div key={inst.institution} className="flex items-center justify-between">
+                        <span className="text-white/70 text-sm truncate">{inst.institution}</span>
+                        <span className="text-white font-semibold">{inst.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         

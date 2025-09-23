@@ -21,20 +21,34 @@ export async function POST(req: NextRequest) {
   }
 
   const now = new Date().toISOString();
-  const { error } = await admin.from('certificates').insert({
+  
+  const certificateData = {
     user_id: user.id,
     student_id: user.id,
     title: body.ocr?.title ?? 'Untitled Certificate',
     institution: body.ocr?.institution ?? '',
     date_issued: body.ocr?.date_issued ?? now,
     description: body.ocr?.description ?? body.ocr?.raw_text ?? '',
-    file_url: body.publicUrl!,
-    verification_status: 'pending',
+    file_url: body.publicUrl,
+    verification_status: 'pending' as const,
     created_at: now,
     updated_at: now,
-  });
+  };
 
-  if (error) return NextResponse.json({ error: error.message.includes('student_id') ? 'Student not found for this user. Please run setup to create student profile.' : error.message }, { status: 500 });
+  console.log('Inserting certificate with data:', certificateData);
+  
+  const { error } = await supabase.from('certificates').insert(certificateData);
+
+  if (error) {
+    console.error('Certificate creation error:', error);
+    console.error('Certificate data that failed:', certificateData);
+    return NextResponse.json({ 
+      error: error.message, 
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    }, { status: 500 });
+  }
 
   return NextResponse.json({ data: { status: 'created' } });
 }

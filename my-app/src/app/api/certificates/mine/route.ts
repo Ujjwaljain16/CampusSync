@@ -8,7 +8,7 @@ export async function GET(_req: NextRequest) {
 
   const { data, error } = await supabase
     .from('certificates')
-    .select('id, title, institution, date_issued, file_url, verification_status')
+    .select('id, title, institution, date_issued, file_url, verification_status, created_at, auto_approved')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
