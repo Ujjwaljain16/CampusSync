@@ -131,8 +131,6 @@ export async function getServerUserWithRole() {
 		
 		if (upsertError) {
 			console.error('Error assigning default student role:', upsertError);
-		} else {
-			console.log(`Assigned default student role to ${user.email}`);
 		}
 		
 		return { user, role: 'student' } as const;
