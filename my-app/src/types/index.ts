@@ -34,6 +34,7 @@ export interface OcrExtractionResult {
   raw_text?: string;
   confidence?: number; // 0..1
   recipient?: string;
+  certificate_id?: string;
 }
 
 // Faculty approval workflow entity
@@ -203,6 +204,16 @@ export interface VerificationResult {
     ai_confidence?: {
       score: number;
       factors: string[];
+    };
+    metadata_checks?: {
+      score: number; // 0..1
+      issues: string[]; // e.g., ["missing_date", "issuer_mismatch"]
+    };
+    dedupe?: {
+      is_duplicate: boolean;
+      file_hash?: string;
+      text_similarity?: number; // 0..1 with closest existing
+      similar_certificate_id?: string;
     };
   };
   auto_approved: boolean;

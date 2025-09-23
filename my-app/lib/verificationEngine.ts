@@ -68,7 +68,15 @@ export class VerificationEngine {
         const templateResult = await this.verifyTemplateMatch(ocrResult);
         verificationDetails.template_match = templateResult;
 
-        // Step 4: AI Confidence Scoring
+        // Step 4: Metadata checks (issuer/date/title presence + heuristics)
+        const metadataChecks = await this.verifyMetadata(ocrResult);
+        verificationDetails.metadata_checks = metadataChecks;
+
+        // Step 5: Dedupe / similarity
+        const dedupe = await this.checkDuplicates(fileBuffer, ocrResult);
+        verificationDetails.dedupe = dedupe;
+
+        // Step 6: AI Confidence Scoring
         const aiResult = await this.calculateAIConfidence(ocrResult, logoResult, templateResult);
         verificationDetails.ai_confidence = aiResult;
 
@@ -76,7 +84,9 @@ export class VerificationEngine {
         confidenceScore = this.calculateWeightedConfidence(
           verificationDetails.logo_match!,
           verificationDetails.template_match!,
-          verificationDetails.ai_confidence!
+          verificationDetails.ai_confidence!,
+          verificationDetails.metadata_checks!,
+          verificationDetails.dedupe!
         );
         
         // Determine verification method and auto-approval
@@ -253,6 +263,74 @@ export class VerificationEngine {
   }
 
   /**
+   * Metadata validation: presence/format checks and basic issuer consistency
+   */
+  private async verifyMetadata(ocrResult: OcrExtractionResult): Promise<NonNullable<VerificationResult['details']['metadata_checks']>> {
+    const issues: string[] = [];
+    let score = 0;
+
+    if (ocrResult.title && ocrResult.title.length >= 3) score += 0.25; else issues.push('missing_title');
+    if (ocrResult.institution && ocrResult.institution.length >= 3) score += 0.25; else issues.push('missing_institution');
+    if (ocrResult.recipient && ocrResult.recipient.length >= 3) score += 0.2; else issues.push('missing_recipient');
+    if (ocrResult.date_issued && /\d{4}-\d{2}-\d{2}/.test(ocrResult.date_issued)) score += 0.2; else issues.push('invalid_or_missing_date');
+    if ((ocrResult.description || '').length >= 10) score += 0.1; else issues.push('weak_description');
+
+    return { score: Math.min(score, 1), issues };
+  }
+
+  /**
+   * Dedupe via file hash and text similarity against recent certificates
+   */
+  private async checkDuplicates(fileBuffer: Buffer, ocrResult: OcrExtractionResult): Promise<NonNullable<VerificationResult['details']['dedupe']>> {
+    try {
+      const fileHash = createHash('sha256').update(fileBuffer).digest('hex');
+
+      // Lookup any certificate_metadata with same file hash (if stored)
+      const { data: existing, error } = await this.supabase
+        .from('certificate_metadata')
+        .select('certificate_id, verification_details')
+        .ilike('verification_details->>file_hash', fileHash);
+
+      if (!error && existing && existing.length > 0) {
+        return { is_duplicate: true, file_hash: fileHash };
+      }
+
+      // Fallback: simple cosine-like similarity on text vs recent 50
+      const { data: recent } = await this.supabase
+        .from('certificate_metadata')
+        .select('certificate_id, verification_details')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      const text = (ocrResult.raw_text || '').toLowerCase();
+      let bestSim = 0;
+      let bestId: string | undefined;
+      for (const row of recent || []) {
+        const otherText = (row.verification_details?.ocr_text || '').toLowerCase();
+        if (!otherText) continue;
+        const sim = this.jaccardSimilarity(this.tokenize(text), this.tokenize(otherText));
+        if (sim > bestSim) { bestSim = sim; bestId = row.certificate_id; }
+      }
+
+      return { is_duplicate: bestSim > 0.95, text_similarity: bestSim, similar_certificate_id: bestId };
+    } catch {
+      return { is_duplicate: false };
+    }
+  }
+
+  private tokenize(t: string): Set<string> {
+    return new Set(t.split(/[^a-z0-9]+/g).filter(Boolean));
+  }
+
+  private jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+    if (a.size === 0 || b.size === 0) return 0;
+    let inter = 0;
+    for (const x of a) if (b.has(x)) inter++;
+    const union = a.size + b.size - inter;
+    return inter / union;
+  }
+
+  /**
    * AI Confidence Scoring
    */
   private async calculateAIConfidence(
@@ -309,19 +387,27 @@ export class VerificationEngine {
   private calculateWeightedConfidence(
     logoResult: NonNullable<VerificationResult['details']['logo_match']>,
     templateResult: NonNullable<VerificationResult['details']['template_match']>,
-    aiResult: NonNullable<VerificationResult['details']['ai_confidence']>
+    aiResult: NonNullable<VerificationResult['details']['ai_confidence']>,
+    metadata: NonNullable<VerificationResult['details']['metadata_checks']>,
+    dedupe: NonNullable<VerificationResult['details']['dedupe']>
   ): number {
     const weights = {
-      logo: 0.25,
-      template: 0.30,
-      ai: 0.45
-    };
+      logo: 0.2,
+      template: 0.25,
+      ai: 0.35,
+      metadata: 0.15,
+      dedupePenalty: 0.4 // subtract if duplicate
+    } as const;
 
-    return (
+    let score = (
       (logoResult.score * weights.logo) +
       (templateResult.score * weights.template) +
-      (aiResult.score * weights.ai)
+      (aiResult.score * weights.ai) +
+      (metadata.score * weights.metadata)
     );
+
+    if (dedupe.is_duplicate) score = Math.max(0, score - weights.dedupePenalty);
+    return Math.min(1, score);
   }
 
   /**
@@ -400,7 +486,11 @@ export class VerificationEngine {
         template_match_score: details.template_match?.score,
         ai_confidence_score: details.ai_confidence?.score,
         verification_method: verificationMethod,
-        verification_details: details
+        verification_details: {
+          ...details,
+          file_hash: undefined,
+          ocr_text: undefined
+        }
       };
 
       await this.supabase.from('certificate_metadata').upsert(metadata);
