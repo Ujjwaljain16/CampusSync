@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Share2, Star, Zap, Shield, Brain, FileText } from 'lucide-react';
+import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Share2, Star, Zap, Shield, Brain, FileText, Upload, ExternalLink, Trash2 } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 
 interface Row {
@@ -24,6 +24,8 @@ export default function StudentDashboard() {
   const [confidence, setConfidence] = useState<Record<string, number>>({});
   const [details, setDetails] = useState<Record<string, any>>({});
   const [exporting, setExporting] = useState(false);
+  const [recentUploads, setRecentUploads] = useState<Row[]>([]);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,6 +36,15 @@ export default function StudentDashboard() {
       if (!res.ok) throw new Error(json.error || 'Failed to load');
       const list = json.data as Row[];
       setRows(list);
+      
+      // Sort by created_at to get recent uploads (last 5)
+      const sortedList = list.sort((a, b) => {
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dateB - dateA; // Most recent first
+      });
+      setRecentUploads(sortedList.slice(0, 5));
+      
       // Fetch metadata for confidence per cert
       const confMap: Record<string, number> = {};
       const detMap: Record<string, any> = {};
@@ -41,9 +52,19 @@ export default function StudentDashboard() {
         const mdRes = await fetch(`/api/certificates/metadata/${encodeURIComponent(r.id)}`);
         if (mdRes.ok) {
           const md = await mdRes.json();
-          const ai = md?.data?.ai_confidence_score;
-          confMap[r.id] = typeof ai === 'number' ? ai : (md?.data?.verification_details?.ai_confidence?.score ?? 0);
-          detMap[r.id] = md?.data?.verification_details ?? {};
+          if (md?.data) {
+            const ai = md.data.ai_confidence_score;
+            confMap[r.id] = typeof ai === 'number' ? ai : (md.data.verification_details?.ai_confidence?.score ?? 0);
+            detMap[r.id] = md.data.verification_details ?? {};
+          } else {
+            // No metadata available yet, use default values
+            confMap[r.id] = 0;
+            detMap[r.id] = {};
+          }
+        } else {
+          // API call failed, use default values
+          confMap[r.id] = 0;
+          detMap[r.id] = {};
         }
       }
       setConfidence(confMap);
@@ -84,6 +105,48 @@ export default function StudentDashboard() {
       setError('Failed to export portfolio PDF');
     } finally {
       setExporting(false);
+    }
+  }, []);
+
+  const deleteCertificate = useCallback(async (certificateId: string) => {
+    if (!confirm('Are you sure you want to delete this certificate? This action cannot be undone.')) {
+      return;
+    }
+
+    setDeleting(certificateId);
+    try {
+      const response = await fetch('/api/certificates/delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ certificateId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete certificate');
+      }
+
+      // Remove from local state
+      setRows(prev => prev.filter(cert => cert.id !== certificateId));
+      setRecentUploads(prev => prev.filter(cert => cert.id !== certificateId));
+      
+      // Remove from confidence and details maps
+      setConfidence(prev => {
+        const newConf = { ...prev };
+        delete newConf[certificateId];
+        return newConf;
+      });
+      setDetails(prev => {
+        const newDetails = { ...prev };
+        delete newDetails[certificateId];
+        return newDetails;
+      });
+
+    } catch (error) {
+      console.error('Delete certificate error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to delete certificate');
+    } finally {
+      setDeleting(null);
     }
   }, []);
 
@@ -196,6 +259,138 @@ export default function StudentDashboard() {
 
     return (
       <div className="space-y-4">
+        {/* Portfolio Preview Section */}
+        {rows.length > 0 && (
+          <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 backdrop-blur-xl border border-white/10 rounded-2xl p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl">
+                  <ExternalLink className="w-5 h-5 text-blue-300" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-white">Portfolio Preview</h2>
+                  <p className="text-white/70 text-sm">Your public portfolio is ready to share</p>
+                </div>
+              </div>
+              <a
+                href={`/public/portfolio/${rows[0]?.id || 'preview'}`}
+                target="_blank"
+                rel="noreferrer"
+                className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-sm"
+              >
+                <ExternalLink className="w-4 h-4" />
+                View Portfolio
+              </a>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white/5 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Star className="w-4 h-4 text-yellow-400" />
+                  <span className="text-white/70 text-sm">Verified Certificates</span>
+                </div>
+                <p className="text-2xl font-bold text-white">
+                  {rows.filter(r => r.verification_status === 'verified').length}
+                </p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Zap className="w-4 h-4 text-emerald-400" />
+                  <span className="text-white/70 text-sm">Auto-Approved</span>
+                </div>
+                <p className="text-2xl font-bold text-white">
+                  {rows.filter(r => r.auto_approved).length}
+                </p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Shield className="w-4 h-4 text-blue-400" />
+                  <span className="text-white/70 text-sm">Trust Score</span>
+                </div>
+                <p className="text-2xl font-bold text-white">
+                  {Math.round((rows.filter(r => r.verification_status === 'verified').length / Math.max(rows.length, 1)) * 100)}%
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Recent Uploads Progress */}
+        {recentUploads.length > 0 && (
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 mb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-gradient-to-r from-green-500/20 to-blue-500/20 rounded-xl">
+                <Upload className="w-5 h-5 text-green-300" />
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-white">Recent Uploads</h2>
+                <p className="text-white/70 text-sm">Track your latest certificate uploads</p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              {recentUploads.map((upload, index) => {
+                const confScore = confidence[upload.id] || 0;
+                const verificationMethod = getVerificationMethod(details[upload.id]);
+                
+                // Handle date calculation safely
+                let timeAgoText = 'Unknown';
+                if (upload.created_at) {
+                  const timeAgo = new Date(upload.created_at);
+                  const now = new Date();
+                  
+                  // Check if the date is valid
+                  if (!isNaN(timeAgo.getTime())) {
+                    const diffInHours = Math.floor((now.getTime() - timeAgo.getTime()) / (1000 * 60 * 60));
+                    
+                    if (diffInHours < 1) {
+                      timeAgoText = 'Just now';
+                    } else if (diffInHours < 24) {
+                      timeAgoText = `${diffInHours}h ago`;
+                    } else {
+                      timeAgoText = `${Math.floor(diffInHours / 24)}d ago`;
+                    }
+                  }
+                }
+                
+                return (
+                  <div key={upload.id} className="bg-white/5 rounded-xl p-4 hover:bg-white/10 transition-colors">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-2 h-2 rounded-full ${
+                          upload.verification_status === 'verified' ? 'bg-emerald-400' :
+                          upload.verification_status === 'pending' ? 'bg-yellow-400' :
+                          'bg-red-400'
+                        }`}></div>
+                        <h3 className="text-white font-medium truncate">{upload.title}</h3>
+                        <span className="text-white/50 text-sm">
+                          {timeAgoText}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className={`flex items-center gap-1 ${verificationMethod.color}`}>
+                          {verificationMethod.icon}
+                          <span className="text-xs">{verificationMethod.text}</span>
+                        </div>
+                        <span className={`text-xs font-semibold ${getConfidenceColor(confScore)}`}>
+                          {Math.round(confScore * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <p className="text-white/60 text-sm truncate">{upload.institution}</p>
+                      <div className="flex items-center gap-1">
+                        {getStatusIcon(upload.verification_status, upload.auto_approved)}
+                        <span className={`text-xs ${getStatusColor(upload.verification_status, upload.auto_approved).split(' ')[1]}`}>
+                          {getStatusText(upload.verification_status, upload.auto_approved)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Summary Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
           <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-3 md:p-4">
@@ -298,6 +493,18 @@ export default function StudentDashboard() {
                       >
                         <Share2 className="w-4 h-4 text-white" />
                       </button>
+                      <button 
+                        onClick={() => deleteCertificate(cert.id)}
+                        disabled={deleting === cert.id}
+                        className="p-2 bg-red-500/20 hover:bg-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
+                        title="Delete Certificate"
+                      >
+                        {deleting === cert.id ? (
+                          <div className="w-4 h-4 border-2 border-red-300 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <Trash2 className="w-4 h-4 text-red-300" />
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -353,7 +560,14 @@ export default function StudentDashboard() {
             </div>
             
             <div className="flex items-center gap-3">
-              <LogoutButton variant="minimal" />
+              <a
+                href="/student/upload"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-6 py-2 md:py-3 rounded-xl font-medium transition-colors flex items-center gap-2 text-sm md:text-base"
+              >
+                <Upload className="w-4 h-4 md:w-5 md:h-5" />
+                <span className="hidden sm:inline">Upload Certificate</span>
+                <span className="sm:hidden">Upload</span>
+              </a>
               <button
                 onClick={exportPortfolioPDF}
                 disabled={exporting || rows.length === 0}
@@ -363,6 +577,7 @@ export default function StudentDashboard() {
                 <span className="hidden sm:inline">{exporting ? 'Generating...' : 'Export PDF'}</span>
                 <span className="sm:hidden">{exporting ? '...' : 'PDF'}</span>
               </button>
+              <LogoutButton variant="minimal" />
             </div>
           </div>
         </div>

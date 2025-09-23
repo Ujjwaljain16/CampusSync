@@ -1,16 +1,17 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { access_token, refresh_token } = body || {};
+    const { access_token, refresh_token } = await request.json();
+
     if (!access_token || !refresh_token) {
       return NextResponse.json({ error: 'Missing tokens' }, { status: 400 });
     }
 
-    const res = NextResponse.json({ ok: true });
-
+    // Create response with cookie handling
+    const response = NextResponse.json({ success: true });
+    
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -21,26 +22,27 @@ export async function POST(request: NextRequest) {
           },
           setAll(cookies) {
             cookies.forEach(({ name, value, options }) => {
-              res.cookies.set({ name, value, ...options });
+              response.cookies.set(name, value, options);
             });
           },
         },
       }
     );
 
-    // Set the session on the server so middleware can read cookies
+    // Set the session using the provided tokens
     const { error } = await supabase.auth.setSession({
       access_token,
       refresh_token,
     });
+
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      console.error('Error setting session:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return res;
+    return response;
   } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Unknown error' }, { status: 500 });
+    console.error('Set session error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-
-

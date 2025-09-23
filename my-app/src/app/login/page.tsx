@@ -73,20 +73,27 @@ export default function LoginPage() {
         if (signInError) throw signInError;
         
         // Check if user was successfully authenticated
-        if (data.user) {
+        if (data.user && data.session) {
           console.log('Login successful, user data:', data.user);
           
-          // Ensure server sets auth cookies so middleware can see session
-          if (data.session?.access_token && data.session?.refresh_token) {
-            await fetch('/api/auth/set-session', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                access_token: data.session.access_token,
-                refresh_token: data.session.refresh_token
-              })
-            });
+          // Set the session on the server side to ensure cookies are properly set
+          const setSessionResponse = await fetch('/api/auth/set-session', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              access_token: data.session.access_token,
+              refresh_token: data.session.refresh_token,
+            }),
+          });
+
+          if (!setSessionResponse.ok) {
+            console.error('Failed to set session on server');
+            throw new Error('Failed to establish session');
           }
+          
+          console.log('Session set successfully, redirecting to dashboard...');
           window.location.href = "/dashboard";
         } else {
           throw new Error('Authentication failed');

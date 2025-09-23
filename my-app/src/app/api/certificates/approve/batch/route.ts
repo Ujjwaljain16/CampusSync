@@ -18,9 +18,12 @@ export async function POST(req: NextRequest) {
   const results: { id: string; ok: boolean; error?: string }[] = [];
   for (const item of body.certificates) {
     try {
+      // Map API status to database verification_status
+      const verificationStatus = item.status === 'approved' ? 'verified' : 'rejected';
+      
       const { error: updateErr } = await supabase
         .from('certificates')
-        .update({ verification_status: item.status, updated_at: new Date().toISOString() })
+        .update({ verification_status: verificationStatus, updated_at: new Date().toISOString() })
         .eq('id', item.id);
       if (updateErr) throw new Error(updateErr.message);
 
