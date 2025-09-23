@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireRole, createSupabaseServerClient } from '../../../../../lib/supabaseServer';
+import { requireRole, createSupabaseServerClient, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { emailService } from '../../../../../lib/emailService';
 
 export async function POST(req: NextRequest) {
 	const auth = await requireRole(['faculty', 'admin']);
@@ -17,13 +18,76 @@ export async function POST(req: NextRequest) {
 	}
 
 	const supabase = await createSupabaseServerClient();
+
+	// Get certificate details for email notification
+	const { data: certificate, error: certError } = await supabase
+		.from('certificates')
+		.select('title, institution, user_id, description')
+		.eq('id', body.certificateId)
+		.single();
+
+	if (certError) {
+		return NextResponse.json({ error: 'Certificate not found' }, { status: 404 });
+	}
+
+	// Get user email for notification
+	const { data: user, error: userError } = await supabase.auth.admin.getUserById(certificate.user_id);
+	const userEmail = user?.user?.email;
+
 	// Update certificate status in your DB table `certificates`
-	const { error } = await supabase
+	const { error: updateErr } = await supabase
 		.from('certificates')
 		.update({ verification_status: body.status, updated_at: new Date().toISOString() })
 		.eq('id', body.certificateId);
 
-	if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+	if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
+
+	// If approved and metadataId provided, update verification method to manual
+	if (body.status === 'approved' && typeof body.metadataId === 'string') {
+		await supabase
+			.from('certificate_metadata')
+			.update({ verification_method: 'manual' })
+			.eq('id', body.metadataId);
+	}
+
+	// Send email notification
+	if (userEmail) {
+		try {
+			const notificationData = {
+				studentName: user?.user?.user_metadata?.full_name || 'Student',
+				certificateTitle: certificate.title,
+				institution: certificate.institution,
+				portfolioUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${certificate.user_id}`,
+			};
+
+			if (body.status === 'approved') {
+				await emailService.sendCertificateApproved(userEmail, notificationData);
+			} else {
+				await emailService.sendCertificateRejected(userEmail, notificationData);
+			}
+		} catch (emailError) {
+			console.error('Failed to send email notification:', emailError);
+			// Don't fail the request if email fails
+		}
+	}
+
+	// Write audit log if possible
+	try {
+		const { user } = await getServerUserWithRole();
+		await supabase.from('audit_logs').insert({
+			user_id: user?.id ?? null,
+			action: body.status === 'approved' ? 'manual_approve' : 'manual_reject',
+			entity_type: 'certificate',
+			entity_id: body.certificateId,
+			details: {
+				reason: body.approveReason || body.rejectReason || null,
+				metadataId: body.metadataId || null,
+			},
+			created_at: new Date().toISOString(),
+		});
+	} catch {
+		// ignore audit failures
+	}
 
 	return NextResponse.json({ data: { certificateId: body.certificateId, status: body.status } });
 }

@@ -348,3 +348,224 @@ html {
     font-size: 0.875rem;
   }
 }
+
+/* Mobile-First Responsive Design */
+@media (max-width: 640px) {
+  /* Typography adjustments for mobile */
+  .text-4xl {
+    font-size: 2rem;
+    line-height: 2.5rem;
+  }
+  
+  .text-3xl {
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+  }
+  
+  .text-2xl {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+  
+  /* Spacing adjustments */
+  .py-10 {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+  }
+  
+  .px-6 {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  /* Grid adjustments */
+  .grid-cols-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  
+  .grid-cols-2 {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+  
+  /* Card adjustments */
+  .rounded-2xl {
+    border-radius: 1rem;
+  }
+  
+  .p-6 {
+    padding: 1rem;
+  }
+  
+  /* Button adjustments */
+  .px-6 {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  .py-3 {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+  
+  /* Flex adjustments */
+  .flex-col {
+    flex-direction: column;
+  }
+  
+  .items-start {
+    align-items: flex-start;
+  }
+  
+  .justify-between {
+    justify-content: space-between;
+  }
+  
+  /* Gap adjustments */
+  .gap-4 {
+    gap: 0.75rem;
+  }
+  
+  .gap-6 {
+    gap: 1rem;
+  }
+  
+  .gap-8 {
+    gap: 1.5rem;
+  }
+  
+  /* Text size adjustments */
+  .text-sm {
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+  
+  .text-xs {
+    font-size: 0.625rem;
+    line-height: 0.75rem;
+  }
+  
+  /* Hide elements on mobile if needed */
+  .hidden-mobile {
+    display: none;
+  }
+  
+  /* Show elements only on mobile */
+  .mobile-only {
+    display: block;
+  }
+  
+  /* Full width on mobile */
+  .w-full-mobile {
+    width: 100%;
+  }
+  
+  /* Stack elements vertically on mobile */
+  .stack-mobile {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  /* Adjust margins and padding for mobile */
+  .mb-8 {
+    margin-bottom: 1.5rem;
+  }
+  
+  .mb-6 {
+    margin-bottom: 1rem;
+  }
+  
+  .mb-4 {
+    margin-bottom: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Extra small screens */
+  .text-4xl {
+    font-size: 1.75rem;
+    line-height: 2.25rem;
+  }
+  
+  .text-3xl {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+  
+  .px-6 {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+  
+  .py-10 {
+    padding-top: 1.5rem;
+    padding-bottom: 1.5rem;
+  }
+  
+  .grid-cols-4 {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+  
+  .gap-4 {
+    gap: 0.5rem;
+  }
+  
+  .p-6 {
+    padding: 0.75rem;
+  }
+  
+  .px-6 {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+  
+  .py-3 {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .grid-cols-4 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  
+  .grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Desktop adjustments */
+@media (min-width: 1025px) {
+  .mobile-only {
+    display: none;
+  }
+  
+  .hidden-mobile {
+    display: block;
+  }
+}
+
+/* Touch-friendly button sizes */
+@media (hover: none) and (pointer: coarse) {
+  .cv-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  button, .cv-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  input, select, textarea {
+    min-height: 44px;
+  }
+}
+
+/* High DPI display adjustments */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .cv-card {
+    border-width: 0.5px;
+  }
+}

@@ -1,0 +1,205 @@
+{
+  "timestamp": "2025-09-23T15:54:04.397Z",
+  "summary": {
+    "total": 44,
+    "passed": 44,
+    "failed": 0,
+    "successRate": 100,
+    "totalTime": 12770
+  },
+  "details": [
+    {
+      "status": "PASS",
+      "message": "User creation should succeed"
+    },
+    {
+      "status": "PASS",
+      "message": "User authentication should succeed"
+    },
+    {
+      "status": "PASS",
+      "message": "Session should contain access token"
+    },
+    {
+      "status": "PASS",
+      "message": "Certificate creation endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "User certificates endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "Pending certificates endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "Certificate metadata endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "OCR endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "Smart verification endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "Auto verification endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "Bulk verification endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "VC verification should return validity"
+    },
+    {
+      "status": "PASS",
+      "message": "VC verification by ID should work"
+    },
+    {
+      "status": "PASS",
+      "message": "Recruiter verification should work"
+    },
+    {
+      "status": "PASS",
+      "message": "User roles endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "Role update endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "Trusted issuers endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "Trusted issuer creation endpoint exists and responds"
+    },
+    {
+      "status": "PASS",
+      "message": "Database connection should be available"
+    },
+    {
+      "status": "PASS",
+      "message": "Table 'certificates' should exist"
+    },
+    {
+      "status": "PASS",
+      "message": "Table 'verification_results' should exist"
+    },
+    {
+      "status": "PASS",
+      "message": "Table 'trusted_issuers' should exist"
+    },
+    {
+      "status": "PASS",
+      "message": "Table 'verification_rules' should exist"
+    },
+    {
+      "status": "PASS",
+      "message": "Table 'certificate_metadata' should exist"
+    },
+    {
+      "status": "PASS",
+      "message": "Table 'verifiable_credentials' should exist"
+    },
+    {
+      "status": "PASS",
+      "message": "Table 'revocation_list' should exist"
+    },
+    {
+      "status": "PASS",
+      "message": "Table 'user_roles' should exist"
+    },
+    {
+      "status": "PASS",
+      "message": "Row Level Security policies should be configured"
+    },
+    {
+      "status": "PASS",
+      "message": "Database indexes should be created for performance"
+    },
+    {
+      "status": "PASS",
+      "message": "End-to-end certificate flow should work"
+    },
+    {
+      "status": "PASS",
+      "message": "Role-based access control should work correctly"
+    },
+    {
+      "status": "PASS",
+      "message": "Verification engine should integrate properly"
+    },
+    {
+      "status": "PASS",
+      "message": "Verifiable credentials should integrate properly"
+    },
+    {
+      "status": "PASS",
+      "message": "API calls should complete within 5 seconds (took 596ms)"
+    },
+    {
+      "status": "PASS",
+      "message": "Verification engine should process certificates within 10 seconds"
+    },
+    {
+      "status": "PASS",
+      "message": "Database queries should be optimized with proper indexes"
+    },
+    {
+      "status": "PASS",
+      "message": "Application should not have memory leaks"
+    },
+    {
+      "status": "PASS",
+      "message": "User authentication should be secure"
+    },
+    {
+      "status": "PASS",
+      "message": "Role-based access control should be properly enforced"
+    },
+    {
+      "status": "PASS",
+      "message": "All API endpoints should validate input"
+    },
+    {
+      "status": "PASS",
+      "message": "Database queries should be protected against SQL injection"
+    },
+    {
+      "status": "PASS",
+      "message": "User input should be sanitized to prevent XSS"
+    },
+    {
+      "status": "PASS",
+      "message": "API endpoints should be protected against CSRF attacks"
+    },
+    {
+      "status": "PASS",
+      "message": "JWT/JWS tokens should be properly signed and validated"
+    }
+  ],
+  "config": {
+    "baseUrl": "http://localhost:3000",
+    "testUser": {
+      "email": "test@example.com",
+      "password": "testpassword123"
+    },
+    "adminUser": {
+      "email": "jainujjwal1609@gmail.com",
+      "password": "adminpassword123"
+    },
+    "testCertificate": {
+      "title": "Test Certificate",
+      "institution": "Test University",
+      "date_issued": "2025-09-23T15:53:51.617Z",
+      "description": "This is a test certificate for verification testing"
+    }
+  }
+}

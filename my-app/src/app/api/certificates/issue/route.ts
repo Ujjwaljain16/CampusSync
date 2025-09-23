@@ -9,17 +9,45 @@ export async function POST(req: NextRequest) {
 	const { user, role } = await getServerUserWithRole();
 	if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-	const body = await req.json().catch(() => null);
+	const body = await req.json().catch(() => null) as { credentialSubject?: CredentialSubject; certificateId?: string } | null;
 	if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
 
-	const subject: CredentialSubject | undefined = body.credentialSubject;
-	if (!subject) {
-		return NextResponse.json({ error: 'Invalid credentialSubject' }, { status: 400 });
+	let subject: CredentialSubject | undefined = body.credentialSubject;
+
+	// If called from auto-verify with certificateId, map it to credentialSubject
+	if (!subject && body.certificateId) {
+		const { data: cert, error: certErr } = await supabase
+			.from('certificates')
+			.select('*')
+			.eq('id', body.certificateId)
+			.single();
+		if (certErr || !cert) {
+			return NextResponse.json({ error: 'Certificate not found' }, { status: 404 });
+		}
+		// Only allow issuing for own certificate unless faculty/admin
+		const isOwner = cert.user_id === user.id;
+		const canIssueOnBehalf = role === 'admin';
+		if (!isOwner && !canIssueOnBehalf) {
+			return NextResponse.json({ error: 'Forbidden to issue for another user' }, { status: 403 });
+		}
+		subject = {
+			id: cert.user_id,
+			certificateId: cert.id,
+			title: cert.title,
+			institution: cert.institution,
+			dateIssued: cert.date_issued,
+			description: cert.description ?? undefined,
+		};
+	} else if (subject) {
+		const isSelfIssue = subject.id === user.id;
+		const canIssueOnBehalf = role === 'admin';
+		if (!isSelfIssue && !canIssueOnBehalf) {
+			return NextResponse.json({ error: 'Forbidden to issue for another user' }, { status: 403 });
+		}
 	}
-	const isSelfIssue = subject.id === user.id;
-	const canIssueOnBehalf = role === 'faculty' || role === 'admin';
-	if (!isSelfIssue && !canIssueOnBehalf) {
-		return NextResponse.json({ error: 'Forbidden to issue for another user' }, { status: 403 });
+
+	if (!subject) {
+		return NextResponse.json({ error: 'Invalid credentialSubject or certificateId' }, { status: 400 });
 	}
 
 	const issuerDid = process.env.NEXT_PUBLIC_ISSUER_DID || 'did:web:example.org';
@@ -34,15 +62,32 @@ export async function POST(req: NextRequest) {
 	});
 
 	// Store VC in Supabase table `verifiable_credentials`
+	const now = new Date().toISOString();
 	const { error } = await supabase.from('verifiable_credentials').insert({
 		id: vc.id,
 		user_id: user.id,
 		issuer: vc.issuer,
 		issuance_date: vc.issuanceDate,
 		credential: vc,
-		created_at: new Date().toISOString(),
+		status: 'active',
+		created_at: now,
 	});
 	if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+	// Audit log: issue_vc
+	try {
+		const { user: actor } = await getServerUserWithRole();
+		await supabase.from('audit_logs').insert({
+			user_id: actor?.id ?? null,
+			action: 'issue_vc',
+			entity_type: 'verifiable_credential',
+			entity_id: vc.id,
+			details: { certificateId: body?.certificateId ?? subject.certificateId },
+			created_at: now,
+		});
+	} catch {
+		// ignore audit failures
+	}
 
 	return NextResponse.json({ data: vc });
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole, createSupabaseAdminClient } from '../../../../../lib/supabaseServer';
 
 // GET /api/admin/roles - List all users and their roles
 export async function GET(_req: NextRequest) {
@@ -8,21 +8,17 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: auth.message }, { status: auth.status });
   }
 
-  const supabase = await createSupabaseServerClient();
+  const adminSupabase = createSupabaseAdminClient();
   
-  // Get all users with their roles
-  const { data: users, error } = await supabase
+  // Get all users with their roles using admin client to bypass RLS
+  const { data: users, error } = await adminSupabase
     .from('user_roles')
     .select(`
       user_id,
       role,
       created_at,
       updated_at,
-      assigned_by,
-      auth_users:user_id (
-        email,
-        created_at
-      )
+      assigned_by
     `)
     .order('created_at', { ascending: false });
 
@@ -49,10 +45,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid role. Must be student, faculty, or admin' }, { status: 400 });
   }
 
-  const supabase = await createSupabaseServerClient();
+  // 🛡️ SAFETY CHECK: Prevent admins from demoting themselves
+  if (body.user_id === auth.user.id && body.role !== 'admin') {
+    return NextResponse.json({ 
+      error: 'Security violation: Admins cannot demote themselves. This prevents system lockout.' 
+    }, { status: 403 });
+  }
+
+  const adminSupabase = createSupabaseAdminClient();
   
-  // Check if user exists
-  const { data: userExists, error: userError } = await supabase
+  // Check if user exists using admin client
+  const { data: userExists, error: userError } = await adminSupabase
     .from('user_roles')
     .select('user_id')
     .eq('user_id', body.user_id)
@@ -66,7 +69,7 @@ export async function POST(req: NextRequest) {
   
   if (userExists) {
     // Update existing role
-    const { error } = await supabase
+    const { error } = await adminSupabase
       .from('user_roles')
       .update({
         role: body.role,
@@ -80,7 +83,7 @@ export async function POST(req: NextRequest) {
     }
   } else {
     // Insert new role
-    const { error } = await supabase
+    const { error } = await adminSupabase
       .from('user_roles')
       .insert({
         user_id: body.user_id,
@@ -118,10 +121,50 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Missing user_id parameter' }, { status: 400 });
   }
 
-  const supabase = await createSupabaseServerClient();
+  // 🛡️ CRITICAL SAFETY CHECK: Prevent admins from removing themselves
+  if (userId === auth.user.id) {
+    return NextResponse.json({ 
+      error: 'Security violation: Admins cannot remove their own role. This prevents system lockout.' 
+    }, { status: 403 });
+  }
+
+  const adminSupabase = createSupabaseAdminClient();
+  
+  // 🛡️ SAFETY CHECK: Ensure there's at least one admin remaining
+  const { data: adminCount, error: countError } = await adminSupabase
+    .from('user_roles')
+    .select('user_id', { count: 'exact', head: true })
+    .eq('role', 'admin');
+
+  if (countError) {
+    return NextResponse.json({ error: 'Failed to check admin count' }, { status: 500 });
+  }
+
+  if (adminCount && adminCount <= 1) {
+    return NextResponse.json({ 
+      error: 'Cannot remove role: At least one admin must remain in the system' 
+    }, { status: 403 });
+  }
+
+  // 🛡️ SAFETY CHECK: Check if the user being removed is an admin
+  const { data: targetUser, error: userError } = await adminSupabase
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', userId)
+    .single();
+
+  if (userError) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  if (targetUser.role === 'admin' && adminCount && adminCount <= 1) {
+    return NextResponse.json({ 
+      error: 'Cannot remove the last admin in the system' 
+    }, { status: 403 });
+  }
   
   // Delete the role record (user will default to 'student')
-  const { error } = await supabase
+  const { error } = await adminSupabase
     .from('user_roles')
     .delete()
     .eq('user_id', userId);
