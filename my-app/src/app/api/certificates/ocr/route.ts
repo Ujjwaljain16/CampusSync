@@ -231,6 +231,7 @@ export async function POST(req: NextRequest) {
 			// Create a temporary certificate record for verification (use admin to avoid RLS issues)
 			const { data: tempCert } = await admin.from('certificates').insert({
 				user_id: user.id,
+				student_id: user.id,
 				title: result.title || 'Untitled Certificate',
 				institution: result.institution || '',
 				date_issued: result.date_issued || new Date().toISOString(),
