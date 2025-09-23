@@ -3,6 +3,7 @@
 import { LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { supabase } from '../../lib/supabaseClient';
 
 interface LogoutButtonProps {
   className?: string;
@@ -18,7 +19,10 @@ export default function LogoutButton({ className = '', variant = 'default' }: Lo
     
     setLoggingOut(true);
     try {
-      // Call the logout API
+      // Clear client session first to avoid refresh token errors
+      try { await supabase.auth.signOut(); } catch {}
+
+      // Call the logout API to clear server cookies/session
       const response = await fetch('/api/auth/signout', {
         method: 'POST',
         headers: {
@@ -33,7 +37,6 @@ export default function LogoutButton({ className = '', variant = 'default' }: Lo
       // Force a full page reload to clear all client-side state
       window.location.href = '/login';
     } catch (error) {
-      console.error('Logout error:', error);
       // Even if the API call fails, redirect to login
       window.location.href = '/login';
     } finally {
