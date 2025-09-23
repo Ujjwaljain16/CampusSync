@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
 	
 	// Only process file if it exists (not in JSON test mode)
 	if (file) {
-		if (!(file instanceof Blob)) {
+	if (!(file instanceof Blob)) {
 			return NextResponse.json({ error: 'Invalid file' }, { status: 400 });
 		}
 		const arrayBuffer = await file.arrayBuffer();
@@ -101,11 +101,11 @@ export async function POST(req: NextRequest) {
 		}
 
 		// Store in Supabase Storage
-		const filename = `${user.id}/${Date.now()}-${(file as any).name || 'upload'}`;
+	const filename = `${user.id}/${Date.now()}-${(file as any).name || 'upload'}`;
 		const { data: uploaded, error: storageError } = await admin.storage
 			.from(BUCKET_NAME)
-			.upload(filename, buffer, { contentType: (file as any).type || 'application/octet-stream', upsert: true });
-		if (storageError) return NextResponse.json({ error: storageError.message }, { status: 500 });
+		.upload(filename, buffer, { contentType: (file as any).type || 'application/octet-stream', upsert: true });
+	if (storageError) return NextResponse.json({ error: storageError.message }, { status: 500 });
 		storage = uploaded as any;
 		publicUrlStr = admin.storage.from(BUCKET_NAME).getPublicUrl(storage!.path).data.publicUrl;
 	} else {
@@ -126,7 +126,6 @@ export async function POST(req: NextRequest) {
 		try {
 			if (isPdf) {
 				// For PDFs, convert to image and run OCR
-				console.log('PDF detected on server, converting to image for OCR...');
 				try {
 					// Ensure tmp directory exists
 					const tmpDir = path.join(process.cwd(), 'tmp');
@@ -147,7 +146,6 @@ export async function POST(req: NextRequest) {
 					const convertResult = await convert(1, { responseType: "buffer" });
 					
 					if (convertResult.buffer) {
-						console.log('PDF converted to image, running OCR...');
 						// Run OCR on the converted image
 						const { data: ocrData } = await Tesseract.recognize(convertResult.buffer, 'eng', {
 							langPath: process.env.TESSERACT_LANG_CDN || 'https://tessdata.projectnaptha.com/4.0.0',
@@ -156,12 +154,10 @@ export async function POST(req: NextRequest) {
 						});
 						ocrText = ocrData?.text || '';
 						ocrConfidence = ocrData?.confidence ? ocrData.confidence / 100 : undefined;
-						console.log('PDF OCR completed, extracted text length:', ocrText.length);
 					} else {
 						throw new Error('PDF to image conversion failed');
 					}
 				} catch (pdfErr) {
-					console.error('PDF OCR failed, using fallback:', pdfErr);
 					// Fallback to metadata extraction
 					try {
 						const pdfDoc = await PDFDocument.load(buffer);
@@ -180,7 +176,6 @@ export async function POST(req: NextRequest) {
 						ocrText = pdfText;
 						ocrConfidence = title || author || subject ? 0.5 : 0.3;
 					} catch (fallbackErr) {
-						console.error('PDF fallback also failed:', fallbackErr);
 						ocrText = 'Certificate Document\nPlease enter the certificate details manually.';
 						ocrConfidence = 0.2;
 					}
@@ -195,21 +190,19 @@ export async function POST(req: NextRequest) {
 				ocrConfidence = ocrData?.confidence ? ocrData.confidence / 100 : undefined;
 			}
 		} catch (ocrErr: any) {
-			console.error('OCR/PDF extraction failed, continuing without OCR:', ocrErr);
+			// swallow OCR errors; continue with extraction fallback
 		}
 	}
 
 	// Enhanced extraction with Gemini AI + fallback to rule-based
 	let result;
+	let usedGemini = false;
 	try {
 		const llmExtractor = new LLMExtractor();
-		
-		console.log('Attempting Gemini extraction...');
 		const geminiResult = await llmExtractor.structureText(ocrText);
-		
+		usedGemini = true;
 		// Validate Gemini results and merge with rule-based fallback
 		const ruleBasedResult = extractFromText(ocrText, ocrConfidence);
-		
 		result = {
 			raw_text: ocrText,
 			confidence: ocrConfidence,
@@ -219,17 +212,13 @@ export async function POST(req: NextRequest) {
 			date_issued: geminiResult.date_issued || ruleBasedResult.date_issued,
 			description: geminiResult.description || ruleBasedResult.description,
 		};
-		
-		console.log('Gemini extraction successful:', {
-			title: result.title,
-			institution: result.institution,
-			recipient: result.recipient,
-			date: result.date_issued
-		});
-		
 	} catch (error) {
-		console.warn('Gemini extraction failed, using rule-based fallback:', error);
 		result = extractFromText(ocrText, ocrConfidence);
+	}
+
+	// Ensure confidence is always a number 0..1
+	if (typeof result.confidence !== 'number') {
+		result.confidence = usedGemini ? 0.85 : (ocrText ? 0.5 : 0);
 	}
 
 	// If smart verification is enabled, run verification
@@ -260,7 +249,7 @@ export async function POST(req: NextRequest) {
 				);
 			}
 		} catch (error) {
-			console.error('Smart verification failed:', error);
+			// swallow verification errors in response
 		}
 	}
 
