@@ -3,6 +3,7 @@ import { getServerUserWithRole } from '../../../lib/supabaseServer';
 
 export default async function DashboardRedirectPage() {
   const { user, role } = await getServerUserWithRole();
+  
   if (!user) {
     redirect('/login');
   }

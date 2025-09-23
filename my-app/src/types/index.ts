@@ -33,6 +33,7 @@ export interface OcrExtractionResult {
   description?: string;
   raw_text?: string;
   confidence?: number; // 0..1
+  recipient?: string;
 }
 
 // Faculty approval workflow entity

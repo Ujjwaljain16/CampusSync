@@ -56,14 +56,40 @@ async function setupAdmin() {
     const firstUser = users.users[0];
     console.log(`\nAssigning admin role to: ${firstUser.email}`);
     
-    const { error: roleError } = await supabase
+    // First check if user already has a role
+    const { data: existingRole } = await supabase
       .from('user_roles')
-      .upsert({
-        user_id: firstUser.id,
-        role: 'admin',
-        assigned_by: firstUser.id, // Self-assigned for first admin
-        updated_at: new Date().toISOString()
-      });
+      .select('role')
+      .eq('user_id', firstUser.id)
+      .single();
+    
+    let roleError;
+    if (existingRole) {
+      // User already has a role, update it to admin
+      const { error } = await supabase
+        .from('user_roles')
+        .update({
+          role: 'admin',
+          assigned_by: firstUser.id,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', firstUser.id);
+      roleError = error;
+      console.log(`Updating existing role from '${existingRole.role}' to 'admin'`);
+    } else {
+      // User has no role, insert admin role
+      const { error } = await supabase
+        .from('user_roles')
+        .insert({
+          user_id: firstUser.id,
+          role: 'admin',
+          assigned_by: firstUser.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      roleError = error;
+      console.log('Inserting new admin role');
+    }
     
     if (roleError) {
       console.error('Error assigning admin role:', roleError);
