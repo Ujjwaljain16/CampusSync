@@ -254,11 +254,16 @@ export default function AdminDashboardPage() {
                     <td className="p-4">
                       <div>
                         <div className="text-white font-medium">
-                          {user.auth_users?.email || 'Unknown User'}
+                          {user.auth_users?.email || `User ${user.user_id.slice(0, 8)}`}
                         </div>
                         <div className="text-white/60 text-sm">
                           ID: {user.user_id.slice(0, 8)}...
                         </div>
+                        {user.auth_users?.email && (
+                          <div className="text-white/40 text-xs mt-1">
+                            Joined: {new Date(user.auth_users.created_at).toLocaleDateString()}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="p-4">
