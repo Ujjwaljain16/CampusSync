@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
-import LogoutButton from '../../../components/LogoutButton';
+// Logout button is provided globally in layout
 
 interface PendingCert {
   id: string;
@@ -478,7 +478,7 @@ export default function FacultyDashboardPage() {
   }, [loading, error, getFilteredRows, selectedCerts, batchApprove, batchReject, clearSelection, toggleSelect, onApprove, onReject, actioning]);
 
   return (
-    <div className="min-h-[calc(100vh-120px)] bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-10">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-10">
       <div className="max-w-6xl mx-auto px-6">
         {/* Header */}
         <div className="mb-8">
@@ -534,7 +534,6 @@ export default function FacultyDashboardPage() {
               >
                 Clear Selection
               </button>
-              <LogoutButton variant="minimal" />
             </div>
           </div>
           
