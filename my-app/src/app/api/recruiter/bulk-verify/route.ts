@@ -1,0 +1,120 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
+
+export async function POST(request: NextRequest) {
+  try {
+    const { user, role } = await getServerUserWithRole();
+    
+    // Check if user is recruiter or admin
+    if (!user || (role !== 'recruiter' && role !== 'admin')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { student_ids, action } = body;
+
+    if (!student_ids || !Array.isArray(student_ids) || student_ids.length === 0) {
+      return NextResponse.json({ error: 'Student IDs are required' }, { status: 400 });
+    }
+
+    if (!action || !['verify', 'reject'].includes(action)) {
+      return NextResponse.json({ error: 'Action must be "verify" or "reject"' }, { status: 400 });
+    }
+
+    const supabase = await createSupabaseServerClient();
+    const newStatus = action === 'verify' ? 'verified' : 'rejected';
+
+    // Update all certificates for the selected students
+    const { data: certificates, error: fetchError } = await supabase
+      .from('certificates')
+      .select('id, student_id, title, verification_status')
+      .in('student_id', student_ids);
+
+    if (fetchError) {
+      console.error('Error fetching certificates:', fetchError);
+      return NextResponse.json({ error: 'Failed to fetch certificates' }, { status: 500 });
+    }
+
+    if (!certificates || certificates.length === 0) {
+      return NextResponse.json({ error: 'No certificates found for selected students' }, { status: 404 });
+    }
+
+    // Update certificate statuses
+    const { error: updateError } = await supabase
+      .from('certificates')
+      .update({ 
+        verification_status: newStatus,
+        updated_at: new Date().toISOString()
+      })
+      .in('id', certificates.map(c => c.id));
+
+    if (updateError) {
+      console.error('Error updating certificates:', updateError);
+      return NextResponse.json({ error: 'Failed to update certificates' }, { status: 500 });
+    }
+
+    // Create audit logs for the bulk action (align with existing schema)
+    const auditLogs = certificates.map(cert => ({
+      user_id: user.id,
+      action: `bulk_${action}`,
+      target_id: cert.id,
+      details: {
+        student_id: cert.student_id,
+        certificate_title: cert.title,
+        previous_status: cert.verification_status,
+        new_status: newStatus,
+        bulk_action: true
+      },
+      created_at: new Date().toISOString()
+    }));
+
+    const { error: auditError } = await supabase
+      .from('audit_logs')
+      .insert(auditLogs);
+
+    if (auditError) {
+      console.error('Error creating audit logs:', auditError);
+      // Don't fail the request for audit log errors
+    }
+
+    // If verifying, issue VCs for the certificates
+    if (action === 'verify') {
+      try {
+        // Issue VCs for verified certificates
+        const vcPromises = certificates.map(async (cert) => {
+          const vcResponse = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/vc/issue`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${user.id}` // In production, use proper auth
+            },
+            body: JSON.stringify({
+              certificate_id: cert.id,
+              student_id: cert.student_id
+            })
+          });
+
+          if (!vcResponse.ok) {
+            console.error(`Failed to issue VC for certificate ${cert.id}`);
+          }
+        });
+
+        await Promise.allSettled(vcPromises);
+      } catch (vcError) {
+        console.error('Error issuing VCs:', vcError);
+        // Don't fail the request for VC issuance errors
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Successfully ${action}ed ${certificates.length} certificates for ${student_ids.length} students`,
+      updated_certificates: certificates.length,
+      students_affected: student_ids.length
+    });
+
+  } catch (error) {
+    console.error('Bulk verify API error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
