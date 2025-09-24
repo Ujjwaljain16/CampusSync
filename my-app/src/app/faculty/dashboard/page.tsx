@@ -1,12 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-<<<<<<< HEAD
-import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw, History } from 'lucide-react';
-=======
 import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
 // Logout button is provided globally in layout
->>>>>>> frontend
 
 interface PendingCert {
   id: string;
@@ -538,16 +534,12 @@ export default function FacultyDashboardPage() {
               >
                 Clear Selection
               </button>
-<<<<<<< HEAD
               <a
                 href="/faculty/history"
-                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-colors"
+                className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg font-medium transition-colors"
               >
-                <History className="w-4 h-4" />
-                Approval History
+                History
               </a>
-=======
->>>>>>> frontend
             </div>
           </div>
           
