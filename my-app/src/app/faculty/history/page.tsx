@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Clock, CheckCircle, XCircle, RotateCcw, Eye, Calendar, User, FileText, AlertCircle, RefreshCw } from 'lucide-react';
-import LogoutButton from '../../../components/LogoutButton';
 
 interface ApprovalHistory {
   id: string;
@@ -162,7 +161,6 @@ export default function FacultyHistoryPage() {
                 <RefreshCw className="w-4 h-4" />
                 <span>Refresh</span>
               </button>
-              <LogoutButton />
             </div>
           </div>
         </div>
