@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw, History } from 'lucide-react';
-import LogoutButton from '../../../components/LogoutButton';
 
 interface PendingCert {
   id: string;
@@ -541,26 +540,11 @@ export default function FacultyDashboardPage() {
                 <History className="w-4 h-4" />
                 Approval History
               </a>
-              <LogoutButton variant="minimal" />
             </div>
           </div>
           
           {/* Summary Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-yellow-500/20 rounded-lg">
-                  <Clock className="w-5 h-5 text-yellow-400" />
-                </div>
-                <div>
-                  <p className="text-white/60 text-sm">Pending Review</p>
-                  <p className="text-2xl font-bold text-white">
-                    {analytics?.overview.pending || rows.filter(r => !r.auto_approved).length}
-                  </p>
-                </div>
-              </div>
-            </div>
-            
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-red-500/20 rounded-lg">
@@ -569,7 +553,7 @@ export default function FacultyDashboardPage() {
                 <div>
                   <p className="text-white/60 text-sm">Low Confidence</p>
                   <p className="text-2xl font-bold text-white">
-                    {analytics?.confidenceDistribution.low || rows.filter(r => (r.confidence_score || 0) < 0.7).length}
+                    {rows.filter(r => (r.confidence_score || 0) < 0.7).length}
                   </p>
                 </div>
               </div>
@@ -583,7 +567,7 @@ export default function FacultyDashboardPage() {
                 <div>
                   <p className="text-white/60 text-sm">Auto-Approved</p>
                   <p className="text-2xl font-bold text-white">
-                    {analytics?.overview.autoApproved || rows.filter(r => r.auto_approved).length}
+                    {rows.filter(r => r.auto_approved).length}
                   </p>
                 </div>
               </div>
@@ -595,9 +579,9 @@ export default function FacultyDashboardPage() {
                   <Star className="w-5 h-5 text-purple-400" />
                 </div>
                 <div>
-                  <p className="text-white/60 text-sm">Total</p>
+                  <p className="text-white/60 text-sm">Pending Review</p>
                   <p className="text-2xl font-bold text-white">
-                    {analytics?.overview.totalCertificates || rows.length}
+                    {rows.length}
                   </p>
                 </div>
               </div>
