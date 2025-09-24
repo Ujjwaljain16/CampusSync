@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
+import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw, History } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 
 interface PendingCert {
@@ -534,6 +534,13 @@ export default function FacultyDashboardPage() {
               >
                 Clear Selection
               </button>
+              <a
+                href="/faculty/history"
+                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-colors"
+              >
+                <History className="w-4 h-4" />
+                Approval History
+              </a>
               <LogoutButton variant="minimal" />
             </div>
           </div>

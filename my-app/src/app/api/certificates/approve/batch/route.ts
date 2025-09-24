@@ -37,8 +37,7 @@ export async function POST(req: NextRequest) {
       await supabase.from('audit_logs').insert({
         user_id: user?.id ?? null,
         action: item.status === 'approved' ? 'manual_approve' : 'manual_reject',
-        entity_type: 'certificate',
-        entity_id: item.id,
+        target_id: item.id,
         details: { reason: item.reason ?? null, metadataId: item.metadataId ?? null },
         created_at: new Date().toISOString(),
       });
