@@ -80,6 +80,24 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // Audit log for batch action
+        try {
+          await supabase.from('audit_logs').insert({
+            user_id: user?.id ?? null,
+            action: action === 'approve' ? 'batch_approve' : 'batch_reject',
+            target_id: certificateId,
+            details: { 
+              action,
+              batchSize: certificateIds.length,
+              batchIndex: certificateIds.indexOf(certificateId) + 1
+            },
+            created_at: new Date().toISOString(),
+          });
+        } catch (auditError) {
+          console.error('Failed to log batch action:', auditError);
+          // Don't fail the operation if audit logging fails
+        }
+
         results.push({ certificateId, success: true });
 
       } catch (error: any) {

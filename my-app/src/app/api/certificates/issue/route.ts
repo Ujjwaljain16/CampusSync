@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 		}
 		// Only allow issuing for own certificate unless faculty/admin
 		const isOwner = cert.user_id === user.id;
-		const canIssueOnBehalf = role === 'admin';
+		const canIssueOnBehalf = role === 'admin' || role === 'faculty';
 		if (!isOwner && !canIssueOnBehalf) {
 			return NextResponse.json({ error: 'Forbidden to issue for another user' }, { status: 403 });
 		}
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
 		};
 	} else if (subject) {
 		const isSelfIssue = subject.id === user.id;
-		const canIssueOnBehalf = role === 'admin';
+		const canIssueOnBehalf = role === 'admin' || role === 'faculty';
 		if (!isSelfIssue && !canIssueOnBehalf) {
 			return NextResponse.json({ error: 'Forbidden to issue for another user' }, { status: 403 });
 		}
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
 	const now = new Date().toISOString();
 	const { error } = await supabase.from('verifiable_credentials').insert({
 		id: vc.id,
-		user_id: user.id,
+		user_id: subject.id, // Store with certificate owner's user_id, not issuer's
 		issuer: vc.issuer,
 		issuance_date: vc.issuanceDate,
 		credential: vc,
