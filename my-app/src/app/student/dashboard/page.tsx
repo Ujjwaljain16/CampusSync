@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Share2, Star, Zap, Shield, Brain, FileText, Upload, ExternalLink, Trash2 } from 'lucide-react';
-import LogoutButton from '../../../components/LogoutButton';
+// LogoutButton is already rendered in layout, avoid duplicate here
 
 interface Row {
   id: string;
@@ -542,7 +542,7 @@ export default function StudentDashboard() {
   }, [rows, loading, error, confidence, details]);
 
   return (
-    <div className="min-h-[calc(100vh-120px)] bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-10">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-10">
       <div className="max-w-6xl mx-auto px-6">
         {/* Header */}
         <div className="mb-6 md:mb-8">
@@ -577,7 +577,6 @@ export default function StudentDashboard() {
                 <span className="hidden sm:inline">{exporting ? 'Generating...' : 'Export PDF'}</span>
                 <span className="sm:hidden">{exporting ? '...' : 'PDF'}</span>
               </button>
-              <LogoutButton variant="minimal" />
             </div>
           </div>
         </div>
