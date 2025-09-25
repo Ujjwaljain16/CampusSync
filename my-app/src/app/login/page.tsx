@@ -93,8 +93,22 @@ export default function LoginPage() {
             throw new Error('Failed to establish session');
           }
           
-          console.log('Session set successfully, redirecting to dashboard...');
-          window.location.href = "/dashboard";
+          // Ask server where to go based on role, with session cookies applied server-side
+          const completeResp = await fetch('/api/auth/complete-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              access_token: data.session.access_token,
+              refresh_token: data.session.refresh_token,
+            })
+          });
+          const completeJson = await completeResp.json().catch(() => ({} as any));
+          if (!completeResp.ok || !completeJson?.redirectTo) {
+            console.error('Complete-login failed, falling back to /dashboard', completeJson);
+            window.location.href = '/dashboard';
+          } else {
+            window.location.href = completeJson.redirectTo;
+          }
         } else {
           throw new Error('Authentication failed');
         }
@@ -127,8 +141,19 @@ export default function LoginPage() {
                   refresh_token: signInData.session.refresh_token
                 })
               });
+              const completeResp = await fetch('/api/auth/complete-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  access_token: signInData.session.access_token,
+                  refresh_token: signInData.session.refresh_token
+                })
+              });
+              const completeJson = await completeResp.json().catch(() => ({} as any));
+              window.location.href = completeJson?.redirectTo || '/dashboard';
+            } else {
+              window.location.href = '/dashboard';
             }
-            window.location.href = '/dashboard';
             return;
           } catch (e: any) {
             setError(e?.message || 'Signup failed');
