@@ -23,6 +23,10 @@ export default function LoginPage() {
   const [major, setMajor] = useState("");
   const [location, setLocation] = useState("");
   const [gpa, setGpa] = useState<string>("");
+  // Desired access (optional elevation)
+  const [wantRecruiter, setWantRecruiter] = useState(false);
+  const [wantFaculty, setWantFaculty] = useState(false);
+  const [wantAdmin, setWantAdmin] = useState(false);
 
   // Remove automatic redirect - let middleware handle it
   // This prevents infinite redirect loops
@@ -185,6 +189,15 @@ export default function LoginPage() {
                   gpa: gpa ? Number(gpa) : undefined,
                 })
               });
+              // Submit role request if needed
+              const desired = wantAdmin ? 'admin' : wantFaculty ? 'faculty' : wantRecruiter ? 'recruiter' : null;
+              if (desired && desired !== 'student') {
+                await fetch('/api/role-requests', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ requested_role: desired, metadata: { university, company: university, major, location } })
+                }).catch(()=>null);
+              }
               const completeResp = await fetch('/api/auth/complete-login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -194,7 +207,11 @@ export default function LoginPage() {
                 })
               });
               const completeJson = await completeResp.json().catch(() => ({} as any));
-              window.location.href = completeJson?.redirectTo || '/dashboard';
+              if (desired && desired !== 'student') {
+                window.location.href = '/waiting';
+              } else {
+                window.location.href = completeJson?.redirectTo || '/dashboard';
+              }
             } else {
               window.location.href = '/dashboard';
             }
@@ -239,6 +256,14 @@ export default function LoginPage() {
               })
             });
             if (complete.ok) {
+              const desired = wantAdmin ? 'admin' : wantFaculty ? 'faculty' : wantRecruiter ? 'recruiter' : null;
+              if (desired && desired !== 'student') {
+                await fetch('/api/role-requests', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ requested_role: desired, metadata: { university, company: university, major, location } })
+                }).catch(()=>null);
+              }
               const go = await fetch('/api/auth/complete-login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -248,7 +273,11 @@ export default function LoginPage() {
                 })
               });
               const payload = await go.json().catch(() => ({} as any));
-              window.location.href = payload?.redirectTo || '/dashboard';
+              if (desired && desired !== 'student') {
+                window.location.href = '/waiting';
+              } else {
+                window.location.href = payload?.redirectTo || '/dashboard';
+              }
               return;
             }
           }
@@ -382,86 +411,24 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-3">
-                    <label htmlFor="university" className="cv-form-label text-white font-semibold">University</label>
-                    <div className="cv-input-wrapper">
-                      <Building className="cv-input-icon" />
-                      <input
-                        id="university"
-                        type="text"
-                        value={university}
-                        onChange={(e) => setUniversity(e.target.value)}
-                        className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
-                        placeholder="Stanford University"
-                      />
-                    </div>
+                {/* Desired Access (optional) */}
+                <div className="mt-2 space-y-2">
+                  <p className="text-white/80 font-semibold">Access type (optional)</p>
+                  <div className="flex flex-wrap gap-4 text-white/90">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={wantRecruiter} onChange={(e)=>setWantRecruiter(e.target.checked)} />
+                      Recruiter
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={wantFaculty} onChange={(e)=>setWantFaculty(e.target.checked)} />
+                      Faculty
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={wantAdmin} onChange={(e)=>setWantAdmin(e.target.checked)} />
+                      Admin
+                    </label>
                   </div>
-                  <div className="space-y-3">
-                    <label htmlFor="graduation_year" className="cv-form-label text-white font-semibold">Graduation Year</label>
-                    <div className="cv-input-wrapper">
-                      <Calendar className="cv-input-icon" />
-                      <input
-                        id="graduation_year"
-                        type="number"
-                        min="1900"
-                        max="2100"
-                        value={graduationYear}
-                        onChange={(e) => setGraduationYear(e.target.value)}
-                        className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
-                        placeholder="2026"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-3">
-                    <label htmlFor="major" className="cv-form-label text-white font-semibold">Major</label>
-                    <div className="cv-input-wrapper">
-                      <GraduationCap className="cv-input-icon" />
-                      <input
-                        id="major"
-                        type="text"
-                        value={major}
-                        onChange={(e) => setMajor(e.target.value)}
-                        className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
-                        placeholder="Computer Science"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    <label htmlFor="location" className="cv-form-label text-white font-semibold">Location</label>
-                    <div className="cv-input-wrapper">
-                      <MapPin className="cv-input-icon" />
-                      <input
-                        id="location"
-                        type="text"
-                        value={location}
-                        onChange={(e) => setLocation(e.target.value)}
-                        className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
-                        placeholder="Palo Alto, CA"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <label htmlFor="gpa" className="cv-form-label text-white font-semibold">GPA (optional)</label>
-                  <div className="cv-input-wrapper">
-                    <Star className="cv-input-icon" />
-                    <input
-                      id="gpa"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="10"
-                      value={gpa}
-                      onChange={(e) => setGpa(e.target.value)}
-                      className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
-                      placeholder="8.5"
-                    />
-                  </div>
+                  <p className="text-xs text-white/60">Selecting non-student access sends a request to admins for approval.</p>
                 </div>
               </>
             )}
