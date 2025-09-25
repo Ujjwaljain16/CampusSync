@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
 import { validateStudentEmailSync } from "../../../lib/emailValidation";
-import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Check } from "lucide-react";
+import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Check, Building, Calendar, GraduationCap, MapPin, Star } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,6 +16,13 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
+  // Signup-only fields
+  const [fullName, setFullName] = useState("");
+  const [university, setUniversity] = useState("");
+  const [graduationYear, setGraduationYear] = useState<string>("");
+  const [major, setMajor] = useState("");
+  const [location, setLocation] = useState("");
+  const [gpa, setGpa] = useState<string>("");
 
   // Remove automatic redirect - let middleware handle it
   // This prevents infinite redirect loops
@@ -60,6 +67,13 @@ export default function LoginPage() {
         const validation = validateStudentEmail(email);
         if (!validation.isValid) {
           setEmailError(validation.error || 'Invalid email');
+          setLoading(false);
+          return;
+        }
+
+        // Basic required field check
+        if (!fullName.trim()) {
+          setError('Please provide your full name');
           setLoading(false);
           return;
         }
@@ -114,7 +128,22 @@ export default function LoginPage() {
         }
       } else {
         if (process.env.NODE_ENV === 'development') {
-          // Bypass Supabase signUp entirely in development
+          // In development, first check if the account already exists by attempting sign-in.
+          try {
+            const precheck = await supabase.auth.signInWithPassword({
+              email: email.trim(),
+              password,
+            });
+            if (precheck.data?.user) {
+              setError('Email already registered. Please sign in.');
+              setLoading(false);
+              return;
+            }
+          } catch (_) {
+            // Ignore; proceed to dev upsert flow
+          }
+
+          // Bypass Supabase signUp entirely in development by creating the user directly
           try {
             const resp = await fetch('/api/auth/dev-upsert-user', {
               method: 'POST',
@@ -141,6 +170,21 @@ export default function LoginPage() {
                   refresh_token: signInData.session.refresh_token
                 })
               });
+              // Complete signup with profile details
+              await fetch('/api/auth/complete-signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  access_token: signInData.session.access_token,
+                  refresh_token: signInData.session.refresh_token,
+                  full_name: fullName.trim(),
+                  university: university.trim() || undefined,
+                  graduation_year: graduationYear ? Number(graduationYear) : undefined,
+                  major: major.trim() || undefined,
+                  location: location.trim() || undefined,
+                  gpa: gpa ? Number(gpa) : undefined,
+                })
+              });
               const completeResp = await fetch('/api/auth/complete-login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -164,12 +208,51 @@ export default function LoginPage() {
             email: email.trim(),
             password,
           });
-          if (signUpError) throw signUpError;
-          if (data.user && !data.user.email_confirmed_at) {
-            setError('Account created! Please check your email and click the confirmation link to complete your registration. After confirming, you can sign in with your credentials.');
+          if (signUpError) {
+            const lower = (signUpError.message || '').toLowerCase();
+            if (lower.includes('already') || lower.includes('registered') || lower.includes('exists')) {
+              setError('Email already registered. Please sign in.');
+            } else {
+              setError(signUpError.message || 'Signup failed');
+            }
+            setLoading(false);
             return;
           }
-          window.location.href = '/dashboard';
+          if (data.user && !data.user.email_confirmed_at) {
+            setError('Account created! Please check your email and click the confirmation link to complete your registration. After confirming, sign in to continue.');
+            return;
+          }
+          // If email confirmation is disabled in dev, complete signup immediately with minimal details
+          if (process.env.NODE_ENV === 'development' && data.session?.access_token && data.session?.refresh_token) {
+            const complete = await fetch('/api/auth/complete-signup', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                access_token: data.session.access_token,
+                refresh_token: data.session.refresh_token,
+                full_name: fullName.trim() || 'New Student',
+                university: university.trim() || undefined,
+                graduation_year: graduationYear ? Number(graduationYear) : undefined,
+                major: major.trim() || undefined,
+                location: location.trim() || undefined,
+                gpa: gpa ? Number(gpa) : undefined,
+              })
+            });
+            if (complete.ok) {
+              const go = await fetch('/api/auth/complete-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  access_token: data.session.access_token,
+                  refresh_token: data.session.refresh_token
+                })
+              });
+              const payload = await go.json().catch(() => ({} as any));
+              window.location.href = payload?.redirectTo || '/dashboard';
+              return;
+            }
+          }
+          window.location.href = '/login';
         }
       }
     } catch (err: unknown) {
@@ -282,6 +365,106 @@ export default function LoginPage() {
 
           {/* Form */}
           <form onSubmit={handleSubmit} noValidate className="space-y-6" id={mode === "login" ? "login-panel" : "signup-panel"}>
+            {mode === 'signup' && (
+              <>
+                <div className="space-y-3">
+                  <label htmlFor="full_name" className="cv-form-label text-white font-semibold">Full Name</label>
+                  <div className="cv-input-wrapper">
+                    <input
+                      id="full_name"
+                      type="text"
+                      required
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      className="cv-form-input cv-input-focus-ring bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
+                      placeholder="Jane Doe"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-3">
+                    <label htmlFor="university" className="cv-form-label text-white font-semibold">University</label>
+                    <div className="cv-input-wrapper">
+                      <Building className="cv-input-icon" />
+                      <input
+                        id="university"
+                        type="text"
+                        value={university}
+                        onChange={(e) => setUniversity(e.target.value)}
+                        className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
+                        placeholder="Stanford University"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <label htmlFor="graduation_year" className="cv-form-label text-white font-semibold">Graduation Year</label>
+                    <div className="cv-input-wrapper">
+                      <Calendar className="cv-input-icon" />
+                      <input
+                        id="graduation_year"
+                        type="number"
+                        min="1900"
+                        max="2100"
+                        value={graduationYear}
+                        onChange={(e) => setGraduationYear(e.target.value)}
+                        className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
+                        placeholder="2026"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-3">
+                    <label htmlFor="major" className="cv-form-label text-white font-semibold">Major</label>
+                    <div className="cv-input-wrapper">
+                      <GraduationCap className="cv-input-icon" />
+                      <input
+                        id="major"
+                        type="text"
+                        value={major}
+                        onChange={(e) => setMajor(e.target.value)}
+                        className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
+                        placeholder="Computer Science"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <label htmlFor="location" className="cv-form-label text-white font-semibold">Location</label>
+                    <div className="cv-input-wrapper">
+                      <MapPin className="cv-input-icon" />
+                      <input
+                        id="location"
+                        type="text"
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
+                        placeholder="Palo Alto, CA"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label htmlFor="gpa" className="cv-form-label text-white font-semibold">GPA (optional)</label>
+                  <div className="cv-input-wrapper">
+                    <Star className="cv-input-icon" />
+                    <input
+                      id="gpa"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="10"
+                      value={gpa}
+                      onChange={(e) => setGpa(e.target.value)}
+                      className="cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
+                      placeholder="8.5"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
             <div className="space-y-3">
               <label htmlFor="email" className="cv-form-label text-white font-semibold">
                 Email Address
