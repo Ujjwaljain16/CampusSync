@@ -21,8 +21,8 @@ export async function POST(request: NextRequest) {
 	try {
 		const { access_token, refresh_token, full_name, university, graduation_year, major, location, gpa } = await request.json();
 
-		if (!access_token || !refresh_token || !full_name) {
-			return NextResponse.json({ error: 'Missing tokens or full_name' }, { status: 400 });
+		if (!access_token || !refresh_token) {
+			return NextResponse.json({ error: 'Missing tokens' }, { status: 400 });
 		}
 
 		const response = NextResponse.json({ ok: true });
@@ -57,37 +57,34 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json({ error: userError?.message || 'User not found' }, { status: 500 });
 		}
 
-		// Upsert profile with best-effort extras; fall back to minimal if schema lacks columns
-		const attempt = coerceProfilePayload({ id: user.id }, { full_name, university, graduation_year, major, location, gpa });
-		let profileError: any = null;
-		try {
-			const { error } = await supabase.from('profiles').upsert(attempt, { onConflict: 'id' });
-			profileError = error;
-		} catch (e: any) {
-			console.error('[complete-signup] profile upsert exception:', e);
-			profileError = e;
-		}
-		if (profileError) {
-			// Retry with only known-safe columns
-			const minimal = { id: user.id, full_name, role: 'student' };
-			const { error: retryErr } = await supabase.from('profiles').upsert(minimal, { onConflict: 'id' });
-			if (retryErr) {
-				console.error('[complete-signup] minimal profile upsert failed:', retryErr);
-				return NextResponse.json({ error: retryErr.message || 'Profile upsert failed' }, { status: 500 });
+		// If a full_name is provided, upsert profile; otherwise skip and rely on onboarding later
+		if (typeof full_name === 'string' && full_name.trim().length > 0) {
+			const attempt = coerceProfilePayload({ id: user.id }, { full_name, university, graduation_year, major, location, gpa });
+			let profileError: any = null;
+			try {
+				const { error } = await supabase.from('profiles').upsert(attempt, { onConflict: 'id' });
+				profileError = error;
+			} catch (e: any) {
+				console.error('[complete-signup] profile upsert exception:', e);
+				profileError = e;
+			}
+			if (profileError) {
+				// Retry with only known-safe columns
+				const minimal = { id: user.id, full_name, role: 'student' } as any;
+				const { error: retryErr } = await supabase.from('profiles').upsert(minimal, { onConflict: 'id' });
+				if (retryErr) {
+					console.error('[complete-signup] minimal profile upsert failed:', retryErr);
+					return NextResponse.json({ error: retryErr.message || 'Profile upsert failed' }, { status: 500 });
+				}
 			}
 		}
 
 		// Ensure user_roles has student role (best-effort under RLS)
 		try {
-			const { error: roleErr } = await supabase
-				.from('user_roles')
-				.upsert({ user_id: user.id, role: 'student', assigned_by: user.id }, { onConflict: 'user_id' });
-			if (roleErr) {
-				console.error('[complete-signup] role upsert error:', roleErr);
-				// Ignore RLS errors – role may already exist, and middleware gates access anyway
-			}
+			// Prefer server-side RPC to avoid client RLS friction
+			await supabase.rpc('ensure_student_role', { p_user_id: user.id });
 		} catch (e) {
-			console.error('[complete-signup] role write exception:', e);
+			console.error('[complete-signup] ensure_student_role exception:', e);
 		}
 
 		return response;
