@@ -143,8 +143,13 @@ export default function LoginPage() {
               setLoading(false);
               return;
             }
-          } catch (_) {
-            // Ignore; proceed to dev upsert flow
+          } catch (precheckError: any) {
+            // Expected error if account doesn't exist - proceed with signup
+            if (precheckError?.status === 400) {
+              console.log('Account does not exist, proceeding with signup');
+            } else {
+              console.warn('Unexpected error during precheck:', precheckError);
+            }
           }
 
           // Bypass Supabase signUp entirely in development by creating the user directly

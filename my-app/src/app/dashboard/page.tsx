@@ -16,18 +16,27 @@ export default async function DashboardRedirectPage() {
     redirect('/faculty/dashboard');
   }
 
-  // Onboarding gate: if profile missing minimal info, send to /onboarding
-  try {
-    const supabase = await createSupabaseServerClient();
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('id', user.id)
-      .maybeSingle();
-    if (!prof || !prof.full_name) {
+  // For students, always check if profile is complete
+  if (role === 'student') {
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('full_name, university, graduation_year, major')
+        .eq('id', user.id)
+        .maybeSingle();
+      
+      // If profile is missing or incomplete, redirect to onboarding
+      if (!prof || !prof.full_name || !prof.university || !prof.graduation_year || !prof.major) {
+        console.log('Student profile incomplete, redirecting to onboarding');
+        redirect('/onboarding');
+      }
+    } catch (error) {
+      console.error('Error checking profile:', error);
+      // If we can't check profile, redirect to onboarding to be safe
       redirect('/onboarding');
     }
-  } catch {}
+  }
 
   redirect('/student/dashboard');
 }
