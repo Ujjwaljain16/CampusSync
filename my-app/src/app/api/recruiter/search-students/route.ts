@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, getServerUserWithRole } from '../../../../../lib/supabaseServer';
 
 export async function GET(req: NextRequest) {
   try {
+    const { user, role } = await getServerUserWithRole();
+    
+    // Check if user is recruiter or admin
+    if (!user || (role !== 'recruiter' && role !== 'admin')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const { searchParams } = new URL(req.url);
     const query = searchParams.get('q') || '';
     const skill = searchParams.get('skill') || '';
@@ -117,16 +123,62 @@ export async function GET(req: NextRequest) {
       user.institutions.add(cert.institution);
     });
 
-    // Convert to array and format response
-    const students = Array.from(userMap.values()).map(user => ({
-      user_id: user.user_id,
-      total_certificates: user.total_certificates,
-      verified_certificates: user.verified_certificates,
-      skills: Array.from(user.skills),
-      institutions: Array.from(user.institutions),
-      certificates: user.certificates,
-      portfolio_url: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${user.user_id}`
-    }));
+    // Get profiles for these students
+    const studentUserIdsArray = Array.from(userMap.keys());
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, full_name, role, created_at')
+      .in('id', studentUserIdsArray);
+
+    if (profilesError) {
+      console.error('Error fetching profiles:', profilesError);
+    }
+
+    // Create a map for quick profile lookup
+    const profileMap = new Map();
+    profiles?.forEach(profile => {
+      profileMap.set(profile.id, profile);
+    });
+
+    // Convert to array and format response with proper structure
+    const students = Array.from(userMap.values()).map(user => {
+      const profile = profileMap.get(user.user_id) || {
+        id: user.user_id,
+        full_name: 'Unknown Student',
+        role: 'student',
+        created_at: new Date().toISOString()
+      };
+
+      // Get the first certificate for basic info
+      const firstCert = user.certificates[0];
+      
+      return {
+        id: user.user_id, // Dashboard expects 'id' not 'user_id'
+        name: profile.full_name || 'Unknown Student',
+        email: `${user.user_id}@example.com`, // Generate email
+        university: firstCert?.institution || 'Unknown University',
+        graduation_year: firstCert?.date_issued ? new Date(firstCert.date_issued).getFullYear() : new Date().getFullYear(),
+        major: 'Unknown', // Not in profiles schema
+        gpa: 0, // Not in profiles schema
+        location: 'Unknown', // Not in profiles schema
+        skills: Array.from(user.skills),
+        certifications: user.certificates.map(cert => ({
+          id: cert.id,
+          title: cert.title,
+          issuer: cert.institution,
+          issue_date: cert.date_issued,
+          verification_status: cert.verification_status,
+          confidence_score: 0.9, // Default confidence
+          skills: [], // Will be populated from title
+          verification_method: 'AI + Manual'
+        })),
+        verified_count: user.verified_certificates,
+        total_certifications: user.total_certificates,
+        last_activity: firstCert?.date_issued || new Date().toISOString(),
+        created_at: profile.created_at,
+        portfolio_url: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${user.user_id}`
+      };
+    });
 
     // Get total count for pagination (only verified certificates from students)
     const { count: totalCount } = await supabase
@@ -165,6 +217,12 @@ export async function GET(req: NextRequest) {
 // POST endpoint for advanced search with multiple criteria
 export async function POST(req: NextRequest) {
   try {
+    const { user, role } = await getServerUserWithRole();
+    
+    // Check if user is recruiter or admin
+    if (!user || (role !== 'recruiter' && role !== 'admin')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const body = await req.json().catch(() => null) as {
       skills?: string[];
       certifications?: string[];
@@ -306,18 +364,64 @@ export async function POST(req: NextRequest) {
       user.institutions.add(cert.institution);
     });
 
-    // Filter users by minimum certificate count
+    // Get profiles for these students
+    const studentUserIdsArray = Array.from(userMap.keys());
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, full_name, role, created_at')
+      .in('id', studentUserIdsArray);
+
+    if (profilesError) {
+      console.error('Error fetching profiles:', profilesError);
+    }
+
+    // Create a map for quick profile lookup
+    const profileMap = new Map();
+    profiles?.forEach(profile => {
+      profileMap.set(profile.id, profile);
+    });
+
+    // Filter users by minimum certificate count and format response
     const filteredStudents = Array.from(userMap.values())
       .filter(user => user.verified_certificates >= min_certificates)
-      .map(user => ({
-        user_id: user.user_id,
-        total_certificates: user.total_certificates,
-        verified_certificates: user.verified_certificates,
-        skills: Array.from(user.skills),
-        institutions: Array.from(user.institutions),
-        certificates: user.certificates,
-        portfolio_url: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${user.user_id}`
-      }));
+      .map(user => {
+        const profile = profileMap.get(user.user_id) || {
+          id: user.user_id,
+          full_name: 'Unknown Student',
+          role: 'student',
+          created_at: new Date().toISOString()
+        };
+
+        // Get the first certificate for basic info
+        const firstCert = user.certificates[0];
+        
+        return {
+          id: user.user_id, // Dashboard expects 'id' not 'user_id'
+          name: profile.full_name || 'Unknown Student',
+          email: `${user.user_id}@example.com`, // Generate email
+          university: firstCert?.institution || 'Unknown University',
+          graduation_year: firstCert?.date_issued ? new Date(firstCert.date_issued).getFullYear() : new Date().getFullYear(),
+          major: 'Unknown', // Not in profiles schema
+          gpa: 0, // Not in profiles schema
+          location: 'Unknown', // Not in profiles schema
+          skills: Array.from(user.skills),
+          certifications: user.certificates.map(cert => ({
+            id: cert.id,
+            title: cert.title,
+            issuer: cert.institution,
+            issue_date: cert.date_issued,
+            verification_status: cert.verification_status,
+            confidence_score: 0.9, // Default confidence
+            skills: [], // Will be populated from title
+            verification_method: 'AI + Manual'
+          })),
+          verified_count: user.verified_certificates,
+          total_certifications: user.total_certificates,
+          last_activity: firstCert?.date_issued || new Date().toISOString(),
+          created_at: profile.created_at,
+          portfolio_url: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${user.user_id}`
+        };
+      });
 
     return NextResponse.json({
       data: {

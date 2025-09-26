@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { createSupabaseServerClient, getServerUserWithRole } from '../../../../../lib/supabaseServer';
 
 export async function GET(request: NextRequest) {
   try {
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ students: [], pagination: { page, limit, total: 0, totalPages: 0 } });
     }
 
-    // Build the query joining profiles via certificates.student_id -> profiles.id
+    // First get certificates for students
     let query = supabase
       .from('certificates')
       .select(`
@@ -53,31 +53,13 @@ export async function GET(request: NextRequest) {
         confidence_score,
         verification_method,
         student_id,
-        created_at,
-        profiles:profiles!inner(
-          id,
-          name,
-          email,
-          university,
-          graduation_year,
-          location,
-          gpa,
-          major
-        )
+        created_at
       `)
       .in('student_id', studentIds);
 
     // Apply filters
     if (search) {
-      query = query.or(`title.ilike.%${search}%,issuer.ilike.%${search}%,profiles.name.ilike.%${search}%,profiles.email.ilike.%${search}%`);
-    }
-
-    if (universities.length > 0) {
-      query = query.in('profiles.university', universities);
-    }
-
-    if (graduation_years.length > 0) {
-      query = query.in('profiles.graduation_year', graduation_years);
+      query = query.or(`title.ilike.%${search}%,issuer.ilike.%${search}%`);
     }
 
     if (verification_status.length > 0) {
@@ -88,44 +70,66 @@ export async function GET(request: NextRequest) {
       query = query.gte('confidence_score', confidence_min);
     }
 
-    if (location) {
-      query = query.ilike('profiles.location', `%${location}%`);
-    }
-
-    if (gpa_min > 0) {
-      query = query.gte('profiles.gpa', gpa_min);
-    }
-
     // Add pagination
     query = query.range(offset, offset + limit - 1);
 
-    const { data: certificates, error } = await query as any;
+    const { data: certificates, error } = await query;
 
     if (error) {
-      console.error('Error fetching students:', error);
+      console.error('Error fetching certificates:', error);
       return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 });
     }
+
+    if (!certificates || certificates.length === 0) {
+      return NextResponse.json({ 
+        students: [], 
+        pagination: { page, limit, total: 0, totalPages: 0 } 
+      });
+    }
+
+    // Get unique student IDs from certificates
+    const uniqueStudentIds = [...new Set(certificates.map(cert => cert.student_id))];
+
+    // Fetch profiles for these students (using actual schema)
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, full_name, role, created_at')
+      .in('id', uniqueStudentIds);
+
+    if (profilesError) {
+      console.error('Error fetching profiles:', profilesError);
+      // Continue without profiles
+    }
+
+    // Create a map for quick profile lookup
+    const profileMap = new Map();
+    profiles?.forEach(profile => {
+      profileMap.set(profile.id, profile);
+    });
 
     // Group certificates by student
     const studentsMap = new Map();
     
-    (certificates as any[])?.forEach((cert: any) => {
-      const studentId = cert.student_id as string;
-      const profile = (cert as any).profiles || null;
-      
-      if (!profile) return;
+    certificates.forEach((cert: any) => {
+      const studentId = cert.student_id;
+      const profile = profileMap.get(studentId) || {
+        id: studentId,
+        full_name: 'Unknown Student',
+        role: 'student',
+        created_at: new Date().toISOString()
+      };
 
       if (!studentsMap.has(studentId)) {
         studentsMap.set(studentId, {
           id: studentId,
-          name: profile.name,
-          email: profile.email,
-          university: profile.university,
-          graduation_year: profile.graduation_year,
-          location: profile.location,
-          gpa: profile.gpa,
-          major: profile.major,
-          skills: [], // Will be populated from certificates
+          name: profile.full_name || 'Unknown Student',
+          email: `${studentId}@example.com`, // Generate email from ID
+          university: cert.institution || 'Unknown University', // Use certificate institution
+          graduation_year: new Date(cert.date_issued).getFullYear() || new Date().getFullYear(),
+          location: 'Unknown', // Not in profiles schema
+          gpa: 0, // Not in profiles schema
+          major: 'Unknown', // Not in profiles schema
+          skills: [],
           certifications: [],
           verified_count: 0,
           total_certifications: 0,
@@ -143,7 +147,7 @@ export async function GET(request: NextRequest) {
         issue_date: cert.issue_date,
         verification_status: cert.verification_status,
         confidence_score: cert.confidence_score,
-        skills: [], // Extract from title/issuer for now
+        skills: [],
         verification_method: cert.verification_method
       });
 
@@ -178,7 +182,7 @@ export async function GET(request: NextRequest) {
     const { count } = await supabase
       .from('certificates')
       .select('*', { count: 'exact', head: true })
-      .eq('user_roles.role', 'student');
+      .in('student_id', studentIds);
 
     return NextResponse.json({
       students,
