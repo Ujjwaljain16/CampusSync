@@ -25,6 +25,7 @@ export default function AdminDashboardPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('student');
   const [inviting, setInviting] = useState(false);
+  const [pendingCount, setPendingCount] = useState<number>(0);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -43,6 +44,13 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     fetchUsers();
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/role-requests/count');
+        const json = await res.json();
+        if (res.ok) setPendingCount(json.pending || 0);
+      } catch {}
+    })();
   }, [fetchUsers]);
 
   const updateUserRole = useCallback(async (userId: string, newRole: string) => {
@@ -156,6 +164,17 @@ export default function AdminDashboardPage() {
               >
                 <BarChart3 className="w-5 h-5" />
                 View Analytics
+              </a>
+              <a
+                href="/admin/role-requests"
+                className="bg-white/10 hover:bg-white/20 text-white px-6 py-3 rounded-xl font-medium transition-colors flex items-center gap-2 relative"
+              >
+                Pending Requests
+                {pendingCount > 0 && (
+                  <span className="ml-2 inline-flex items-center justify-center text-xs bg-red-600 text-white rounded-full px-2 py-0.5">
+                    {pendingCount}
+                  </span>
+                )}
               </a>
               <LogoutButton variant="danger" />
             </div>
