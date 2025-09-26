@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, UserPlus, Mail, BarChart3 } from 'lucide-react';
+import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, UserPlus, Mail, BarChart3, Crown, Lock } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 
 interface UserWithRole {
@@ -53,14 +53,41 @@ export default function AdminDashboardPage() {
     })();
   }, [fetchUsers]);
 
-  const updateUserRole = useCallback(async (userId: string, newRole: string) => {
+  const updateUserRole = useCallback(async (userId: string, newRole: string, currentRole: string) => {
+    // Show confirmation dialog with warnings
+    const warnings = getRoleChangeWarnings(currentRole, newRole);
+    const confirmMessage = `Are you sure you want to change this user's role from ${currentRole} to ${newRole}?\n\n${warnings}`;
+    
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    // For admin demotions, require a detailed reason
+    let reason = `Role changed from ${currentRole} to ${newRole} by admin`;
+    if (currentRole === 'admin' && newRole !== 'admin') {
+      const detailedReason = window.prompt(
+        `Admin demotion requires a detailed reason (minimum 10 characters):\n\n` +
+        `Why are you demoting this admin from ${currentRole} to ${newRole}?`
+      );
+      
+      if (!detailedReason || detailedReason.length < 10) {
+        setError('Admin demotion requires a detailed reason (minimum 10 characters)');
+        return;
+      }
+      reason = detailedReason;
+    }
+
     setActioning(userId);
     setError(null);
     try {
-      const res = await fetch('/api/admin/roles', {
+      const res = await fetch('/api/admin/roles/change', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, role: newRole }),
+        body: JSON.stringify({ 
+          user_id: userId, 
+          new_role: newRole,
+          reason: reason
+        })
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to update role');
@@ -71,6 +98,41 @@ export default function AdminDashboardPage() {
       setActioning(null);
     }
   }, [fetchUsers]);
+
+  const getRoleChangeWarnings = (fromRole: string, toRole: string, isSuperAdmin: boolean = false): string => {
+    const warnings = [];
+    
+    if (isSuperAdmin && toRole !== 'admin') {
+      warnings.push('🚨 CRITICAL: This is the SUPER ADMIN (original/founder)');
+      warnings.push('❌ SUPER ADMIN CANNOT BE DEMOTED');
+      warnings.push('🛡️ This admin serves as the system recovery mechanism');
+      return warnings.join('\n');
+    }
+    
+    if (fromRole === 'admin' && toRole !== 'admin') {
+      warnings.push('🚨 CRITICAL: This will remove admin privileges');
+      warnings.push('⚠️ You will be required to provide a detailed reason');
+      warnings.push('⚠️ This action will be logged and audited');
+    }
+    
+    if (fromRole === 'recruiter' && toRole === 'student') {
+      warnings.push('⚠️ This user will lose access to student search and verification features');
+    }
+    
+    if (fromRole === 'faculty' && toRole === 'student') {
+      warnings.push('⚠️ This user will lose certificate approval capabilities');
+    }
+    
+    if (toRole === 'admin') {
+      warnings.push('⚠️ This user will gain full system access');
+    }
+    
+    if (warnings.length === 0) {
+      warnings.push('✅ This is a standard role change');
+    }
+    
+    return warnings.join('\n');
+  };
 
   const removeUserRole = useCallback(async (userId: string) => {
     setActioning(userId);
@@ -114,22 +176,37 @@ export default function AdminDashboardPage() {
     }
   }, [inviteEmail, inviteRole, fetchUsers]);
 
-  const getRoleColor = (role: string) => {
+  const getRoleColor = (role: string, isSuperAdmin: boolean = false) => {
+    if (isSuperAdmin) {
+      return 'bg-gradient-to-r from-yellow-500/20 to-orange-500/20 text-yellow-300 border-yellow-500/30';
+    }
     switch (role) {
       case 'admin': return 'bg-red-100 text-red-800 border-red-200';
       case 'faculty': return 'bg-blue-100 text-blue-800 border-blue-200';
       case 'student': return 'bg-green-100 text-green-800 border-green-200';
+      case 'recruiter': return 'bg-purple-100 text-purple-800 border-purple-200';
       default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
-  const getRoleIcon = (role: string) => {
+  const getRoleIcon = (role: string, isSuperAdmin: boolean = false) => {
+    if (isSuperAdmin) {
+      return <Crown className="w-4 h-4" />;
+    }
     switch (role) {
       case 'admin': return <Shield className="w-4 h-4" />;
       case 'faculty': return <UserCheck className="w-4 h-4" />;
       case 'student': return <Users className="w-4 h-4" />;
+      case 'recruiter': return <UserPlus className="w-4 h-4" />;
       default: return <Users className="w-4 h-4" />;
     }
+  };
+
+  const getRoleDisplayName = (role: string, isSuperAdmin: boolean = false) => {
+    if (isSuperAdmin) {
+      return 'Super Admin';
+    }
+    return role.charAt(0).toUpperCase() + role.slice(1);
   };
 
   if (loading) {
@@ -286,39 +363,56 @@ export default function AdminDashboardPage() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium border ${getRoleColor(user.role)}`}>
-                        {getRoleIcon(user.role)}
-                        {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                      <div className="flex items-center gap-2">
+                        <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium border ${getRoleColor(user.role, user.is_super_admin)}`}>
+                          {getRoleIcon(user.role, user.is_super_admin)}
+                          {getRoleDisplayName(user.role, user.is_super_admin)}
+                        </div>
                       </div>
                     </td>
                     <td className="p-4">
                       <div className="flex gap-2">
                         {user.role !== 'admin' && (
                           <button
-                            onClick={() => updateUserRole(user.user_id, 'admin')}
+                            onClick={() => updateUserRole(user.user_id, 'admin', user.role)}
                             disabled={actioning === user.user_id}
                             className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
                           >
                             Make Admin
                           </button>
                         )}
-                        {user.role !== 'faculty' && (
+                        {user.role !== 'faculty' && !user.is_super_admin && (
                           <button
-                            onClick={() => updateUserRole(user.user_id, 'faculty')}
+                            onClick={() => updateUserRole(user.user_id, 'faculty', user.role)}
                             disabled={actioning === user.user_id}
                             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
                           >
                             Make Faculty
                           </button>
                         )}
-                        {user.role !== 'student' && (
+                        {user.role !== 'recruiter' && !user.is_super_admin && (
                           <button
-                            onClick={() => updateUserRole(user.user_id, 'student')}
+                            onClick={() => updateUserRole(user.user_id, 'recruiter', user.role)}
+                            disabled={actioning === user.user_id}
+                            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                          >
+                            Make Recruiter
+                          </button>
+                        )}
+                        {user.role !== 'student' && !user.is_super_admin && (
+                          <button
+                            onClick={() => updateUserRole(user.user_id, 'student', user.role)}
                             disabled={actioning === user.user_id}
                             className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
                           >
                             Make Student
                           </button>
+                        )}
+                        {user.is_super_admin && (
+                          <div className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/30 text-yellow-300 rounded-lg text-sm font-medium opacity-75 cursor-not-allowed">
+                            <Lock className="w-4 h-4" />
+                            Protected
+                          </div>
                         )}
                         {user.role !== 'student' && (
                           <button

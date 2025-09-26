@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, Check, X, ArrowLeft } from 'lucide-react';
+import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, Check, X, ArrowLeft, UserPlus, Crown } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 
 interface RoleRequest {
@@ -88,6 +88,15 @@ export default function AdminRoleRequestsPage() {
       case 'faculty': return 'bg-blue-100 text-blue-800 border-blue-200';
       case 'recruiter': return 'bg-purple-100 text-purple-800 border-purple-200';
       default: return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+  };
+
+  const getRoleIcon = (role: string) => {
+    switch (role) {
+      case 'admin': return <Crown className="w-4 h-4" />;
+      case 'faculty': return <UserCheck className="w-4 h-4" />;
+      case 'recruiter': return <UserPlus className="w-4 h-4" />;
+      default: return <Users className="w-4 h-4" />;
     }
   };
 
@@ -200,6 +209,7 @@ export default function AdminRoleRequestsPage() {
                       </td>
                       <td className="p-4">
                         <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium border ${getRoleColor(request.requested_role)}`}>
+                          {getRoleIcon(request.requested_role)}
                           {request.requested_role.charAt(0).toUpperCase() + request.requested_role.slice(1)}
                         </div>
                       </td>
