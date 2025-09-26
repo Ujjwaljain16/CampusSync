@@ -6,6 +6,7 @@ export type OcrExtractionResult = {
   raw_text?: string;
   confidence?: number;
   recipient?: string;
+  certificate_id?: string;
 };
 
 export function extractTitle(text: string): string | undefined {
