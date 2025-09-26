@@ -8,7 +8,7 @@ do $$ begin
   if not exists (
     select 1 from pg_policies where schemaname='public' and tablename='role_requests' and policyname='role_requests_select_own'
   ) then
-    create policy role_requests_select_own on public.role_requests
+    create policy role_requests_select_own on public.role_requests  
       for select to authenticated
       using (user_id = auth.uid());
   end if;
