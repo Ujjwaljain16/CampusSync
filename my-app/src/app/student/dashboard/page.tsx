@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Share2, Star, Zap, Shield, Brain, FileText, Upload, ExternalLink, Trash2 } from 'lucide-react';
-// LogoutButton is already rendered in layout, avoid duplicate here
+import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Share2, Star, Zap, Shield, Brain, FileText, Upload, ExternalLink, Trash2, User2, Edit3, Building, Calendar, GraduationCap, MapPin } from 'lucide-react';
+import LogoutButton from '../../../components/LogoutButton';
 
 interface Row {
   id: string;
@@ -17,6 +17,18 @@ interface Row {
   created_at: string;
 }
 
+interface Profile {
+  id: string;
+  full_name: string;
+  university?: string;
+  graduation_year?: number;
+  major?: string;
+  location?: string;
+  gpa?: number;
+  role: string;
+  created_at: string;
+}
+
 export default function StudentDashboard() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +38,24 @@ export default function StudentDashboard() {
   const [exporting, setExporting] = useState(false);
   const [recentUploads, setRecentUploads] = useState<Row[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [showProfileEdit, setShowProfileEdit] = useState(false);
+
+  const loadProfile = useCallback(async () => {
+    setProfileLoading(true);
+    try {
+      const res = await fetch('/api/profile/complete');
+      const json = await res.json();
+      if (res.ok) {
+        setProfile(json.data);
+      }
+    } catch (e) {
+      console.error('Failed to load profile:', e);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,7 +106,10 @@ export default function StudentDashboard() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { 
+    load(); 
+    loadProfile();
+  }, [load, loadProfile]);
 
   const exportPortfolioPDF = useCallback(async () => {
     setExporting(true);
@@ -568,22 +601,479 @@ export default function StudentDashboard() {
                 <span className="hidden sm:inline">Upload Certificate</span>
                 <span className="sm:hidden">Upload</span>
               </a>
-              <button
-                onClick={exportPortfolioPDF}
-                disabled={exporting || rows.length === 0}
-                className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 md:px-6 py-2 md:py-3 rounded-xl font-medium transition-colors flex items-center gap-2 text-sm md:text-base"
-              >
-                <FileText className="w-4 h-4 md:w-5 md:h-5" />
-                <span className="hidden sm:inline">{exporting ? 'Generating...' : 'Export PDF'}</span>
-                <span className="sm:hidden">{exporting ? '...' : 'PDF'}</span>
-              </button>
+              <LogoutButton variant="minimal" />
             </div>
           </div>
         </div>
-        
-        {content}
+
+        {/* Profile Section */}
+        {!profileLoading && profile && (
+          <div className="mb-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-r from-green-500/20 to-blue-500/20 rounded-xl">
+                  <User2 className="w-6 h-6 text-green-300" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">My Profile</h2>
+                  <p className="text-white/70 text-sm">Manage your personal information</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowProfileEdit(!showProfileEdit)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+              >
+                <Edit3 className="w-4 h-4" />
+                {showProfileEdit ? 'Cancel' : 'Edit Profile'}
+              </button>
+            </div>
+
+            {showProfileEdit ? (
+              <ProfileEditForm 
+                profile={profile} 
+                onSave={() => {
+                  setShowProfileEdit(false);
+                  loadProfile();
+                }} 
+              />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                  <User2 className="w-5 h-5 text-blue-300" />
+                  <div>
+                    <p className="text-white/60 text-sm">Full Name</p>
+                    <p className="text-white font-medium">{profile.full_name}</p>
+                  </div>
+                </div>
+                
+                {profile.university && (
+                  <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                    <Building className="w-5 h-5 text-purple-300" />
+                    <div>
+                      <p className="text-white/60 text-sm">University</p>
+                      <p className="text-white font-medium">{profile.university}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {profile.graduation_year && (
+                  <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                    <Calendar className="w-5 h-5 text-green-300" />
+                    <div>
+                      <p className="text-white/60 text-sm">Graduation Year</p>
+                      <p className="text-white font-medium">{profile.graduation_year}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {profile.major && (
+                  <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                    <GraduationCap className="w-5 h-5 text-yellow-300" />
+                    <div>
+                      <p className="text-white/60 text-sm">Major</p>
+                      <p className="text-white font-medium">{profile.major}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {profile.location && (
+                  <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                    <MapPin className="w-5 h-5 text-red-300" />
+                    <div>
+                      <p className="text-white/60 text-sm">Location</p>
+                      <p className="text-white font-medium">{profile.location}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {profile.gpa && (
+                  <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                    <Star className="w-5 h-5 text-orange-300" />
+                    <div>
+                      <p className="text-white/60 text-sm">GPA</p>
+                      <p className="text-white font-medium">{profile.gpa}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+          {/* Stats Cards */}
+          <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white/70 text-sm font-medium">Total Certificates</p>
+                  <p className="text-2xl font-bold text-white">{rows.length}</p>
+                </div>
+                <div className="p-3 bg-blue-500/20 rounded-xl">
+                  <FileText className="w-6 h-6 text-blue-300" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white/70 text-sm font-medium">Verified</p>
+                  <p className="text-2xl font-bold text-white">{rows.filter(r => r.verification_status === 'verified').length}</p>
+                </div>
+                <div className="p-3 bg-green-500/20 rounded-xl">
+                  <CheckCircle className="w-6 h-6 text-green-300" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white/70 text-sm font-medium">Pending</p>
+                  <p className="text-2xl font-bold text-white">{rows.filter(r => r.verification_status === 'pending').length}</p>
+                </div>
+                <div className="p-3 bg-yellow-500/20 rounded-xl">
+                  <Clock className="w-6 h-6 text-yellow-300" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white/70 text-sm font-medium">Auto-Approved</p>
+                  <p className="text-2xl font-bold text-white">{rows.filter(r => r.auto_approved).length}</p>
+                </div>
+                <div className="p-3 bg-purple-500/20 rounded-xl">
+                  <Zap className="w-6 h-6 text-purple-300" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Uploads */}
+        {recentUploads.length > 0 && (
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <Clock className="w-5 h-5" />
+              Recent Uploads
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {recentUploads.map((upload) => (
+                <div key={upload.id} className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-white font-medium truncate">{upload.title}</h4>
+                      <p className="text-white/60 text-sm truncate">{upload.institution}</p>
+                    </div>
+                    <div className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(upload.verification_status, upload.auto_approved)}`}>
+                      {getStatusText(upload.verification_status, upload.auto_approved)}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-white/50">
+                      {upload.created_at ? (() => {
+                        const timeAgo = new Date(upload.created_at);
+                        const now = new Date();
+                        if (!isNaN(timeAgo.getTime())) {
+                          const diffInHours = Math.floor((now.getTime() - timeAgo.getTime()) / (1000 * 60 * 60));
+                          if (diffInHours < 1) return 'Just now';
+                          if (diffInHours < 24) return `${diffInHours}h ago`;
+                          return `${Math.floor(diffInHours / 24)}d ago`;
+                        }
+                        return 'Unknown';
+                      })() : 'Unknown'}
+                    </span>
+                    {upload.confidence_score && (
+                      <div className="flex items-center gap-1">
+                        <span className={`text-xs ${getConfidenceColor(upload.confidence_score)}`}>
+                          {Math.round(upload.confidence_score * 100)}%
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* All Certificates Table */}
+        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-white/10">
+            <h3 className="text-lg font-semibold text-white">All Certificates</h3>
+          </div>
+          
+          {loading ? (
+            <div className="p-8 text-center">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+              <p className="text-white/70 mt-2">Loading certificates...</p>
+            </div>
+          ) : error ? (
+            <div className="p-8 text-center">
+              <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-2" />
+              <p className="text-red-300">{error}</p>
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="p-8 text-center">
+              <FileText className="w-12 h-12 text-white/30 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-white mb-2">No certificates yet</h3>
+              <p className="text-white/60 mb-4">Upload your first certificate to get started</p>
+              <a
+                href="/student/upload"
+                className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+              >
+                <Upload className="w-4 h-4" />
+                Upload Certificate
+              </a>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Certificate</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Institution</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Confidence</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Date Issued</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/10">
+                  {rows.map((row) => (
+                    <tr key={row.id} className="hover:bg-white/5 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex-shrink-0">
+                            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                              <FileText className="w-5 h-5 text-white" />
+                            </div>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-white font-medium truncate">{row.title}</p>
+                            <p className="text-white/60 text-sm truncate">{row.institution}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-white/80">{row.institution}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <div className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(row.verification_status, row.auto_approved)}`}>
+                            {getStatusText(row.verification_status, row.auto_approved)}
+                          </div>
+                          {row.auto_approved && (
+                            <div className="flex items-center gap-1 text-xs text-emerald-400">
+                              <Zap className="w-3 h-3" />
+                              Auto
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {row.confidence_score ? (
+                          <div className="flex items-center gap-2">
+                            <div className="w-16">
+                              {getConfidenceBar(row.confidence_score)}
+                            </div>
+                            <span className={`text-sm font-medium ${getConfidenceColor(row.confidence_score)}`}>
+                              {Math.round(row.confidence_score * 100)}%
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-white/50 text-sm">N/A</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-white/80 text-sm">
+                        {row.date_issued ? new Date(row.date_issued).toLocaleDateString() : 'N/A'}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          {row.file_url && (
+                            <a
+                              href={row.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                              title="View Certificate"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </a>
+                          )}
+                          <button
+                            onClick={() => deleteCertificate(row.id)}
+                            disabled={deleting === row.id}
+                            className="p-2 text-white/60 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                            title="Delete Certificate"
+                          >
+                            {deleting === row.id ? (
+                              <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+// Profile Edit Form Component
+function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => void }) {
+  const [formData, setFormData] = useState({
+    full_name: profile.full_name,
+    university: profile.university || '',
+    graduation_year: profile.graduation_year?.toString() || '',
+    major: profile.major || '',
+    location: profile.location || '',
+    gpa: profile.gpa?.toString() || '',
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/profile/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: formData.full_name.trim(),
+          university: formData.university.trim() || undefined,
+          graduation_year: formData.graduation_year ? Number(formData.graduation_year) : undefined,
+          major: formData.major.trim() || undefined,
+          location: formData.location.trim() || undefined,
+          gpa: formData.gpa ? Number(formData.gpa) : undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const json = await response.json().catch(() => ({}));
+        throw new Error(json?.error || 'Failed to save profile');
+      }
+
+      onSave();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to save profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {error && (
+        <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-300 rounded-lg text-sm">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-white/70 text-sm font-medium mb-2">Full Name *</label>
+          <input
+            type="text"
+            value={formData.full_name}
+            onChange={(e) => setFormData(prev => ({ ...prev, full_name: e.target.value }))}
+            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+            placeholder="Enter your full name"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-white/70 text-sm font-medium mb-2">University</label>
+          <input
+            type="text"
+            value={formData.university}
+            onChange={(e) => setFormData(prev => ({ ...prev, university: e.target.value }))}
+            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+            placeholder="Enter your university"
+          />
+        </div>
+
+        <div>
+          <label className="block text-white/70 text-sm font-medium mb-2">Graduation Year</label>
+          <input
+            type="number"
+            min="1900"
+            max="2100"
+            value={formData.graduation_year}
+            onChange={(e) => setFormData(prev => ({ ...prev, graduation_year: e.target.value }))}
+            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+            placeholder="Enter graduation year"
+          />
+        </div>
+
+        <div>
+          <label className="block text-white/70 text-sm font-medium mb-2">Major</label>
+          <input
+            type="text"
+            value={formData.major}
+            onChange={(e) => setFormData(prev => ({ ...prev, major: e.target.value }))}
+            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+            placeholder="Enter your major"
+          />
+        </div>
+
+        <div>
+          <label className="block text-white/70 text-sm font-medium mb-2">Location</label>
+          <input
+            type="text"
+            value={formData.location}
+            onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+            placeholder="Enter your location"
+          />
+        </div>
+
+        <div>
+          <label className="block text-white/70 text-sm font-medium mb-2">GPA</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            max="10"
+            value={formData.gpa}
+            onChange={(e) => setFormData(prev => ({ ...prev, gpa: e.target.value }))}
+            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+            placeholder="Enter your GPA"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 pt-4">
+        <button
+          type="submit"
+          disabled={loading || !formData.full_name.trim()}
+          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+        >
+          {loading ? 'Saving...' : 'Save Changes'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onSave()}
+          className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg font-medium transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
