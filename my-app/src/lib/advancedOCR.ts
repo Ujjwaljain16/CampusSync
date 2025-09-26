@@ -73,20 +73,55 @@ export class AdvancedOCREngine {
   }
 
   private async extractFromPDF(buffer: Buffer): Promise<AdvancedOCRResult | null> {
-    // Implementation for PDF text extraction
-    // Using pdfplumber equivalent in Node.js
-    return null; // Placeholder
+    try {
+      // Use pdf-parse for PDF text extraction
+      const pdf = require('pdf-parse');
+      const data = await pdf(buffer);
+      
+      if (data.text && data.text.trim().length > 0) {
+        const structuredResult = await this.llmExtractor.structureText(data.text);
+        return this.scorer.scoreResult(structuredResult, 'pdf_text');
+      }
+    } catch (error) {
+      console.warn('PDF extraction failed:', error);
+    }
+    return null;
   }
 
   private async preprocessImage(buffer: Buffer): Promise<Buffer> {
-    // Image preprocessing with Sharp or similar
-    // - Deskew, denoise, enhance contrast
-    return buffer; // Placeholder
+    try {
+      // Use Sharp for image preprocessing
+      const sharp = require('sharp');
+      
+      return await sharp(buffer)
+        .grayscale()
+        .normalize()
+        .sharpen()
+        .png()
+        .toBuffer();
+    } catch (error) {
+      console.warn('Image preprocessing failed:', error);
+      return buffer;
+    }
   }
 
   private async basicTesseractOCR(buffer: Buffer): Promise<string> {
-    // Fallback to current Tesseract implementation
-    return ''; // Placeholder
+    try {
+      // Use Tesseract.js as fallback
+      const { createWorker } = require('tesseract.js');
+      const worker = await createWorker();
+      
+      await worker.loadLanguage('eng');
+      await worker.initialize('eng');
+      
+      const { data: { text } } = await worker.recognize(buffer);
+      await worker.terminate();
+      
+      return text;
+    } catch (error) {
+      console.error('Tesseract OCR failed:', error);
+      return '';
+    }
   }
 }
 
