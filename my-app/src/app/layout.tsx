@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import LogoutButton from "../components/LogoutButton";
 
 // Font configurations
 const inter = Inter({
@@ -78,9 +77,6 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
       </head>
       <body className="antialiased font-sans min-h-screen">
-        <div className="fixed top-4 right-4 z-50">
-          <LogoutButton variant="minimal" />
-        </div>
         {children}
       </body>
     </html>
