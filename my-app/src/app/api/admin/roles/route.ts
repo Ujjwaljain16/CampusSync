@@ -16,6 +16,7 @@ export async function GET(_req: NextRequest) {
     .select(`
       user_id,
       role,
+      is_super_admin,
       created_at,
       updated_at,
       assigned_by
@@ -63,8 +64,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing user_id or role' }, { status: 400 });
   }
 
-  if (!['student', 'faculty', 'admin'].includes(body.role)) {
-    return NextResponse.json({ error: 'Invalid role. Must be student, faculty, or admin' }, { status: 400 });
+  if (!['student', 'faculty', 'admin', 'recruiter'].includes(body.role)) {
+    return NextResponse.json({ error: 'Invalid role. Must be student, faculty, admin, or recruiter' }, { status: 400 });
   }
 
   // 🛡️ SAFETY CHECK: Prevent admins from demoting themselves
