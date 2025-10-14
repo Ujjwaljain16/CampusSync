@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,16 +10,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Use admin client to bypass RLS for reading student data
+    const adminSupabase = createSupabaseAdminClient();
     const supabase = await createSupabaseServerClient();
 
-    // Get total students count
-    const { count: totalStudents } = await supabase
+    // Get total students count (use admin client)
+    const { count: totalStudents } = await adminSupabase
       .from('user_roles')
       .select('*', { count: 'exact', head: true })
       .eq('role', 'student');
 
-    // Get certification counts by status
-    const { data: statusCounts } = await supabase
+    // Get certification counts by status (use admin client)
+    const { data: statusCounts } = await adminSupabase
       .from('certificates')
       .select('verification_status')
       .in('verification_status', ['verified', 'pending', 'rejected']);
@@ -28,8 +30,8 @@ export async function GET(request: NextRequest) {
     const pendingCount = statusCounts?.filter(c => c.verification_status === 'pending').length || 0;
     const rejectedCount = statusCounts?.filter(c => c.verification_status === 'rejected').length || 0;
 
-    // Get average confidence score
-    const { data: confidenceData } = await supabase
+    // Get average confidence score (use admin client)
+    const { data: confidenceData } = await adminSupabase
       .from('certificates')
       .select('confidence_score')
       .not('confidence_score', 'is', null);
@@ -38,8 +40,8 @@ export async function GET(request: NextRequest) {
       ? confidenceData.reduce((sum, cert) => sum + (cert.confidence_score || 0), 0) / confidenceData.length
       : 0;
 
-    // Get top skills (extracted from certificate titles)
-    const { data: certificates } = await supabase
+    // Get top skills (extracted from certificate titles) - use admin client
+    const { data: certificates } = await adminSupabase
       .from('certificates')
       .select('title, issuer')
       .eq('verification_status', 'verified');
@@ -68,8 +70,8 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // Get top universities
-    const { data: universityData } = await supabase
+    // Get top universities - use admin client
+    const { data: universityData } = await adminSupabase
       .from('user_roles')
       .select(`
         profiles!inner(
@@ -91,11 +93,11 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // Get daily activity for the last 30 days
+    // Get daily activity for the last 30 days - use admin client
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const { data: dailyActivity } = await supabase
+    const { data: dailyActivity } = await adminSupabase
       .from('certificates')
       .select('created_at')
       .gte('created_at', thirtyDaysAgo.toISOString())
@@ -111,6 +113,33 @@ export async function GET(request: NextRequest) {
       .map(([date, count]) => ({ date, count }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
+    // Get recruiter-specific metrics from database
+    const { count: contactedCount } = await supabase
+      .from('recruiter_contacts')
+      .select('*', { count: 'exact', head: true })
+      .eq('recruiter_id', user.id);
+
+    const { count: responseCount } = await supabase
+      .from('recruiter_contacts')
+      .select('*', { count: 'exact', head: true })
+      .eq('recruiter_id', user.id)
+      .eq('response_received', true);
+
+    const { count: pipelineCount } = await supabase
+      .from('recruiter_pipeline')
+      .select('*', { count: 'exact', head: true })
+      .eq('recruiter_id', user.id)
+      .neq('stage', 'rejected');
+
+    const contactedStudents = contactedCount || 0;
+    const responseRate = contactedStudents > 0 ? Math.round((responseCount || 0) / contactedStudents * 100) : 0;
+    
+    // Calculate engagement rate as percentage of students in active pipeline vs total students
+    const activePipelineCount = pipelineCount || 0;
+    const engagementRate = totalStudents && totalStudents > 0 
+      ? Math.round((activePipelineCount / totalStudents) * 100) 
+      : 0;
+
     return NextResponse.json({
       total_students: totalStudents || 0,
       verified_certifications: verifiedCount,
@@ -119,7 +148,12 @@ export async function GET(request: NextRequest) {
       average_confidence: averageConfidence,
       top_skills: topSkills,
       top_universities: topUniversities,
-      daily_activity: dailyActivityData
+      daily_activity: dailyActivityData,
+      // Recruiter-specific metrics
+      contacted_students: contactedStudents,
+      active_pipeline_count: activePipelineCount,
+      engagement_rate: engagementRate,
+      response_rate: responseRate
     });
 
   } catch (error) {
@@ -127,3 +161,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
