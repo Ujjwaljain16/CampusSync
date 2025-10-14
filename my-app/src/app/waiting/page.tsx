@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function WaitingPage() {
 	const router = useRouter();
-	const [checking, setChecking] = useState(false);
 	const [dots, setDots] = useState('');
+	const [userId, setUserId] = useState<string | null>(null);
 
 	useEffect(() => {
 		// Animate dots
@@ -14,49 +15,93 @@ export default function WaitingPage() {
 			setDots(prev => prev.length >= 3 ? '' : prev + '.');
 		}, 500);
 
-		// Check approval status every 3 seconds
-		const checkApproval = async () => {
-			if (checking) return;
-			
-			setChecking(true);
-			try {
-				const response = await fetch('/api/user/role-status');
-				const data = await response.json();
-				
-				// If user has a non-student role that's been approved, redirect
-				if (data.role && data.role !== 'student') {
-					console.log('[waiting] Role approved:', data.role, '- redirecting...');
-					
-					// Redirect based on role
-					if (data.role === 'faculty') {
-						router.push('/faculty/dashboard');
-					} else if (data.role === 'recruiter') {
-						router.push('/recruiter/dashboard');
-					} else if (data.role === 'admin') {
-						router.push('/admin/dashboard');
-					} else {
-						router.push('/dashboard');
-					}
-					return;
-				}
-			} catch (error) {
-				console.error('[waiting] Error checking status:', error);
-			} finally {
-				setChecking(false);
-			}
-		};
-
-		// Check immediately on mount
-		checkApproval();
-
-		// Then check every 3 seconds
-		const approvalInterval = setInterval(checkApproval, 3000);
-
 		return () => {
 			clearInterval(dotsInterval);
-			clearInterval(approvalInterval);
 		};
-	}, [router, checking]);
+	}, []);
+
+	const redirectToRole = useCallback((role: string) => {
+		console.log('[waiting] Role approved:', role, '- redirecting...');
+		
+		// Redirect based on role
+		if (role === 'faculty') {
+			router.push('/faculty/dashboard');
+		} else if (role === 'recruiter') {
+			router.push('/recruiter/dashboard');
+		} else if (role === 'admin') {
+			router.push('/admin/dashboard');
+		} else {
+			router.push('/dashboard');
+		}
+	}, [router]);
+
+	useEffect(() => {
+		// Get current user and set up realtime subscription
+		const initUser = async () => {
+			const { data: { user } } = await supabase.auth.getUser();
+			if (user) {
+				setUserId(user.id);
+				
+				// Check current status immediately
+				const { data: roleData } = await supabase
+					.from('user_roles')
+					.select('role')
+					.eq('user_id', user.id)
+					.single();
+				
+				if (roleData?.role && roleData.role !== 'student') {
+					redirectToRole(roleData.role);
+				}
+			}
+		};
+		
+		initUser();
+	}, [redirectToRole]);
+
+	useEffect(() => {
+		if (!userId) return;
+
+		// Subscribe to realtime changes on user_roles table for this specific user
+		const channel = supabase
+			.channel(`role-changes-${userId}`)
+			.on(
+				'postgres_changes',
+				{
+					event: 'INSERT',
+					schema: 'public',
+					table: 'user_roles',
+					filter: `user_id=eq.${userId}`,
+				},
+				(payload: any) => {
+					console.log('[waiting] Role assigned via realtime:', payload);
+					const newRole = payload.new?.role;
+					if (newRole && newRole !== 'student') {
+						redirectToRole(newRole);
+					}
+				}
+			)
+			.on(
+				'postgres_changes',
+				{
+					event: 'UPDATE',
+					schema: 'public',
+					table: 'user_roles',
+					filter: `user_id=eq.${userId}`,
+				},
+				(payload: any) => {
+					console.log('[waiting] Role updated via realtime:', payload);
+					const newRole = payload.new?.role;
+					if (newRole && newRole !== 'student') {
+						redirectToRole(newRole);
+					}
+				}
+			)
+			.subscribe();
+
+		return () => {
+			supabase.removeChannel(channel);
+		};
+	}, [userId, redirectToRole]);
 
 	return (
 		<div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 px-6">
@@ -75,8 +120,8 @@ export default function WaitingPage() {
 				</p>
 				
 				<div className="mt-6 flex items-center justify-center gap-2 text-sm text-white/60">
-					<div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
-					<span>Checking for approval{dots}</span>
+					<div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+					<span>Waiting for approval{dots}</span>
 				</div>
 				
 				<div className="mt-8 pt-6 border-t border-white/10">
