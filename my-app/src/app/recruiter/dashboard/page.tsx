@@ -3,9 +3,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import LogoutButton from '@/components/LogoutButton';
 import { 
-  Search, Filter, Download, Users, Award, CheckCircle, Clock, XCircle, 
-  Eye, Mail, ExternalLink, Building, GraduationCap, MapPin, Star,
-  TrendingUp, BarChart3, FileText, RefreshCw, Plus, Settings, Grid, List
+  Search, Filter, Users, CheckCircle, Clock, XCircle, 
+  Eye, Mail, Star,
+  TrendingUp, RefreshCw, Grid, List
 } from 'lucide-react';
 
 interface StudentRow {
@@ -36,6 +36,18 @@ interface Certification {
   verification_method: string;
 }
 
+interface ContactLog {
+  id: string;
+  recruiter_id: string;
+  student_id: string;
+  contacted_at: string;
+  method: 'email' | 'phone' | 'linkedin' | 'other';
+  notes: string | null;
+  response_received: boolean;
+  response_at: string | null;
+  created_at: string;
+}
+
 interface Analytics {
   total_students: number;
   verified_certifications: number;
@@ -45,6 +57,19 @@ interface Analytics {
   top_skills: { skill: string; count: number }[];
   top_universities: { university: string; count: number }[];
   daily_activity: { date: string; count: number }[];
+  contacted_students?: number;
+  active_pipeline_count?: number;
+  engagement_rate?: number;
+  response_rate?: number;
+}
+
+type PipelineStage = 'none' | 'shortlisted' | 'contacted' | 'interviewed' | 'offered' | 'rejected';
+
+interface StudentPipelineData {
+  studentId: string;
+  stage: PipelineStage;
+  isFavorite: boolean;
+  contactedAt?: string;
 }
 
 export default function RecruiterDashboard() {
@@ -52,17 +77,58 @@ export default function RecruiterDashboard() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(false);
-  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [verifyResult, setVerifyResult] = useState<Record<string, boolean>>({});
   const [pagination, setPagination] = useState<{ total: number; limit: number; offset: number; has_more: boolean } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  
+  // Recruiter-specific states (now persisted in database)
+  const [pipelineStages, setPipelineStages] = useState<Record<string, PipelineStage>>({});
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [contactedStudents, setContactedStudents] = useState<Set<string>>(new Set());
+  const [loadingPersistence, setLoadingPersistence] = useState(true);
+  
+  // Contact tracking modal
+  const [showContactHistory, setShowContactHistory] = useState(false);
+  const [selectedStudentForHistory, setSelectedStudentForHistory] = useState<StudentRow | null>(null);
+  const [contactHistory, setContactHistory] = useState<ContactLog[]>([]);
+
+  // Load persisted data from database
+  const loadPersistedData = useCallback(async () => {
+    try {
+      setLoadingPersistence(true);
+      
+      // Load favorites
+      const favRes = await fetch('/api/recruiter/favorites');
+      if (favRes.ok) {
+        const favData = await favRes.json();
+        setFavorites(new Set(favData.favorites || []));
+      }
+      
+      // Load pipeline stages
+      const pipeRes = await fetch('/api/recruiter/pipeline');
+      if (pipeRes.ok) {
+        const pipeData = await pipeRes.json();
+        setPipelineStages(pipeData.pipeline || {});
+      }
+      
+      // Load contact history
+      const contactRes = await fetch('/api/recruiter/contacts');
+      if (contactRes.ok) {
+        const contactData = await contactRes.json();
+        const contactedIds = new Set<string>(contactData.contacts?.map((c: { student_id: string }) => c.student_id) || []);
+        setContactedStudents(contactedIds);
+      }
+    } catch (err) {
+      console.error('Failed to load persisted data:', err);
+    } finally {
+      setLoadingPersistence(false);
+    }
+  }, []);
 
   // Fetch analytics data
   const fetchAnalytics = useCallback(async () => {
-    setAnalyticsLoading(true);
     try {
       const response = await fetch('/api/recruiter/analytics');
       const data = await response.json();
@@ -71,128 +137,189 @@ export default function RecruiterDashboard() {
       }
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
-    } finally {
-      setAnalyticsLoading(false);
     }
   }, []);
 
   // Search students
   const searchStudents = useCallback(async () => {
+    console.log('[DASHBOARD] searchStudents called, searchQuery:', searchQuery);
     setLoading(true);
     setError(null);
     try {
       const url = new URL('/api/recruiter/search-students', window.location.origin);
       if (searchQuery) url.searchParams.set('q', searchQuery);
       
+      console.log('[DASHBOARD] Fetching URL:', url.toString());
       const res = await fetch(url.toString());
       const json = await res.json();
+      
+      console.log('[DASHBOARD] API response:', {
+        ok: res.ok,
+        status: res.status,
+        data: json
+      });
       
       if (!res.ok) throw new Error(json.error || 'Search failed');
       
       const studentData = json.data?.students || [];
+      console.log('[DASHBOARD] Extracted studentData:', studentData.length, 'students');
       
-      // If no students found, show mock data for demo
-      if (studentData.length === 0) {
-        setStudents([
-          {
-            id: 'demo-student-1',
-            name: 'Alex Johnson',
-            email: 'alex.johnson@stanford.edu',
-            university: 'Stanford University',
-            graduation_year: 2024,
-            major: 'Computer Science',
-            gpa: 3.8,
-            location: 'Palo Alto, CA',
-            skills: ['Python', 'Machine Learning', 'Data Science', 'TensorFlow'],
-            certifications: [
-              {
-                id: 'cert-1',
-                title: 'Machine Learning Specialization',
-                issuer: 'Stanford University',
-                issue_date: '2024-01-15',
-                verification_status: 'verified',
-                confidence_score: 0.95,
-                skills: ['Machine Learning', 'Python'],
-                verification_method: 'AI + Manual'
-              },
-              {
-                id: 'cert-2',
-                title: 'Python for Data Science',
-                issuer: 'Coursera',
-                issue_date: '2024-02-20',
-                verification_status: 'verified',
-                confidence_score: 0.92,
-                skills: ['Python', 'Data Science'],
-                verification_method: 'AI'
-              }
-            ],
-            verified_count: 2,
-            total_certifications: 2,
-            last_activity: '2024-03-15T10:30:00Z',
-            created_at: '2024-01-01T00:00:00Z'
-          },
-          {
-            id: 'demo-student-2',
-            name: 'Sarah Chen',
-            email: 'sarah.chen@mit.edu',
-            university: 'MIT',
-            graduation_year: 2024,
-            major: 'Software Engineering',
-            gpa: 3.9,
-            location: 'Cambridge, MA',
-            skills: ['React', 'JavaScript', 'Node.js', 'TypeScript'],
-            certifications: [
-              {
-                id: 'cert-3',
-                title: 'Full Stack Web Development',
-                issuer: 'MIT',
-                issue_date: '2024-03-10',
-                verification_status: 'verified',
-                confidence_score: 0.88,
-                skills: ['React', 'JavaScript', 'Node.js'],
-                verification_method: 'AI + Manual'
-              }
-            ],
-            verified_count: 1,
-            total_certifications: 1,
-            last_activity: '2024-03-20T14:15:00Z',
-            created_at: '2024-02-01T00:00:00Z'
-          }
-        ]);
-        setPagination({ total: 2, limit: 20, offset: 0, has_more: false });
-      } else {
-        setStudents(studentData);
-        setPagination(json.data?.pagination || null);
-      }
+      // Set the real student data - removed dummy data fallback
+      setStudents(studentData);
+      setPagination(json.data?.pagination || null);
+      
+      console.log('[DASHBOARD] State updated with', studentData.length, 'students');
     } catch (e: unknown) {
+      console.error('[DASHBOARD] Error:', e);
       setError(e instanceof Error ? e.message : 'Unexpected error');
     } finally {
       setLoading(false);
     }
   }, [searchQuery]);
 
-  // Bulk verify certificates
-  const bulkVerify = useCallback(async (certificateIds: string[]) => {
-    for (const id of certificateIds) {
-      try {
-        const res = await fetch('/api/recruiter/verify-certificate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ certificate_id: id, action: 'verify' })
-        });
-        const json = await res.json();
-        setVerifyResult(prev => ({ ...prev, [id]: !!json?.success }));
-      } catch {
-        setVerifyResult(prev => ({ ...prev, [id]: false }));
+  // Contact student via email
+  const contactStudent = useCallback(async (student: StudentRow) => {
+    const subject = encodeURIComponent(`Opportunity from ${student.university || 'Our Company'}`);
+    const body = encodeURIComponent(`Hi ${student.name},\n\nI came across your profile and verified certifications on CampusSync. I'd like to discuss potential opportunities.\n\nBest regards`);
+    window.open(`mailto:${student.email}?subject=${subject}&body=${body}`);
+    
+    // Optimistically update UI
+    setContactedStudents(prev => new Set(prev).add(student.id));
+    
+    // Persist to database and log contact
+    try {
+      const response = await fetch('/api/recruiter/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          studentId: student.id,
+          method: 'email',
+          notes: `Email sent via mailto link at ${new Date().toLocaleString()}`
+        })
+      });
+      
+      if (response.ok) {
+        console.log('✅ Contact logged successfully');
       }
+      
+      // Refresh analytics to show updated contacted count
+      fetchAnalytics();
+    } catch (err) {
+      console.error('Failed to log contact:', err);
+    }
+  }, [fetchAnalytics]);
+  
+  // View contact history for a student
+  const viewContactHistory = useCallback(async (student: StudentRow) => {
+    setSelectedStudentForHistory(student);
+    setShowContactHistory(true);
+    
+    try {
+      const response = await fetch(`/api/recruiter/contacts?studentId=${student.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setContactHistory(data.contacts || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch contact history:', err);
     }
   }, []);
+  
+  // Mark contact as responded
+  const markContactResponse = useCallback(async (contactId: string, responseReceived: boolean) => {
+    try {
+      await fetch('/api/recruiter/contacts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactId, responseReceived })
+      });
+      
+      // Refresh history
+      if (selectedStudentForHistory) {
+        viewContactHistory(selectedStudentForHistory);
+      }
+      
+      // Refresh analytics
+      fetchAnalytics();
+    } catch (err) {
+      console.error('Failed to update contact response:', err);
+    }
+  }, [selectedStudentForHistory, viewContactHistory, fetchAnalytics]);
+
+  // Toggle favorite
+  const toggleFavorite = useCallback(async (studentId: string) => {
+    const isFavorite = favorites.has(studentId);
+    
+    // Optimistically update UI
+    setFavorites(prev => {
+      const newFavorites = new Set(prev);
+      if (isFavorite) {
+        newFavorites.delete(studentId);
+      } else {
+        newFavorites.add(studentId);
+      }
+      return newFavorites;
+    });
+    
+    // Persist to database
+    try {
+      if (isFavorite) {
+        // Remove from favorites
+        await fetch(`/api/recruiter/favorites?studentId=${studentId}`, {
+          method: 'DELETE'
+        });
+      } else {
+        // Add to favorites
+        await fetch('/api/recruiter/favorites', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentId })
+        });
+      }
+    } catch (err) {
+      console.error('Failed to update favorite:', err);
+      // Revert on error
+      setFavorites(prev => {
+        const newFavorites = new Set(prev);
+        if (isFavorite) {
+          newFavorites.add(studentId);
+        } else {
+          newFavorites.delete(studentId);
+        }
+        return newFavorites;
+      });
+    }
+  }, [favorites]);
+
+  // Update pipeline stage
+  const updatePipelineStage = useCallback(async (studentId: string, stage: PipelineStage) => {
+    // Skip 'none' stage
+    if (stage === 'none') return;
+    
+    // Optimistically update UI
+    setPipelineStages(prev => ({ ...prev, [studentId]: stage }));
+    
+    // Persist to database
+    try {
+      await fetch('/api/recruiter/pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId, stage })
+      });
+      
+      // Refresh analytics
+      fetchAnalytics();
+    } catch (err) {
+      console.error('Failed to update pipeline:', err);
+    }
+  }, [fetchAnalytics]);
 
   // Load data on mount
   useEffect(() => {
+    loadPersistedData(); // Load favorites, pipeline, contacts
     fetchAnalytics();
     searchStudents();
-  }, [fetchAnalytics, searchStudents]);
+  }, [loadPersistedData, fetchAnalytics, searchStudents]);
 
   // Handle student selection
   const handleStudentSelect = (studentId: string) => {
@@ -204,19 +331,105 @@ export default function RecruiterDashboard() {
   };
 
   // Handle bulk actions
-  const handleBulkAction = (action: 'verify' | 'export' | 'contact') => {
-    if (action === 'verify') {
-      const allCertIds = selectedStudents.flatMap(studentId => {
-        const student = students.find(s => s.id === studentId);
-        return student?.certifications.map(c => c.id) || [];
-      });
-      bulkVerify(allCertIds);
-    } else if (action === 'export') {
-      // Export selected students
-      console.log('Exporting students:', selectedStudents);
+  const handleBulkAction = (action: 'export' | 'contact' | 'favorite') => {
+    if (action === 'export') {
+      // Export selected students as PDF
+      exportStudentsPDF(selectedStudents);
     } else if (action === 'contact') {
-      // Contact selected students
-      console.log('Contacting students:', selectedStudents);
+      // Open email client for multiple students
+      const selectedEmails = students
+        .filter(s => selectedStudents.includes(s.id))
+        .map(s => s.email)
+        .join(',');
+      window.open(`mailto:${selectedEmails}`);
+      
+      // Mark all as contacted
+      setContactedStudents(prev => {
+        const newSet = new Set(prev);
+        selectedStudents.forEach(id => newSet.add(id));
+        return newSet;
+      });
+    } else if (action === 'favorite') {
+      // Add all to favorites
+      setFavorites(prev => {
+        const newSet = new Set(prev);
+        selectedStudents.forEach(id => newSet.add(id));
+        return newSet;
+      });
+    }
+  };
+
+  // Export students to PDF
+  const exportStudentsPDF = async (studentIds: string[]) => {
+    try {
+      // Dynamically import jsPDF
+      const jsPDF = (await import('jspdf')).default;
+      const autoTable = (await import('jspdf-autotable')).default;
+      
+      const selectedStudentsList = students.filter(s => studentIds.includes(s.id));
+      
+      if (selectedStudentsList.length === 0) {
+        alert('No students selected for export');
+        return;
+      }
+
+      const doc = new jsPDF();
+      
+      // Title
+      doc.setFontSize(18);
+      doc.setTextColor(79, 70, 229); // Indigo
+      doc.text('Student Talent Report', 14, 20);
+      
+      // Metadata
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 28);
+      doc.text(`Total Students: ${selectedStudentsList.length}`, 14, 33);
+      
+      // Table data
+      const tableData = selectedStudentsList.map(student => {
+        const stage = pipelineStages[student.id] || 'none';
+        const isFav = favorites.has(student.id);
+        
+        return [
+          student.name,
+          student.university,
+          student.major,
+          student.graduation_year.toString(),
+          `${student.verified_count}/${student.total_certifications}`,
+          stage === 'none' ? '-' : stage,
+          isFav ? '⭐' : '-'
+        ];
+      });
+      
+      // Add table
+      autoTable(doc, {
+        startY: 40,
+        head: [['Name', 'University', 'Major', 'Grad Year', 'Verified Certs', 'Stage', 'Favorite']],
+        body: tableData,
+        theme: 'striped',
+        headStyles: { fillColor: [79, 70, 229] }, // Indigo
+        styles: { fontSize: 9, cellPadding: 3 },
+        columnStyles: {
+          0: { cellWidth: 35 },
+          1: { cellWidth: 40 },
+          2: { cellWidth: 30 },
+          3: { cellWidth: 20 },
+          4: { cellWidth: 25 },
+          5: { cellWidth: 25 },
+          6: { cellWidth: 15 }
+        }
+      });
+      
+      // Save PDF
+      const filename = `talent_report_${new Date().toISOString().split('T')[0]}.pdf`;
+      doc.save(filename);
+      
+      alert(`✅ Exported ${selectedStudentsList.length} student(s) to PDF`);
+      
+    } catch (error) {
+      console.error('PDF export error:', error);
+      alert('Failed to export PDF. Please try again.');
     }
   };
 
@@ -259,17 +472,43 @@ export default function RecruiterDashboard() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Analytics Cards */}
+        {/* Analytics Cards - Recruiter Metrics */}
         {analytics && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Users className="w-6 h-6 text-blue-600" />
+                <div className="p-2 bg-indigo-100 rounded-lg">
+                  <Users className="w-6 h-6 text-indigo-600" />
                 </div>
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Students</p>
-                  <p className="text-2xl font-bold text-gray-900">{analytics.total_students}</p>
+                  <p className="text-sm font-medium text-gray-600">Talent Pool</p>
+                  <p className="text-2xl font-bold text-gray-900">{analytics.total_students || 0}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center">
+                <div className="p-2 bg-purple-100 rounded-lg">
+                  <Mail className="w-6 h-6 text-purple-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Contacted</p>
+                  <p className="text-2xl font-bold text-gray-900">{analytics.contacted_students || 0}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <TrendingUp className="w-6 h-6 text-blue-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Engagement Rate</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {analytics.engagement_rate || 0}%
+                  </p>
                 </div>
               </div>
             </div>
@@ -280,33 +519,9 @@ export default function RecruiterDashboard() {
                   <CheckCircle className="w-6 h-6 text-green-600" />
                 </div>
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Verified Certificates</p>
-                  <p className="text-2xl font-bold text-gray-900">{analytics.verified_certifications}</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-yellow-100 rounded-lg">
-                  <Clock className="w-6 h-6 text-yellow-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Pending Review</p>
-                  <p className="text-2xl font-bold text-gray-900">{analytics.pending_certifications}</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-purple-100 rounded-lg">
-                  <TrendingUp className="w-6 h-6 text-purple-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Avg Confidence</p>
+                  <p className="text-sm font-medium text-gray-600">Response Rate</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {Math.round(analytics.average_confidence * 100)}%
+                    {analytics.response_rate || 0}%
                   </p>
                 </div>
               </div>
@@ -389,31 +604,32 @@ export default function RecruiterDashboard() {
           </div>
         </div>
 
-        {/* Bulk Actions */}
+        {/* Bulk Actions - Recruiter Specific */}
         {selectedStudents.length > 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
             <div className="flex items-center justify-between">
-              <span className="text-blue-800 font-medium">
+              <span className="text-indigo-800 font-medium">
                 {selectedStudents.length} student{selectedStudents.length !== 1 ? 's' : ''} selected
               </span>
               <div className="flex gap-2">
                 <button
-                  onClick={() => handleBulkAction('verify')}
-                  className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+                  onClick={() => handleBulkAction('contact')}
+                  className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 flex items-center"
                 >
-                  Verify All
+                  <Mail className="w-4 h-4 mr-1" />
+                  Contact All
+                </button>
+                <button
+                  onClick={() => handleBulkAction('favorite')}
+                  className="px-3 py-1 bg-yellow-600 text-white rounded text-sm hover:bg-yellow-700"
+                >
+                  Add to Favorites
                 </button>
                 <button
                   onClick={() => handleBulkAction('export')}
-                  className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+                  className="px-3 py-1 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700"
                 >
-                  Export
-                </button>
-                <button
-                  onClick={() => handleBulkAction('contact')}
-                  className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700"
-                >
-                  Contact
+                  Export PDF
                 </button>
               </div>
             </div>
@@ -494,63 +710,96 @@ export default function RecruiterDashboard() {
                   </div>
                   <div className="flex space-x-2">
                     <button
+                      onClick={() => toggleFavorite(student.id)}
+                      className={`p-2 ${favorites.has(student.id) ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-500`}
+                      title={favorites.has(student.id) ? 'Remove from favorites' : 'Add to favorites'}
+                    >
+                      <Star className={`w-4 h-4 ${favorites.has(student.id) ? 'fill-current' : ''}`} />
+                    </button>
+                    <button
+                      onClick={() => contactStudent(student)}
+                      className="p-2 text-gray-400 hover:text-purple-600"
+                      title="Contact Student"
+                    >
+                      <Mail className="w-4 h-4" />
+                    </button>
+                    <button
                       onClick={() => window.open(`/recruiter/student/${student.id}`, '_blank')}
-                      className="p-2 text-gray-400 hover:text-blue-600"
+                      className="p-2 text-gray-400 hover:text-indigo-600"
                       title="View Details"
                     >
                       <Eye className="w-4 h-4" />
                     </button>
-                    <button
-                      className="p-2 text-gray-400 hover:text-green-600"
-                      title="Contact"
-                    >
-                      <Mail className="w-4 h-4" />
-                    </button>
                   </div>
                 </div>
 
+                {/* Pipeline Stage Indicator */}
+                {pipelineStages[student.id] && (
+                  <div className="mb-3">
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      pipelineStages[student.id] === 'shortlisted' ? 'bg-blue-100 text-blue-800' :
+                      pipelineStages[student.id] === 'contacted' ? 'bg-purple-100 text-purple-800' :
+                      pipelineStages[student.id] === 'interviewed' ? 'bg-yellow-100 text-yellow-800' :
+                      pipelineStages[student.id] === 'offered' ? 'bg-green-100 text-green-800' :
+                      'bg-red-100 text-red-800'
+                    }`}>
+                      {pipelineStages[student.id].charAt(0).toUpperCase() + pipelineStages[student.id].slice(1)}
+                    </span>
+                  </div>
+                )}
+
                 {/* Skills */}
                 <div className="mb-4">
+                  <p className="text-xs font-medium text-gray-500 mb-2">SKILLS</p>
                   <div className="flex flex-wrap gap-1">
-                    {student.skills.slice(0, 3).map((skill, index) => (
+                    {student.skills.slice(0, 5).map((skill, index) => (
                       <span
                         key={index}
-                        className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                        className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
                       >
                         {skill}
                       </span>
                     ))}
-                    {student.skills.length > 3 && (
+                    {student.skills.length > 5 && (
                       <span className="text-xs text-gray-500">
-                        +{student.skills.length - 3} more
+                        +{student.skills.length - 5} more
                       </span>
                     )}
                   </div>
                 </div>
 
-                {/* Certifications */}
+                {/* Student Info */}
+                <div className="mb-4 space-y-2">
+                  <div className="flex items-center text-sm text-gray-600">
+                    <span className="font-medium mr-2">GPA:</span>
+                    <span>{student.gpa || 'N/A'}</span>
+                  </div>
+                  <div className="flex items-center text-sm text-gray-600">
+                    <span className="font-medium mr-2">Location:</span>
+                    <span>{student.location || 'N/A'}</span>
+                  </div>
+                </div>
+
+                {/* Certifications Summary */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Certifications</span>
-                    <span className="font-medium">
-                      {student.verified_count}/{student.total_certifications} verified
+                    <span className="text-gray-600 font-medium">Verified Certifications</span>
+                    <span className="font-bold text-green-600">
+                      {student.verified_count}/{student.total_certifications}
                     </span>
                   </div>
                   {student.certifications.slice(0, 2).map((cert) => (
-                    <div key={cert.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                      <div className="flex items-center space-x-2">
+                    <div key={cert.id} className="p-2 bg-gray-50 rounded border border-gray-200">
+                      <div className="flex items-start space-x-2">
                         {getVerificationStatusIcon(cert.verification_status)}
-                        <span className="text-sm font-medium text-gray-900">{cert.title}</span>
-                        <span className={`text-xs px-2 py-1 rounded ${getConfidenceColor(cert.confidence_score)}`}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{cert.title}</p>
+                          <p className="text-xs text-gray-500">{cert.issuer}</p>
+                        </div>
+                        <span className={`text-xs px-2 py-1 rounded font-medium ${getConfidenceColor(cert.confidence_score)}`}>
                           {Math.round(cert.confidence_score * 100)}%
                         </span>
                       </div>
-                      <button
-                        onClick={() => bulkVerify([cert.id])}
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        Verify
-                      </button>
                     </div>
                   ))}
                   {student.certifications.length > 2 && (
@@ -560,22 +809,46 @@ export default function RecruiterDashboard() {
                   )}
                 </div>
 
+                {/* Pipeline Management */}
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <p className="text-xs font-medium text-gray-500 mb-2">PIPELINE STAGE</p>
+                  <select
+                    value={pipelineStages[student.id] || 'none'}
+                    onChange={(e) => updatePipelineStage(student.id, e.target.value as PipelineStage)}
+                    className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  >
+                    <option value="none">No Stage</option>
+                    <option value="shortlisted">📋 Shortlisted</option>
+                    <option value="contacted">📧 Contacted</option>
+                    <option value="interviewed">🎤 Interviewed</option>
+                    <option value="offered">🎉 Offered</option>
+                    <option value="rejected">❌ Rejected</option>
+                  </select>
+                </div>
+
                 {/* Actions */}
                 <div className="mt-4 pt-4 border-t border-gray-200">
-                  <div className="flex justify-between">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
-                      onClick={() => window.open(`/recruiter/student/${student.id}`, '_blank')}
-                      className="flex items-center text-sm text-blue-600 hover:text-blue-800"
+                      onClick={() => contactStudent(student)}
+                      className="flex items-center justify-center text-sm text-white bg-purple-600 hover:bg-purple-700 px-2 py-2 rounded-lg transition-colors"
+                      title="Send email"
                     >
-                      <Eye className="w-4 h-4 mr-1" />
-                      View Profile
+                      <Mail className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => bulkVerify(student.certifications.map(c => c.id))}
-                      className="flex items-center text-sm text-green-600 hover:text-green-800"
+                      onClick={() => viewContactHistory(student)}
+                      className="flex items-center justify-center text-sm text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-2 py-2 rounded-lg transition-colors"
+                      title="View contact history"
                     >
-                      <CheckCircle className="w-4 h-4 mr-1" />
-                      Verify All
+                      <Clock className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => window.open(`/recruiter/student/${student.id}`, '_blank')}
+                      className="flex items-center justify-center text-sm text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-2 rounded-lg transition-colors"
+                      title="View full profile"
+                    >
+                      <Eye className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
@@ -607,6 +880,106 @@ export default function RecruiterDashboard() {
           </div>
         )}
       </div>
+      
+      {/* Contact History Modal */}
+      {showContactHistory && selectedStudentForHistory && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold">{selectedStudentForHistory.name}</h2>
+                  <p className="text-purple-100 text-sm">{selectedStudentForHistory.email}</p>
+                </div>
+                <button
+                  onClick={() => setShowContactHistory(false)}
+                  className="text-white hover:text-gray-200 transition-colors"
+                >
+                  <XCircle className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+            
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <Clock className="w-5 h-5 mr-2 text-purple-600" />
+                Contact History
+              </h3>
+              
+              {contactHistory.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Mail className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                  <p>No contact history yet</p>
+                  <p className="text-sm mt-1">Click &quot;Contact&quot; to send your first email</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {contactHistory.map((contact) => (
+                    <div key={contact.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          <Mail className="w-4 h-4 text-purple-600" />
+                          <span className="font-medium text-gray-900 capitalize">{contact.method}</span>
+                          <span className="text-xs text-gray-500">
+                            {new Date(contact.contacted_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          {contact.response_received ? (
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+                              ✓ Responded
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => markContactResponse(contact.id, true)}
+                              className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-2 py-1 rounded-full font-medium transition-colors"
+                            >
+                              Mark as Responded
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {contact.notes && (
+                        <p className="text-sm text-gray-600 ml-6">{contact.notes}</p>
+                      )}
+                      
+                      {contact.response_received && contact.response_at && (
+                        <p className="text-xs text-green-600 ml-6 mt-1">
+                          Responded on {new Date(contact.response_at).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
+              <p className="text-sm text-gray-600">
+                Total Contacts: <span className="font-semibold">{contactHistory.length}</span>
+                {contactHistory.length > 0 && (
+                  <>
+                    {' '} | Responses: <span className="font-semibold text-green-600">
+                      {contactHistory.filter(c => c.response_received).length}
+                    </span>
+                  </>
+                )}
+              </p>
+              <button
+                onClick={() => contactStudent(selectedStudentForHistory)}
+                className="flex items-center text-sm text-white bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition-colors"
+              >
+                <Mail className="w-4 h-4 mr-2" />
+                Send New Email
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
