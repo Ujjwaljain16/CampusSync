@@ -6,7 +6,8 @@ function coerceProfilePayload(base: Record<string, any>, extras: Record<string, 
 	const payload: Record<string, any> = {
 		id: base.id,
 		full_name: extras.full_name,
-		role: 'student',
+		role: extras.role || 'student', // Default to student if not specified
+		email: base.email, // Include email from auth user
 	};
 	// Optimistically include optional fields if present in request
 	['university', 'graduation_year', 'major', 'location', 'gpa'].forEach((k) => {
@@ -19,7 +20,17 @@ function coerceProfilePayload(base: Record<string, any>, extras: Record<string, 
 
 export async function POST(request: NextRequest) {
 	try {
-		const { access_token, refresh_token, full_name, university, graduation_year, major, location, gpa } = await request.json();
+		const body = await request.json();
+		const access_token = body.access_token;
+		const refresh_token = body.refresh_token;
+		// Support both snake_case and camelCase keys for safety
+		const full_name = body.full_name ?? body.fullName ?? '';
+		const university = body.university;
+		const graduation_year = body.graduation_year ?? body.graduationYear;
+		const major = body.major;
+		const location = body.location;
+		const gpa = body.gpa;
+		const requested_role: 'student' | 'recruiter' | 'faculty' | 'admin' | undefined = body.requested_role ?? body.requestedRole;
 
 		if (!access_token || !refresh_token) {
 			return NextResponse.json({ error: 'Missing tokens' }, { status: 400 });
@@ -45,10 +56,18 @@ export async function POST(request: NextRequest) {
 		);
 
 		// Establish session first so RLS allows profile/roles writes
-		const { error: setSessionError } = await supabase.auth.setSession({ access_token, refresh_token });
-		if (setSessionError) {
-			console.error('[complete-signup] setSessionError:', setSessionError);
-			return NextResponse.json({ error: setSessionError.message || 'Failed to set session' }, { status: 500 });
+		if (refresh_token) {
+			const { error: setSessionError } = await supabase.auth.setSession({ 
+				access_token, 
+				refresh_token
+			});
+			if (setSessionError) {
+				console.error('[complete-signup] setSessionError:', setSessionError);
+				// Don't fail completely, try to continue without session
+				console.log('[complete-signup] Continuing without session...');
+			}
+		} else {
+			console.warn('[complete-signup] refresh_token missing; skipping setSession');
 		}
 
 		const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -57,34 +76,71 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json({ error: userError?.message || 'User not found' }, { status: 500 });
 		}
 
-		// If a full_name is provided, upsert profile; otherwise skip and rely on onboarding later
-		if (typeof full_name === 'string' && full_name.trim().length > 0) {
-			const attempt = coerceProfilePayload({ id: user.id }, { full_name, university, graduation_year, major, location, gpa });
-			let profileError: any = null;
-			try {
-				const { error } = await supabase.from('profiles').upsert(attempt, { onConflict: 'id' });
-				profileError = error;
-			} catch (e: any) {
-				console.error('[complete-signup] profile upsert exception:', e);
-				profileError = e;
+		// ALWAYS create/update profile first (required for foreign key constraint on role_requests)
+		const role = body.role || 'student'; // Get role from request body
+		const profileFullName = (typeof full_name === 'string' && full_name.trim().length > 0) 
+			? full_name.trim() 
+			: 'New User'; // Fallback name if not provided
+			
+		const attempt = coerceProfilePayload(
+			{ id: user.id, email: user.email }, 
+			{ full_name: profileFullName, role, university, graduation_year, major, location, gpa }
+		);
+		
+		let profileError: any = null;
+		try {
+			const { error } = await supabase.from('profiles').upsert(attempt, { onConflict: 'id' });
+			profileError = error;
+			if (!error) {
+				console.log('[complete-signup] Profile created/updated successfully');
 			}
-			if (profileError) {
-				// Retry with only known-safe columns
-				const minimal = { id: user.id, full_name, role: 'student' } as any;
-				const { error: retryErr } = await supabase.from('profiles').upsert(minimal, { onConflict: 'id' });
-				if (retryErr) {
-					console.error('[complete-signup] minimal profile upsert failed:', retryErr);
-					return NextResponse.json({ error: retryErr.message || 'Profile upsert failed' }, { status: 500 });
-				}
+		} catch (e: any) {
+			console.error('[complete-signup] profile upsert exception:', e);
+			profileError = e;
+		}
+		
+		if (profileError) {
+			// Retry with only known-safe columns
+			const minimal: any = { id: user.id, full_name: profileFullName, email: user.email };
+			const { error: retryErr } = await supabase.from('profiles').upsert(minimal, { onConflict: 'id' });
+			if (retryErr) {
+				console.error('[complete-signup] minimal profile upsert failed:', retryErr);
+				return NextResponse.json({ error: retryErr.message || 'Profile upsert failed' }, { status: 500 });
 			}
+			console.log('[complete-signup] Profile created with minimal data on retry');
 		}
 
-		// Ensure user_roles has student role (best-effort under RLS)
-		try {
-			// Prefer server-side RPC to avoid client RLS friction
-			await supabase.rpc('ensure_student_role', { p_user_id: user.id });
-		} catch (e) {
-			console.error('[complete-signup] ensure_student_role exception:', e);
+		// Assign roles based on role (role variable already defined above)
+		console.log('[complete-signup] Processing role:', role, 'for user:', user.id);
+		
+		if (role === 'student' || !role) {
+			// Ensure user_roles has student role (best-effort under RLS)
+			try {
+				await supabase.rpc('ensure_student_role', { p_user_id: user.id });
+				console.log('[complete-signup] Student role assigned successfully');
+			} catch (e) {
+				console.error('[complete-signup] ensure_student_role exception:', e);
+			}
+		} else {
+			// Create role request for recruiter/faculty/admin
+			console.log('[complete-signup] Creating role request for:', role);
+			try {
+				const { data: insertData, error: rrError } = await supabase.from('role_requests').insert({
+					user_id: user.id,
+					requested_role: role,
+					status: 'pending',
+					metadata: { source: 'complete-signup', timestamp: new Date().toISOString() }
+				}).select();
+				
+				if (rrError) {
+					console.error('[complete-signup] role request insert error:', rrError);
+					console.error('[complete-signup] error details:', JSON.stringify(rrError, null, 2));
+				} else {
+					console.log('[complete-signup] role request created successfully:', insertData);
+				}
+			} catch (e) {
+				console.error('[complete-signup] role request insert exception:', e);
+			}
 		}
 
 		return response;
