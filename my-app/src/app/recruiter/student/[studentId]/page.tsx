@@ -217,12 +217,12 @@ export default function StudentDetailPage() {
               <div className="flex items-center mb-6">
                 <div className="h-20 w-20 rounded-full bg-blue-100 flex items-center justify-center">
                   <span className="text-2xl font-medium text-blue-600">
-                    {student.name.split(' ').map(n => n[0]).join('')}
+                    {student.name?.split(' ').map(n => n[0]).join('') || 'ST'}
                   </span>
                 </div>
                 <div className="ml-4">
-                  <h3 className="text-lg font-medium text-gray-900">{student.name}</h3>
-                  <p className="text-sm text-gray-500">{student.major}</p>
+                  <h3 className="text-lg font-medium text-gray-900">{student.name || 'Unknown Student'}</h3>
+                  <p className="text-sm text-gray-500">{student.major || 'N/A'}</p>
                 </div>
               </div>
 

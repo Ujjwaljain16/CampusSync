@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '../../../../lib/supabaseServer';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function POST(req: NextRequest) {
 	try {
@@ -21,5 +21,6 @@ export async function POST(req: NextRequest) {
 		return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
 	}
 }
+
 
 

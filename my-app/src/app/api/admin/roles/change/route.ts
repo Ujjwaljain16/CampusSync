@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, createSupabaseAdminClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole, createSupabaseAdminClient } from '@/lib/supabaseServer';
 
 interface RoleChangeRequest {
   user_id: string;
@@ -236,3 +236,4 @@ async function handlePostRoleChange(
   // Could add cache invalidation here
   // Could add session refresh requirements here
 }
+

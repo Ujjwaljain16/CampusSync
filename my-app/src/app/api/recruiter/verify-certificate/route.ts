@@ -1,110 +1,85 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const { user, role } = await getServerUserWithRole();
-    
-    // Check if user is recruiter or admin
-    if (!user || (role !== 'recruiter' && role !== 'admin')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await requireRole(['recruiter', 'admin']);
+    if (!auth.authorized) {
+      return NextResponse.json({ error: auth.message }, { status: auth.status });
     }
 
-    const body = await request.json();
-    const { certificate_id, action } = body;
+    const body = await req.json().catch(() => null) as {
+      certificate_id: string;
+      action: 'verify' | 'flag';
+      notes?: string;
+    } | null;
 
-    if (!certificate_id) {
-      return NextResponse.json({ error: 'Certificate ID is required' }, { status: 400 });
-    }
-
-    if (!action || !['verify', 'reject'].includes(action)) {
-      return NextResponse.json({ error: 'Action must be "verify" or "reject"' }, { status: 400 });
+    if (!body || !body.certificate_id || !body.action) {
+      return NextResponse.json({ 
+        error: 'Missing required fields: certificate_id, action' 
+      }, { status: 400 });
     }
 
     const supabase = await createSupabaseServerClient();
-    const newStatus = action === 'verify' ? 'verified' : 'rejected';
-
-    // Get current certificate details
-    const { data: certificate, error: fetchError } = await supabase
+    
+    // Get the certificate
+    const { data: certificate, error: certError } = await supabase
       .from('certificates')
-      .select('id, student_id, title, verification_status')
-      .eq('id', certificate_id)
+      .select('*')
+      .eq('id', body.certificate_id)
       .single();
 
-    if (fetchError || !certificate) {
+    if (certError || !certificate) {
       return NextResponse.json({ error: 'Certificate not found' }, { status: 404 });
     }
 
-    // Update certificate status
-    const { error: updateError } = await supabase
+    // Update verification status
+    const updateData = {
+      recruiter_verified: body.action === 'verify',
+      recruiter_notes: body.notes || null,
+      verified_by_recruiter: auth.user?.id,
+      recruiter_verification_date: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
       .from('certificates')
-      .update({ 
-        verification_status: newStatus,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', certificate_id);
+      .update(updateData)
+      .eq('id', body.certificate_id)
+      .select()
+      .single();
 
-    if (updateError) {
-      console.error('Error updating certificate:', updateError);
-      return NextResponse.json({ error: 'Failed to update certificate' }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Create audit log (align with existing schema)
-    const { error: auditError } = await supabase
-      .from('audit_logs')
-      .insert({
-        user_id: user.id,
-        action: `certificate_${action}`,
-        target_id: certificate_id,
-        details: {
-          student_id: certificate.student_id,
-          certificate_title: certificate.title,
-          previous_status: certificate.verification_status,
-          new_status: newStatus,
-          verified_by: user.id,
-          verified_at: new Date().toISOString()
-        },
-        created_at: new Date().toISOString()
-      });
-
-    if (auditError) {
-      console.error('Error creating audit log:', auditError);
-      // Don't fail the request for audit log errors
-    }
-
-    // If verifying, issue VC for the certificate
-    if (action === 'verify') {
-      try {
-        const vcResponse = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/vc/issue`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${user.id}` // In production, use proper auth
-          },
-          body: JSON.stringify({
-            certificate_id: certificate_id,
-            student_id: certificate.student_id
-          })
-        });
-
-        if (!vcResponse.ok) {
-          console.error('Failed to issue VC for certificate');
-        }
-      } catch (vcError) {
-        console.error('Error issuing VC:', vcError);
-        // Don't fail the request for VC issuance errors
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: `Certificate successfully ${action}ed`,
-      certificate_id: certificate_id,
-      new_status: newStatus
+    // Log the verification action
+    await supabase.from('audit_logs').insert({
+      user_id: auth.user?.id,
+      action: 'recruiter_certificate_verification',
+      target_id: body.certificate_id,
+      details: {
+        action: body.action,
+        notes: body.notes,
+        certificate_title: certificate.title,
+        student_id: certificate.student_id
+      },
+      created_at: new Date().toISOString()
     });
 
-  } catch (error) {
-    console.error('Verify certificate API error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({
+      data: {
+        certificate_id: body.certificate_id,
+        action: body.action,
+        verified: body.action === 'verify',
+        verification_date: updateData.recruiter_verification_date
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Certificate verification error:', error);
+    return NextResponse.json({ 
+      error: error.message || 'Internal server error' 
+    }, { status: 500 });
   }
 }

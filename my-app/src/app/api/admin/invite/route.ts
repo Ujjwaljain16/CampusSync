@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, createSupabaseAdminClient, requireRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, createSupabaseAdminClient, requireRole } from '@/lib/supabaseServer';
 
 // POST /api/admin/invite - Send admin invitation email
 export async function POST(req: NextRequest) {
@@ -119,3 +119,4 @@ export async function POST(req: NextRequest) {
     }, { status: 500 });
   }
 }
+

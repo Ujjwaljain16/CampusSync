@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createSupabaseServerClient, getServerUserWithRole } from '../../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
 
 export async function GET() {
 	const { user, role } = await getServerUserWithRole();
@@ -13,5 +13,6 @@ export async function GET() {
 		.eq('status', 'pending');
 	return NextResponse.json({ pending: count || 0 });
 }
+
 
 

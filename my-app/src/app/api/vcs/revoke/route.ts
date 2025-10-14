@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '@/lib/supabaseServer';
 
 export async function POST(req: NextRequest) {
   const auth = await requireRole(['admin', 'faculty']);
@@ -52,5 +52,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ data: { status: 'revoked', credentialId: body.credentialId } });
 }
+
 
 

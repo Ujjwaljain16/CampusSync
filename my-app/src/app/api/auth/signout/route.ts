@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function POST() {
 	const supabase = await createSupabaseServerClient();
@@ -9,5 +9,6 @@ export async function POST() {
 	}
 	return NextResponse.json({ success: true });
 }
+
 
 

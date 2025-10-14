@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireRole, createSupabaseServerClient, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { requireRole, createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
 import { emailService } from '../../../../../lib/emailService';
 
 export async function POST(req: NextRequest) {
@@ -93,5 +93,6 @@ export async function POST(req: NextRequest) {
 
 	return NextResponse.json({ data: { certificateId: body.certificateId, status: body.status } });
 }
+
 
 

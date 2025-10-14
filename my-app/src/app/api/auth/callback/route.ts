@@ -131,11 +131,11 @@ export async function GET(request: NextRequest) {
 					// Update to admin
 					const { error: updateError } = await supabase
 						.from('user_roles')
-						.update({
-							role: 'admin',
-							assigned_by: 'system',
-							updated_at: new Date().toISOString()
-						})
+					.update({
+						role: 'admin',
+						assigned_by: user.id,
+						updated_at: new Date().toISOString()
+					})
 						.eq('user_id', user.id);
 					
 					if (updateError) {
@@ -148,13 +148,13 @@ export async function GET(request: NextRequest) {
 				// User has no role, insert admin role
 				const { error: insertError } = await supabase
 					.from('user_roles')
-					.insert({
-						user_id: user.id,
-						role: 'admin',
-						assigned_by: 'system',
-						created_at: new Date().toISOString(),
-						updated_at: new Date().toISOString()
-					});
+				.insert({
+					user_id: user.id,
+					role: 'admin',
+					assigned_by: user.id,
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString()
+				});
 				
 				if (insertError) {
 					console.error('Error inserting admin role:', insertError);

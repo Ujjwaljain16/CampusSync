@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
-// Logout button is provided globally in layout
+import LogoutButton from '../../../components/LogoutButton';
 
 interface PendingCert {
   id: string;
@@ -62,21 +62,56 @@ export default function FacultyDashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/certificates/pending');
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to load');
-      
-      // Fetch verification details for each certificate
+      // Try documents pending first, fallback to certificates
+      let pending: PendingCert[] = [];
+      try {
+        const dres = await fetch('/api/documents/pending');
+        if (dres.ok) {
+          const dj = await dres.json();
+          pending = (dj.data || []).map((d: any) => ({
+            id: d.id,
+            title: d.title,
+            institution: d.institution || '',
+            date_issued: d.issue_date || d.created_at,
+            file_url: d.file_url,
+            user_id: d.student_id,
+            created_at: d.created_at,
+          }));
+        }
+      } catch {}
+
+      if (!pending || pending.length === 0) {
+        const res = await fetch('/api/certificates/pending');
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to load');
+        pending = json.data as PendingCert[];
+      }
+
+      // Fetch verification details for each
       const certificatesWithDetails = await Promise.all(
-        (json.data as PendingCert[]).map(async (cert) => {
+        (pending as PendingCert[]).map(async (cert) => {
           try {
-            const mdRes = await fetch(`/api/certificates/metadata/${encodeURIComponent(cert.id)}`);
-            if (mdRes.ok) {
-              const md = await mdRes.json();
+            // Prefer document metadata
+            let md: any = null;
+            const dmd = await fetch(`/api/documents/${encodeURIComponent(cert.id)}/metadata`);
+            if (dmd.ok) {
+              md = await dmd.json();
+              if (md?.data) {
+                return {
+                  ...cert,
+                  confidence_score: md?.data?.ai_confidence_score || 0,
+                  verification_details: md?.data?.verification_details || {}
+                };
+              }
+            }
+
+            const cmdRes = await fetch(`/api/certificates/metadata/${encodeURIComponent(cert.id)}`);
+            if (cmdRes.ok) {
+              const cmd = await cmdRes.json();
               return {
                 ...cert,
-                confidence_score: md?.data?.ai_confidence_score || 0,
-                verification_details: md?.data?.verification_details || {}
+                confidence_score: cmd?.data?.ai_confidence_score || 0,
+                verification_details: cmd?.data?.verification_details || {}
               };
             }
           } catch (e) {
@@ -482,15 +517,21 @@ export default function FacultyDashboardPage() {
       <div className="max-w-6xl mx-auto px-6">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-3 bg-gradient-to-r from-orange-500/20 to-red-500/20 rounded-2xl backdrop-blur-sm border border-white/10">
-              <Users className="w-8 h-8 text-orange-300" />
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-gradient-to-r from-orange-500/20 to-red-500/20 rounded-2xl backdrop-blur-sm border border-white/10">
+                <Users className="w-8 h-8 text-orange-300" />
+              </div>
+              <div>
+                <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-orange-200 to-red-200 bg-clip-text text-transparent">
+                  Faculty Dashboard
+                </h1>
+                <p className="text-white/70 text-lg">Review and approve certificate submissions</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-orange-200 to-red-200 bg-clip-text text-transparent">
-                Faculty Dashboard
-              </h1>
-              <p className="text-white/70 text-lg">Review and approve certificate submissions</p>
+            
+            <div className="flex items-center gap-3">
+              <LogoutButton variant="danger" />
             </div>
           </div>
           

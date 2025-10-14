@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '../../../../../lib/supabaseServer';
-import { ProductionVCIssuer, type IssuanceRequest } from '../../../../../lib/vc/vcIssuer';
-import { ProductionKeyManager } from '../../../../../lib/vc/productionKeyManager';
-import type { CredentialSubject } from '../../../../types';
+import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '@/lib/supabaseServer';
+import { ProductionVCIssuer, type IssuanceRequest } from '@/lib/vc/vcIssuer';
+import { ProductionKeyManager } from '@/lib/vc/productionKeyManager';
+import type { CredentialSubject } from '@/types';
 
 export async function POST(req: NextRequest) {
   try {

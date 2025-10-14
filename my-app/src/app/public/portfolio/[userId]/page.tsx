@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import type { VerifiableCredential } from '../../../../types';
+import type { VerifiableCredential } from '@/types/index';
 
 interface Row {
   id: string;
@@ -10,8 +10,12 @@ interface Row {
   credential: VerifiableCredential;
 }
 
-export default function PublicPortfolioPage({ params }: { params: { userId: string } }) {
-  const { userId } = params;
+export default function PublicPortfolioPage({ params }: { params: Promise<{ userId: string }> }) {
+  const [userId, setUserId] = useState<string>('');
+  
+  useEffect(() => {
+    params.then(p => setUserId(p.userId));
+  }, [params]);
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

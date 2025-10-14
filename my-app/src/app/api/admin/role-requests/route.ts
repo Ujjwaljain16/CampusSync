@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
 
 export async function GET(req: NextRequest) {
 	try {
@@ -46,5 +46,6 @@ export async function GET(req: NextRequest) {
 		return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
 	}
 }
+
 
 

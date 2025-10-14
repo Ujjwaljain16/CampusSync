@@ -1,124 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
 
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireRole(['faculty', 'admin']);
-    
     if (!auth.authorized) {
       return NextResponse.json({ error: auth.message }, { status: auth.status });
     }
 
-    const { certificateIds, action } = await req.json();
+    const body = await req.json().catch(() => null) as {
+      certificateIds: string[];
+      status: 'approved' | 'rejected';
+      reason: string;
+    } | null;
 
-    if (!certificateIds || !Array.isArray(certificateIds) || certificateIds.length === 0) {
-      return NextResponse.json({ error: 'Certificate IDs are required' }, { status: 400 });
-    }
-
-    if (!action || !['approve', 'reject'].includes(action)) {
-      return NextResponse.json({ error: 'Action must be "approve" or "reject"' }, { status: 400 });
+    if (!body || !body.certificateIds || !body.status) {
+      return NextResponse.json({ 
+        error: 'Missing required fields: certificateIds, status' 
+      }, { status: 400 });
     }
 
     const supabase = await createSupabaseServerClient();
-    const results = [];
+    
+    // Update all certificates
+    const { data, error } = await supabase
+      .from('certificates')
+      .update({
+        verification_status: body.status,
+        faculty_notes: body.reason,
+        reviewed_by: auth.user?.id,
+        reviewed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .in('id', body.certificateIds)
+      .select();
 
-    for (const certificateId of certificateIds) {
-      try {
-        // Get certificate details for VC issuance if approving
-        let certificate = null;
-        if (action === 'approve') {
-          const { data: cert, error: certError } = await supabase
-            .from('certificates')
-            .select('*')
-            .eq('id', certificateId)
-            .single();
-
-          if (certError || !cert) {
-            results.push({ certificateId, success: false, error: 'Certificate not found' });
-            continue;
-          }
-          certificate = cert;
-        }
-
-        // Update certificate status
-        const { error: updateError } = await supabase
-          .from('certificates')
-          .update({ 
-            verification_status: action === 'approve' ? 'verified' : 'rejected',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', certificateId);
-
-        if (updateError) {
-          results.push({ certificateId, success: false, error: updateError.message });
-          continue;
-        }
-
-        // Issue VC if approving
-        if (action === 'approve' && certificate) {
-          try {
-            const subject = {
-              id: certificate.user_id,
-              certificateId: certificate.id,
-              title: certificate.title,
-              institution: certificate.institution,
-              dateIssued: certificate.date_issued,
-              description: certificate.description,
-            };
-
-            const vcResponse = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/certificates/issue`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ credentialSubject: subject }),
-            });
-
-            if (!vcResponse.ok) {
-              console.error(`Failed to issue VC for certificate ${certificateId}`);
-            }
-          } catch (vcError) {
-            console.error(`VC issuance error for certificate ${certificateId}:`, vcError);
-          }
-        }
-
-        // Audit log for batch action
-        try {
-          await supabase.from('audit_logs').insert({
-            user_id: user?.id ?? null,
-            action: action === 'approve' ? 'batch_approve' : 'batch_reject',
-            target_id: certificateId,
-            details: { 
-              action,
-              batchSize: certificateIds.length,
-              batchIndex: certificateIds.indexOf(certificateId) + 1
-            },
-            created_at: new Date().toISOString(),
-          });
-        } catch (auditError) {
-          console.error('Failed to log batch action:', auditError);
-          // Don't fail the operation if audit logging fails
-        }
-
-        results.push({ certificateId, success: true });
-
-      } catch (error: any) {
-        results.push({ 
-          certificateId, 
-          success: false, 
-          error: error.message || 'Unknown error' 
-        });
-      }
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const successCount = results.filter(r => r.success).length;
-    const failureCount = results.filter(r => !r.success).length;
+    // Log the batch action
+    await supabase.from('audit_logs').insert({
+      user_id: auth.user?.id,
+      action: 'batch_certificate_review',
+      target_id: body.certificateIds.join(','),
+      details: {
+        status: body.status,
+        reason: body.reason,
+        count: body.certificateIds.length
+      },
+      created_at: new Date().toISOString()
+    });
 
     return NextResponse.json({
       data: {
-        action,
-        totalProcessed: certificateIds.length,
-        successCount,
-        failureCount,
-        results
+        updated: data?.length || 0,
+        status: body.status,
+        certificateIds: body.certificateIds
       }
     });
 

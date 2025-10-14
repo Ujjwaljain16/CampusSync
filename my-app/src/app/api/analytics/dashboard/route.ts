@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
 
 export async function GET(req: NextRequest) {
   const auth = await requireRole(['admin']);
@@ -176,3 +176,4 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+

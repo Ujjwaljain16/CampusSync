@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '@/lib/supabaseServer';
 import { VCRevocationManager } from '../../../../../lib/vc/vcRevocationManager';
 import type { VerifiableCredential } from '../../../../types';
 
@@ -83,6 +83,18 @@ export async function POST(req: NextRequest) {
       }, { status: 500 });
     }
 
+    // Write to status registry
+    await supabase.from('vc_status_registry').insert({
+      credential_id: body.credentialId,
+      status: 'revoked',
+      reason_code: body.reasonCode,
+      reason: revocationRecord.reason.description,
+      issuer: credential.issuer,
+      subject_id: credential.user_id || null,
+      recorded_by: user.id,
+      metadata: { revocationId: revocationRecord.id }
+    });
+
     // Log the revocation
     await supabase.from('audit_logs').insert({
       user_id: user.id,
@@ -135,3 +147,4 @@ export async function GET(req: NextRequest) {
     }, { status: 500 });
   }
 }
+

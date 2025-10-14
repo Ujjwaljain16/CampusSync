@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { getIssuerJwk, verifyCredentialJws } from '../../../../../lib/vc';
 import type { VerifiableCredential } from '../../../../types';
 
@@ -250,3 +250,4 @@ export async function GET(req: NextRequest) {
     }, { status: 500 });
   }
 }
+

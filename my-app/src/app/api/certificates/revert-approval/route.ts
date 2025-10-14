@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '@/lib/supabaseServer';
 
 export async function POST(req: NextRequest) {
   try {
@@ -110,3 +110,4 @@ export async function POST(req: NextRequest) {
     }, { status: 500 });
   }
 }
+

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 
 export async function POST(req: NextRequest) {
@@ -231,3 +231,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+

@@ -9,10 +9,25 @@ const supabase = createClient(
 
 export async function POST(request: NextRequest) {
   try {
-    const { documentId, verificationStatus, reason, confidence } = await request.json();
+    // Handle empty body gracefully
+    let body;
+    try {
+      body = await request.json();
+    } catch (error) {
+      // If JSON parsing fails, return 400 for missing data
+      return NextResponse.json({ error: 'Invalid JSON or missing data' }, { status: 400 });
+    }
+    
+    const { documentId, verificationStatus, reason, confidence } = body;
 
     if (!documentId || !verificationStatus) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    // Validate UUID format for documentId
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(documentId)) {
+      return NextResponse.json({ error: 'Invalid document ID format' }, { status: 400 });
     }
 
     // Update document verification status
