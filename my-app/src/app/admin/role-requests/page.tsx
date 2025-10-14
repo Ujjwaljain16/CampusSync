@@ -65,13 +65,20 @@ export default function AdminRoleRequestsPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Failed to ${action} request`);
+      
+      // Immediately remove the request from the UI if we're viewing pending requests
+      if (filterStatus === 'pending') {
+        setRequests(prev => prev.filter(req => req.id !== requestId));
+      }
+      
+      // Then refresh to ensure consistency
       await fetchRequests();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unexpected error');
     } finally {
       setActioning(null);
     }
-  }, [fetchRequests]);
+  }, [fetchRequests, filterStatus]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -222,23 +229,38 @@ export default function AdminRoleRequestsPage() {
                         {new Date(request.created_at).toLocaleDateString()}
                       </td>
                       <td className="p-4">
-                        {request.status === 'pending' && (
+                        {request.status === 'pending' ? (
                           <div className="flex gap-2">
                             <button
                               onClick={() => handleAction(request.id, 'approve')}
                               disabled={actioning === request.id}
-                              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <Check className="w-4 h-4" /> Approve
+                              {actioning === request.id ? (
+                                <>
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                  Processing...
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="w-4 h-4" />
+                                  Approve
+                                </>
+                              )}
                             </button>
                             <button
                               onClick={() => handleAction(request.id, 'deny')}
                               disabled={actioning === request.id}
-                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <X className="w-4 h-4" /> Deny
+                              <X className="w-4 h-4" />
+                              Deny
                             </button>
                           </div>
+                        ) : (
+                          <span className="text-white/60 text-sm italic">
+                            {request.status === 'approved' ? 'Approved' : 'Rejected'}
+                          </span>
                         )}
                       </td>
                     </tr>
