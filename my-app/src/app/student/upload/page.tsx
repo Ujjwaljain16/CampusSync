@@ -2,8 +2,8 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
-import { Upload, FileText, Check, AlertCircle, Eye, Sparkles, Award } from 'lucide-react';
-import Tesseract from 'tesseract.js';
+import Link from 'next/link';
+import { Upload, FileText, Eye, Sparkles, Award, Check, AlertCircle, ArrowLeft } from 'lucide-react';
 
 // OCR extraction result type matching the API
 type OcrExtractionResult = {
@@ -17,38 +17,6 @@ type OcrExtractionResult = {
   certificate_id?: string;
 };
 
-// Verification result type
-type VerificationResult = {
-  certificate_id: string;
-  is_verified: boolean;
-  confidence_score: number;
-  verification_method: string;
-  details: {
-    qr_verification?: {
-      verified: boolean;
-      data?: string;
-      issuer?: string;
-    };
-    logo_match?: {
-      matched: boolean;
-      score: number;
-      issuer?: string;
-    };
-    template_match?: {
-      matched: boolean;
-      score: number;
-      patterns_matched: string[];
-    };
-    ai_confidence?: {
-      score: number;
-      factors: string[];
-    };
-  };
-  auto_approved: boolean;
-  requires_manual_review: boolean;
-  created_at: string;
-};
-
 export default function StudentUploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -58,16 +26,11 @@ export default function StudentUploadPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [enableSmartVerification, setEnableSmartVerification] = useState(true);
-  const [verification, setVerification] = useState<VerificationResult | null>(null);
-  const [recipient, setRecipient] = useState<string>('');
-  const [certificateId, setCertificateId] = useState<string>('');
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setFile(e.target.files?.[0] ?? null);
     setOcr(null);
     setPublicUrl(null);
-    setVerification(null);
     setError(null);
     setSuccess(null);
   }, []);
@@ -91,11 +54,8 @@ export default function StudentUploadPage() {
       setFile(e.dataTransfer.files[0]);
       setOcr(null);
       setPublicUrl(null);
-      setVerification(null);
       setError(null);
       setSuccess(null);
-      setRecipient('');
-      setCertificateId('');
     }
   }, []);
 
@@ -106,94 +66,66 @@ export default function StudentUploadPage() {
     setSuccess(null);
     
     try {
-      // Create FormData for file upload
+      console.log('🎓 Starting certificate extraction with Gemini AI...');
+      const startTime = Date.now();
+      
+      // Use the Gemini Vision API for extraction
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('enableSmartVerification', enableSmartVerification.toString());
-      
-      // Try client-side OCR for instant autofill; send raw text to server
-      // Skip client OCR for PDFs as Tesseract.js doesn't support them
-      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-      if (!isPdf) {
-        try {
-          console.log('Starting client-side OCR...');
-          const { data } = await Tesseract.recognize(file, 'eng', {
-            logger: m => console.log('OCR Progress:', m)
-          });
-          const rawText = data?.text || '';
-          const confidence = data?.confidence ? (data.confidence / 100).toString() : '';
-          
-          console.log('Client OCR Results:');
-          console.log('- Text length:', rawText.length);
-          console.log('- Confidence:', confidence);
-          console.log('- Text preview:', rawText.substring(0, 100) + '...');
-          
-          if (rawText && rawText.trim().length > 10) { // Ensure we have meaningful text
-            formData.append('rawText', rawText);
-            console.log('✅ Client OCR text added to request');
-          } else {
-            console.warn('⚠️ Client OCR produced insufficient text, server will handle');
-          }
-          
-          if (confidence) {
-            formData.append('ocrConfidence', confidence);
-          }
-        } catch (e) {
-          // Non-blocking if browser OCR fails
-          console.warn('Client OCR failed, continuing with server upload:', e);
-        }
-      } else {
-        console.log('PDF file detected, skipping client OCR (server will handle)');
-      }
-      
-      // Call OCR API endpoint
-      const response = await fetch('/api/certificates/ocr', {
+
+      const response = await fetch('/api/certificates/ocr-gemini', {
         method: 'POST',
-        body: formData,
+        body: formData
       });
       
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`⏱️ Extraction completed in ${elapsed}s`);
+
       if (!response.ok) {
-        const text = await response.text();
-        let msg = 'OCR processing failed';
-        try {
-          const j = JSON.parse(text);
-          msg = j?.error || msg;
-        } catch {
-          if (text) msg = text;
-        }
-        throw new Error(msg);
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to extract certificate information');
       }
-      
+
       const result = await response.json();
       
-      // Set the extracted data and public URL
-      setPublicUrl(result.data.publicUrl);
-      setOcr({
-        title: result.data.ocr.title || 'Untitled Certificate',
-        institution: result.data.ocr.institution || '',
-        date_issued: result.data.ocr.date_issued || new Date().toISOString().split('T')[0],
-        description: result.data.ocr.description || result.data.ocr.raw_text || '',
-        recipient: result.data.ocr.recipient || '',
-        certificate_id: result.data.ocr.certificate_id || ''
-      });
-      if (result.data.ocr?.recipient) setRecipient(result.data.ocr.recipient);
-      if (result.data.ocr?.certificate_id) setCertificateId(result.data.ocr.certificate_id);
-      
-      // Set verification result if available
-      if (result.data.verification) {
-        setVerification(result.data.verification);
+      // The OCR endpoint returns: { data: { ocr: {...}, publicUrl, filePath } }
+      if (!result.data || !result.data.ocr) {
+        throw new Error('Certificate extraction failed - no OCR data returned');
       }
+
+      console.log('✅ Certificate extraction completed successfully');
+      console.log('📊 Extracted data:', result.data.ocr);
+      console.log('📁 File URL:', result.data.publicUrl);
+      
+      // Set the public URL for Save button
+      setPublicUrl(result.data.publicUrl);
+      
+      // Map the OCR result to our state format
+      const ocrData = result.data.ocr;
+      setOcr({
+        title: ocrData.title || '',
+        institution: ocrData.institution || '',
+        date_issued: ocrData.date_issued || '',
+        description: ocrData.description || '',
+        recipient: ocrData.recipient || '',
+        certificate_id: ocrData.certificate_id || '',
+        raw_text: ocrData.raw_text || '',
+        confidence: ocrData.confidence || 0
+      });
+      
+      // Show success message
+      setSuccess('Certificate information extracted successfully!');
       
     } catch (err) {
-      console.error('OCR Error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to process certificate');
+      console.error('Certificate extraction error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to extract certificate information');
     } finally {
       setUploading(false);
     }
-  }, [file, enableSmartVerification]);
+  }, [file]);
 
   const handleSave = useCallback(async () => {
-    if (!publicUrl || !ocr) return;
+    if (!ocr || !publicUrl) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -212,6 +144,8 @@ export default function StudentUploadPage() {
           confidence: ocr.confidence
         }
       };
+
+      console.log('💾 Saving certificate with payload:', payload);
 
       // Call create API endpoint with extracted data
       const response = await fetch('/api/certificates/create', {
@@ -245,7 +179,7 @@ export default function StudentUploadPage() {
     } finally {
       setSaving(false);
     }
-  }, [publicUrl, ocr]);
+  }, [ocr, publicUrl]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
@@ -258,6 +192,15 @@ export default function StudentUploadPage() {
 
       <div className="relative z-10 py-12 px-6">
         <div className="max-w-4xl mx-auto">
+          {/* Back to Dashboard Button */}
+          <Link 
+            href="/student/dashboard"
+            className="inline-flex items-center gap-2 text-white/70 hover:text-white mb-8 transition-colors group"
+          >
+            <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+            <span className="font-medium">Back to Dashboard</span>
+          </Link>
+
           {/* Header Section */}
           <div className="text-center mb-12">
             <div className="inline-flex items-center gap-3 mb-4">
@@ -366,125 +309,20 @@ export default function StudentUploadPage() {
                 </div>
               </div>
 
-              {/* Smart Verification Toggle */}
+              {/* Simplified Certificate Extraction Info */}
               <div className="mt-6 p-4 bg-white/5 rounded-2xl border border-white/10">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-purple-500/20 rounded-xl flex items-center justify-center">
-                      <Sparkles className="w-5 h-5 text-purple-300" />
-                    </div>
-                    <div>
-                      <p className="text-white font-medium">Smart Verification</p>
-                      <p className="text-white/60 text-sm">Enable AI-powered certificate verification</p>
-                    </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-green-500/20 rounded-xl flex items-center justify-center">
+                    <Award className="w-5 h-5 text-green-300" />
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={enableSmartVerification}
-                      onChange={(e) => setEnableSmartVerification(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-white/20 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
-                  </label>
+                  <div>
+                    <p className="text-white font-medium">Simple Certificate Extraction</p>
+                    <p className="text-white/60 text-sm">AI-powered extraction with manual review</p>
+                  </div>
                 </div>
               </div>
 
-              {/* Verification Results */}
-              {verification && (
-                <div className="mt-6 p-6 bg-white/5 rounded-2xl border border-white/10">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                      verification.auto_approved 
-                        ? 'bg-emerald-500/20' 
-                        : verification.requires_manual_review 
-                        ? 'bg-yellow-500/20' 
-                        : 'bg-red-500/20'
-                    }`}>
-                      {verification.auto_approved ? (
-                        <Check className="w-5 h-5 text-emerald-300" />
-                      ) : verification.requires_manual_review ? (
-                        <AlertCircle className="w-5 h-5 text-yellow-300" />
-                      ) : (
-                        <AlertCircle className="w-5 h-5 text-red-300" />
-                      )}
-                    </div>
-                    <div>
-                      <h3 className="text-white font-semibold">
-                        {verification.auto_approved 
-                          ? 'Certificate Auto-Approved!' 
-                          : verification.requires_manual_review 
-                          ? 'Requires Manual Review' 
-                          : 'Verification Failed'}
-                      </h3>
-                      <p className="text-white/60 text-sm">
-                        Confidence: {(verification.confidence_score * 100).toFixed(1)}% • 
-                        Method: {verification.verification_method.replace('_', ' ')}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Verification Details */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {verification.details.qr_verification && (
-                      <div className="p-3 bg-white/5 rounded-xl">
-                        <p className="text-white/80 text-sm font-medium mb-1">QR Verification</p>
-                        <p className={`text-sm ${
-                          verification.details.qr_verification.verified 
-                            ? 'text-emerald-300' 
-                            : 'text-red-300'
-                        }`}>
-                          {verification.details.qr_verification.verified 
-                            ? `✓ Verified by ${verification.details.qr_verification.issuer}` 
-                            : '✗ No valid QR code found'}
-                        </p>
-                      </div>
-                    )}
-
-                    {verification.details.logo_match && (
-                      <div className="p-3 bg-white/5 rounded-xl">
-                        <p className="text-white/80 text-sm font-medium mb-1">Logo Match</p>
-                        <p className={`text-sm ${
-                          verification.details.logo_match.matched 
-                            ? 'text-emerald-300' 
-                            : 'text-red-300'
-                        }`}>
-                          {verification.details.logo_match.matched 
-                            ? `✓ Matched ${verification.details.logo_match.issuer} (${(verification.details.logo_match.score * 100).toFixed(1)}%)` 
-                            : `✗ No logo match (${(verification.details.logo_match.score * 100).toFixed(1)}%)`}
-                        </p>
-                      </div>
-                    )}
-
-                    {verification.details.template_match && (
-                      <div className="p-3 bg-white/5 rounded-xl">
-                        <p className="text-white/80 text-sm font-medium mb-1">Template Match</p>
-                        <p className={`text-sm ${
-                          verification.details.template_match.matched 
-                            ? 'text-emerald-300' 
-                            : 'text-red-300'
-                        }`}>
-                          {verification.details.template_match.matched 
-                            ? `✓ Pattern matched (${(verification.details.template_match.score * 100).toFixed(1)}%)` 
-                            : `✗ No pattern match (${(verification.details.template_match.score * 100).toFixed(1)}%)`}
-                        </p>
-                      </div>
-                    )}
-
-                    {verification.details.ai_confidence && (
-                      <div className="p-3 bg-white/5 rounded-xl">
-                        <p className="text-white/80 text-sm font-medium mb-1">AI Confidence</p>
-                        <p className="text-emerald-300 text-sm">
-                          ✓ {(verification.details.ai_confidence.score * 100).toFixed(1)}% confidence
-                        </p>
-                        <p className="text-white/60 text-xs mt-1">
-                          Factors: {verification.details.ai_confidence.factors.join(', ')}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+              {/* Verification removed - not needed in simplified flow */}
 
               {/* Action Buttons */}
               <div className="flex gap-4 mt-8">
@@ -499,12 +337,12 @@ export default function StudentUploadPage() {
                     {uploading ? (
                       <>
                         <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        <span>{enableSmartVerification ? 'Processing & Verifying...' : 'Processing Magic...'}</span>
+                        <span>Analyzing with AI... (this may take 5-10s)</span>
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-5 h-5" />
-                        <span>{enableSmartVerification ? 'Extract & Verify' : 'Extract with AI'}</span>
+                        <span>Extract with Gemini AI</span>
                       </>
                     )}
                   </div>
@@ -684,22 +522,7 @@ export default function StudentUploadPage() {
                     </div>
                   </div>
 
-                  {/* OCR Quality Indicator */}
-                  {ocr.raw_text && (
-                    <div className="mt-6 p-4 bg-white/5 rounded-xl border border-white/10">
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="block text-sm font-medium text-white/70">Raw OCR Text</label>
-                        <span className="text-xs text-white/40">
-                          {ocr.raw_text.length} characters extracted
-                        </span>
-                      </div>
-                      <div className="max-h-32 overflow-y-auto bg-black/20 rounded-lg p-3">
-                        <pre className="text-xs text-white/60 whitespace-pre-wrap font-mono">
-                          {ocr.raw_text}
-                        </pre>
-                      </div>
-                    </div>
-                  )}
+                  {/* Raw OCR text removed - not needed for users */}
                 </div>
               )}
             </div>
