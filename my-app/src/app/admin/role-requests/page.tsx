@@ -26,6 +26,9 @@ export default function AdminRoleRequestsPage() {
   const [actioning, setActioning] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const [filterRole, setFilterRole] = useState<'all' | 'recruiter' | 'faculty' | 'admin'>('all');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalAction, setModalAction] = useState<'approve' | 'deny' | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<RoleRequest | null>(null);
   const router = useRouter();
 
   const fetchRequests = useCallback(async () => {
@@ -51,34 +54,45 @@ export default function AdminRoleRequestsPage() {
     fetchRequests();
   }, [fetchRequests]);
 
-  const handleAction = useCallback(async (requestId: string, action: 'approve' | 'deny') => {
-    if (!window.confirm(`Are you sure you want to ${action} this request?`)) {
-      return;
-    }
+  const openModal = useCallback((request: RoleRequest, action: 'approve' | 'deny') => {
+    setSelectedRequest(request);
+    setModalAction(action);
+    setModalOpen(true);
+  }, []);
 
-    setActioning(requestId);
+  const closeModal = useCallback(() => {
+    setModalOpen(false);
+    setModalAction(null);
+    setSelectedRequest(null);
+  }, []);
+
+  const handleAction = useCallback(async () => {
+    if (!selectedRequest || !modalAction) return;
+
+    setActioning(selectedRequest.id);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/role-requests/${requestId}/${action}`, {
+      const res = await fetch(`/api/admin/role-requests/${selectedRequest.id}/${modalAction}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || `Failed to ${action} request`);
+      if (!res.ok) throw new Error(json.error || `Failed to ${modalAction} request`);
       
       // Immediately remove the request from the UI if we're viewing pending requests
       if (filterStatus === 'pending') {
-        setRequests(prev => prev.filter(req => req.id !== requestId));
+        setRequests(prev => prev.filter(req => req.id !== selectedRequest.id));
       }
       
-      // Then refresh to ensure consistency
+      // Close modal and refresh
+      closeModal();
       await fetchRequests();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unexpected error');
     } finally {
       setActioning(null);
     }
-  }, [fetchRequests, filterStatus]);
+  }, [selectedRequest, modalAction, fetchRequests, filterStatus, closeModal]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -232,24 +246,15 @@ export default function AdminRoleRequestsPage() {
                         {request.status === 'pending' ? (
                           <div className="flex gap-2">
                             <button
-                              onClick={() => handleAction(request.id, 'approve')}
+                              onClick={() => openModal(request, 'approve')}
                               disabled={actioning === request.id}
                               className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              {actioning === request.id ? (
-                                <>
-                                  <RefreshCw className="w-4 h-4 animate-spin" />
-                                  Processing...
-                                </>
-                              ) : (
-                                <>
-                                  <Check className="w-4 h-4" />
-                                  Approve
-                                </>
-                              )}
+                              <Check className="w-4 h-4" />
+                              Approve
                             </button>
                             <button
-                              onClick={() => handleAction(request.id, 'deny')}
+                              onClick={() => openModal(request, 'deny')}
                               disabled={actioning === request.id}
                               className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -271,6 +276,123 @@ export default function AdminRoleRequestsPage() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      {modalOpen && selectedRequest && modalAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-white/20 rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            {/* Modal Header */}
+            <div className={`px-6 py-4 ${modalAction === 'approve' ? 'bg-green-600/20 border-b border-green-500/30' : 'bg-red-600/20 border-b border-red-500/30'}`}>
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${modalAction === 'approve' ? 'bg-green-600' : 'bg-red-600'}`}>
+                  {modalAction === 'approve' ? (
+                    <Check className="w-5 h-5 text-white" />
+                  ) : (
+                    <X className="w-5 h-5 text-white" />
+                  )}
+                </div>
+                <h3 className="text-xl font-bold text-white">
+                  {modalAction === 'approve' ? 'Approve' : 'Deny'} Role Request
+                </h3>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="px-6 py-6 space-y-4">
+              <p className="text-white/80 text-base">
+                Are you sure you want to <span className="font-semibold">{modalAction}</span> this role request?
+              </p>
+              
+              {/* User Info Card */}
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+                <div>
+                  <div className="text-white/60 text-xs uppercase tracking-wider mb-1">Requester</div>
+                  <div className="text-white font-semibold">{selectedRequest.requester_name}</div>
+                  <div className="text-white/70 text-sm">{selectedRequest.requester_email}</div>
+                </div>
+                
+                <div>
+                  <div className="text-white/60 text-xs uppercase tracking-wider mb-1">Requested Role</div>
+                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border ${getRoleColor(selectedRequest.requested_role)}`}>
+                    {getRoleIcon(selectedRequest.requested_role)}
+                    {selectedRequest.requested_role.charAt(0).toUpperCase() + selectedRequest.requested_role.slice(1)}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-white/60 text-xs uppercase tracking-wider mb-1">Submitted</div>
+                  <div className="text-white/80 text-sm">
+                    {new Date(selectedRequest.created_at).toLocaleDateString('en-US', { 
+                      year: 'numeric', 
+                      month: 'long', 
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {modalAction === 'approve' && (
+                <div className="bg-green-600/10 border border-green-500/20 rounded-lg p-3">
+                  <p className="text-green-300 text-sm">
+                    ✓ User will be granted <span className="font-semibold">{selectedRequest.requested_role}</span> access immediately.
+                  </p>
+                </div>
+              )}
+
+              {modalAction === 'deny' && (
+                <div className="bg-red-600/10 border border-red-500/20 rounded-lg p-3">
+                  <p className="text-red-300 text-sm">
+                    ✗ This request will be rejected. The user will remain with their current access level.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 bg-white/5 border-t border-white/10 flex items-center justify-end gap-3">
+              <button
+                onClick={closeModal}
+                disabled={actioning === selectedRequest.id}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg font-medium transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAction}
+                disabled={actioning === selectedRequest.id}
+                className={`flex items-center gap-2 px-5 py-2 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                  modalAction === 'approve'
+                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                    : 'bg-red-600 hover:bg-red-700 text-white'
+                }`}
+              >
+                {actioning === selectedRequest.id ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    {modalAction === 'approve' ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        Approve Request
+                      </>
+                    ) : (
+                      <>
+                        <X className="w-4 h-4" />
+                        Deny Request
+                      </>
+                    )}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
