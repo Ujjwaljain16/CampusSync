@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Clock, CheckCircle, XCircle, RotateCcw, Eye, Calendar, User, FileText, AlertCircle, RefreshCw } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Clock, CheckCircle, XCircle, RotateCcw, Eye, Calendar, User, FileText, AlertCircle, RefreshCw, ArrowLeft } from 'lucide-react';
 
 interface ApprovalHistory {
   id: string;
@@ -29,6 +30,7 @@ interface Pagination {
 }
 
 export default function FacultyHistoryPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [approvals, setApprovals] = useState<ApprovalHistory[]>([]);
   const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
@@ -154,6 +156,13 @@ export default function FacultyHistoryPage() {
               <p className="text-gray-300 mt-1">Track and manage certificate approvals</p>
             </div>
             <div className="flex items-center space-x-4">
+              <button
+                onClick={() => router.push('/faculty/dashboard')}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back to Dashboard</span>
+              </button>
               <button
                 onClick={() => fetchApprovalHistory(pagination.page)}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
