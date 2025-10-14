@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '../../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
 
 export async function GET(_req: NextRequest, context: { params: Promise<{ certificateId: string }> }) {
   try {

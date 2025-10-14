@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function GET(_req: NextRequest) {
   const supabase = await createSupabaseServerClient();
@@ -15,5 +15,6 @@ export async function GET(_req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ data });
 }
+
 
 

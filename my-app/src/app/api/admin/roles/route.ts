@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, createSupabaseAdminClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole, createSupabaseAdminClient } from '@/lib/supabaseServer';
 
 // GET /api/admin/roles - List all users and their roles
 export async function GET(_req: NextRequest) {
@@ -203,3 +203,4 @@ export async function DELETE(req: NextRequest) {
     } 
   });
 }
+

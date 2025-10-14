@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { getServerUserWithRole, createSupabaseServerClient } from '../../../lib/supabaseServer';
+import { getServerUserWithRole, createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export default async function DashboardRedirectPage() {
   const { user, role } = await getServerUserWithRole();

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
 import type { TrustedIssuer } from '../../../../types';
 
 export async function GET(_req: NextRequest) {
@@ -112,3 +112,4 @@ export async function DELETE(req: NextRequest) {
 
   return NextResponse.json({ data: { deleted: true } });
 }
+

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
 
 export async function GET(_req: NextRequest) {
   const auth = await requireRole(['faculty', 'admin']);
@@ -27,5 +27,6 @@ export async function GET(_req: NextRequest) {
 
   return NextResponse.json({ data: flagged });
 }
+
 
 

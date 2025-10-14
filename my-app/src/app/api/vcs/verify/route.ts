@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { getIssuerJwk, verifyCredentialJws } from '../../../../../lib/vc';
 
 export async function GET(req: NextRequest) {
@@ -54,5 +54,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ data: { valid: false, revoked: false, reason } }, { status: 200 });
   }
 }
+
 
 

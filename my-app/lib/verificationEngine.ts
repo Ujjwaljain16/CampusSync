@@ -107,13 +107,10 @@ export class VerificationEngine {
 
       const result: VerificationResult = {
         certificate_id: certificateId,
-        is_verified: autoApproved,
-        confidence_score: confidenceScore,
-        verification_method: verificationMethod,
-        details: verificationDetails,
-        auto_approved: autoApproved,
-        requires_manual_review: !autoApproved,
-        created_at: startTime
+        verified: autoApproved,
+        confidence: confidenceScore,
+        method: verificationMethod,
+        details: verificationDetails
       };
 
       return result;
@@ -124,13 +121,11 @@ export class VerificationEngine {
       // Return a failed verification result
       return {
         certificate_id: certificateId,
-        is_verified: false,
-        confidence_score: 0,
-        verification_method: 'error',
+        verified: false,
+        confidence: 0,
+        method: 'error',
         details: verificationDetails,
-        auto_approved: false,
-        requires_manual_review: true,
-        created_at: startTime
+        errors: [error instanceof Error ? error.message : 'Unknown error']
       };
     }
   }
@@ -159,7 +154,19 @@ export class VerificationEngine {
 
       const source = new RGBLuminanceSource(luminances, width, height);
       const bitmap = new BinaryBitmap(new HybridBinarizer(source));
-      const result = this.qrReader.decode(bitmap);
+      
+      let result;
+      try {
+        result = this.qrReader.decode(bitmap);
+      } catch (error) {
+        // No QR code found - this is normal, not an error
+        return {
+          found: false,
+          data: null,
+          issuer: null,
+          confidence: 0
+        };
+      }
 
       const qrData = result.getText();
       const matchingIssuer = this.trustedIssuers.find(issuer => 
@@ -185,10 +192,10 @@ export class VerificationEngine {
       const image = await Jimp.read(fileBuffer);
       
       // Resize to standard size for consistent hashing
-      (image as any).resize(32, 32);
+      image.resize({ w: 32, h: 32 });
       
       // Convert to grayscale
-      (image as any).greyscale();
+      image.greyscale();
       
       // Calculate perceptual hash
       const logoHash = this.calculatePerceptualHash(image);
@@ -231,7 +238,7 @@ export class VerificationEngine {
       let issuerScore = 0;
       let matchedPatterns: string[] = [];
 
-      for (const pattern of issuer.template_patterns) {
+      for (const pattern of issuer.template_patterns || []) {
         try {
           const regex = new RegExp(pattern, 'gi');
           if (regex.test(text)) {
@@ -244,8 +251,8 @@ export class VerificationEngine {
       }
 
       // Normalize score by number of patterns
-      const normalizedScore = issuer.template_patterns.length > 0 
-        ? issuerScore / issuer.template_patterns.length 
+      const normalizedScore = (issuer.template_patterns?.length || 0) > 0 
+        ? issuerScore / (issuer.template_patterns?.length || 1)
         : 0;
 
       if (normalizedScore > bestScore) {
@@ -414,8 +421,16 @@ export class VerificationEngine {
    * Calculate perceptual hash for image
    */
   private calculatePerceptualHash(image: any): string {
-    const hash = createHash('md5');
-    const pixels = image.bitmap.data;
+    try {
+      const hash = createHash('md5');
+      
+      // Check if image has the expected structure
+      if (!image || !image.bitmap || !image.bitmap.data) {
+        console.log('Invalid image structure for perceptual hash');
+        return hash.digest('hex');
+      }
+      
+      const pixels = image.bitmap.data;
     
     // Simple hash based on average brightness of 8x8 grid
     const gridSize = 8;
@@ -451,6 +466,10 @@ export class VerificationEngine {
     }
     
     return hashString;
+    } catch (error) {
+      console.log('Error calculating perceptual hash:', error);
+      return createHash('md5').digest('hex');
+    }
   }
 
   /**
@@ -480,12 +499,11 @@ export class VerificationEngine {
       const metadata: Partial<CertificateMetadata> = {
         certificate_id: certificateId,
         qr_code_data: details.qr_verification?.data,
-        qr_verified: details.qr_verification?.verified || false,
-        logo_hash: details.logo_match ? this.calculatePerceptualHash(await Jimp.read(Buffer.alloc(0))) : undefined,
-        logo_match_score: details.logo_match?.score,
-        template_match_score: details.template_match?.score,
-        ai_confidence_score: details.ai_confidence?.score,
-        verification_method: verificationMethod,
+        // logo_hash: details.logo_match ? this.calculatePerceptualHash(await Jimp.read(Buffer.alloc(0))) : undefined,
+        // logo_match_score: details.logo_match?.score,
+        // template_match_score: details.template_match?.score,
+        // ai_confidence_score: details.ai_confidence?.score,
+        // verification_method: verificationMethod,
         verification_details: {
           ...details,
           file_hash: undefined,

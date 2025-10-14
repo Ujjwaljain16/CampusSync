@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, createSupabaseAdminClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
 import type { OcrExtractionResult } from '../../../../types';
 
 export async function POST(req: NextRequest) {
@@ -52,5 +52,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ data: { status: 'created' } });
 }
+
 
 

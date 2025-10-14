@@ -1,7 +1,24 @@
 import { jwtVerify, importJWK } from 'jose';
 import { VCValidator, type ValidationResult } from './vcValidator';
 import { VCRevocationManager, type RevocationCheckResult } from './vcRevocationManager';
-import type { VerifiableCredential } from '../../src/types';
+// Define VerifiableCredential interface locally
+interface VerifiableCredential {
+  id: string;
+  type: string[];
+  issuer: string;
+  issuanceDate: string;
+  expirationDate?: string;
+  credentialSubject: {
+    id: string;
+    [key: string]: any;
+  };
+  proof: {
+    type: string;
+    verificationMethod: string;
+    jws: string;
+    created: string;
+  };
+}
 
 export interface VerificationOptions {
   allowExpired?: boolean;
@@ -177,12 +194,25 @@ export class ProductionVCVerifier {
           credential: vc,
           errors: [`Verification error: ${error instanceof Error ? error.message : 'Unknown error'}`],
           warnings: [],
-          metadata: {},
+          metadata: {
+            issuer: '',
+            subject: '',
+            issuedAt: new Date(),
+            credentialType: [],
+            keyId: '',
+            verificationMethod: ''
+          },
           validationDetails: {
             isValid: false,
             errors: [`Verification error: ${error instanceof Error ? error.message : 'Unknown error'}`],
             warnings: [],
-            metadata: {}
+            metadata: {
+              issuer: '',
+              subject: '',
+              issuedAt: new Date(),
+              credentialType: [],
+              keyId: ''
+            }
           }
         },
         verificationMethod: 'JsonWebSignature2020',

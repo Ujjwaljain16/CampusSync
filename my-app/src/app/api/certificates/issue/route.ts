@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, getServerUserWithRole } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
 import { signCredential } from '../../../../../lib/vc';
 import type { CredentialSubject } from '../../../../types';
 
@@ -91,5 +91,6 @@ export async function POST(req: NextRequest) {
 
 	return NextResponse.json({ data: vc });
 }
+
 
 

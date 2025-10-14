@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
+import { NextRequest } from 'next/server';
 
 export async function createSupabaseServerClient() {
 	const cookieStore = await cookies();
@@ -29,6 +30,48 @@ export async function createSupabaseServerClient() {
 			},
 		}
 	);
+}
+
+// Create Supabase client that handles both cookies and Authorization headers
+export async function createSupabaseServerClientWithAuth(request?: NextRequest) {
+	const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+	const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+	if (!supabaseUrl || !supabaseAnonKey) {
+		throw new Error('Missing Supabase environment variables');
+	}
+
+	// Check for Authorization header first
+	if (request) {
+		const authHeader = request.headers.get('authorization');
+		if (authHeader && authHeader.startsWith('Bearer ')) {
+			const token = authHeader.replace('Bearer ', '');
+			
+			// Create client with custom headers for token auth
+			const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+				global: {
+					headers: {
+						Authorization: `Bearer ${token}`
+					}
+				}
+			});
+			
+			// Test the token by getting user
+			const { data: userData, error: userError } = await supabase.auth.getUser();
+			
+			if (userError) {
+				console.error('❌ Token validation error:', userError);
+				// Fall back to cookie-based auth
+				return createSupabaseServerClient();
+			} else {
+				console.log('✅ Token validated successfully for user:', userData.user?.email);
+				return supabase;
+			}
+		}
+	}
+
+	// Fall back to cookie-based auth
+	return createSupabaseServerClient();
 }
 
 // Utility to get current user on the server
@@ -74,7 +117,7 @@ export async function getServerUserWithRole() {
 				.upsert({
 					user_id: user.id,
 					role: 'admin',
-					assigned_by: 'system',
+					assigned_by: user.id,
 					created_at: new Date().toISOString(),
 					updated_at: new Date().toISOString()
 				}, {
@@ -90,23 +133,7 @@ export async function getServerUserWithRole() {
 		}
 
 		// Default to 'student' for all other users
-		// Assign student role in database for new users
-		const { error: upsertError } = await supabase
-			.from('user_roles')
-			.upsert({
-				user_id: user.id,
-				role: 'student',
-				assigned_by: 'system',
-				created_at: new Date().toISOString(),
-				updated_at: new Date().toISOString()
-			}, {
-				onConflict: 'user_id'
-			});
-		
-		if (upsertError) {
-			console.error('Error assigning default student role:', upsertError);
-		}
-		
+		// Do NOT auto-assign here; rely on complete-signup + role requests
 		return { user, role: 'student' } as const;
 	} catch (error) {
 		console.error('Error fetching user role:', error);

@@ -13,7 +13,7 @@ interface EmailConfig {
 interface NotificationData {
   to: string;
   subject: string;
-  template: 'certificate_approved' | 'certificate_rejected' | 'certificate_auto_approved' | 'manual_review_required';
+  template: 'certificate_approved' | 'certificate_rejected' | 'certificate_auto_approved' | 'manual_review_required' | 'role_approved' | 'role_denied';
   data: {
     studentName?: string;
     certificateTitle?: string;
@@ -21,6 +21,12 @@ interface NotificationData {
     confidenceScore?: number;
     verificationMethod?: string;
     portfolioUrl?: string;
+    userName?: string;
+    requestedRole?: string;
+    adminNotes?: string;
+    reason?: string;
+    dashboardUrl?: string;
+    supportUrl?: string;
   };
 }
 
@@ -153,6 +159,36 @@ class EmailService {
           </div>
         `;
         break;
+
+      case 'role_approved':
+        content = `
+          <div class="certificate-card">
+            <h3>🎉 Role Request Approved!</h3>
+            <p>Great news! Your role request has been approved by our admin team.</p>
+            <p><strong>Requested Role:</strong> ${data.requestedRole}</p>
+            <p><strong>Institution:</strong> ${data.university}</p>
+            <p><strong>Admin Notes:</strong> ${data.adminNotes}</p>
+            <p>You can now access your new dashboard and features.</p>
+            <a href="${data.dashboardUrl}" class="button">Access Dashboard</a>
+            <span class="status-badge approved">✓ Approved</span>
+          </div>
+        `;
+        break;
+
+      case 'role_denied':
+        content = `
+          <div class="certificate-card">
+            <h3>❌ Role Request Denied</h3>
+            <p>Unfortunately, your role request has been denied.</p>
+            <p><strong>Requested Role:</strong> ${data.requestedRole}</p>
+            <p><strong>Reason:</strong> ${data.reason}</p>
+            <p><strong>Admin Notes:</strong> ${data.adminNotes}</p>
+            <p>If you have questions, please contact our support team.</p>
+            <a href="${data.supportUrl}" class="button">Contact Support</a>
+            <span class="status-badge rejected">✗ Denied</span>
+          </div>
+        `;
+        break;
     }
 
     return `
@@ -222,6 +258,24 @@ class EmailService {
       to,
       subject: 'Certificate Requires Review - CampusSync',
       template: 'manual_review_required',
+      data,
+    });
+  }
+
+  async sendRoleApproved(to: string, data: NotificationData['data']) {
+    return this.sendNotification({
+      to,
+      subject: 'Role Request Approved - CampusSync',
+      template: 'role_approved',
+      data,
+    });
+  }
+
+  async sendRoleDenied(to: string, data: NotificationData['data']) {
+    return this.sendNotification({
+      to,
+      subject: 'Role Request Denied - CampusSync',
+      template: 'role_denied',
       data,
     });
   }

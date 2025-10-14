@@ -23,16 +23,19 @@ export default function LoginPage() {
   const [major, setMajor] = useState("");
   const [location, setLocation] = useState("");
   const [gpa, setGpa] = useState<string>("");
-  // Desired access (optional elevation)
-  const [wantRecruiter, setWantRecruiter] = useState(false);
-  const [wantFaculty, setWantFaculty] = useState(false);
-  const [wantAdmin, setWantAdmin] = useState(false);
+  // Desired access (required) - only one can be selected
+  const [requestedRole, setRequestedRole] = useState<'student' | 'recruiter' | 'faculty' | 'admin'>('student');
 
   // Remove automatic redirect - let middleware handle it
   // This prevents infinite redirect loops
 
-  // Email validation for student signup - Using flexible validation system
-  const validateStudentEmail = useCallback((email: string) => {
+  // Email validation - role-aware validation system
+  const validateEmail = useCallback((email: string, role: string) => {
+    // Recruiters can use any email (including non-educational)
+    if (role === 'recruiter') {
+      return { isValid: true, error: null };
+    }
+    // Students, faculty, and admins need educational emails
     return validateStudentEmailSync(email);
   }, []);
 
@@ -43,12 +46,12 @@ export default function LoginPage() {
     
     // Only validate on signup mode and if email is not empty
     if (mode === 'signup' && newEmail.trim()) {
-      const validation = validateStudentEmail(newEmail);
+      const validation = validateEmail(newEmail, requestedRole);
       if (!validation.isValid) {
         setEmailError(validation.error || 'Invalid email');
       }
     }
-  }, [mode, validateStudentEmail]);
+  }, [mode, validateEmail, requestedRole]);
 
   const handleGoogleSignIn = useCallback(() => {
     const redirectTo = '/dashboard';
@@ -68,7 +71,7 @@ export default function LoginPage() {
     try {
       // Validate email for signup
       if (mode === "signup") {
-        const validation = validateStudentEmail(email);
+        const validation = validateEmail(email, requestedRole);
         if (!validation.isValid) {
           setEmailError(validation.error || 'Invalid email');
           setLoading(false);
@@ -78,6 +81,13 @@ export default function LoginPage() {
         // Basic required field check
         if (!fullName.trim()) {
           setError('Please provide your full name');
+          setLoading(false);
+          return;
+        }
+
+        // Ensure a role is selected
+        if (!requestedRole) {
+          setError('Please select an access type');
           setLoading(false);
           return;
         }
@@ -94,24 +104,7 @@ export default function LoginPage() {
         if (data.user && data.session) {
           console.log('Login successful, user data:', data.user);
           
-          // Set the session on the server side to ensure cookies are properly set
-          const setSessionResponse = await fetch('/api/auth/set-session', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              access_token: data.session.access_token,
-              refresh_token: data.session.refresh_token,
-            }),
-          });
-
-          if (!setSessionResponse.ok) {
-            console.error('Failed to set session on server');
-            throw new Error('Failed to establish session');
-          }
-          
-          // Ask server where to go based on role, with session cookies applied server-side
+          // Establish session and get redirect target in one step (avoid duplicate setSession)
           const completeResp = await fetch('/api/auth/complete-login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -195,12 +188,11 @@ export default function LoginPage() {
                 })
               });
               // Submit role request if needed
-              const desired = wantAdmin ? 'admin' : wantFaculty ? 'faculty' : wantRecruiter ? 'recruiter' : null;
-              if (desired && desired !== 'student') {
+              if (requestedRole && requestedRole !== 'student') {
                 await fetch('/api/role-requests', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ requested_role: desired, metadata: { university, company: university, major, location } })
+                  body: JSON.stringify({ requested_role: requestedRole, metadata: { university, company: university, major, location } })
                 }).catch(()=>null);
               }
               const completeResp = await fetch('/api/auth/complete-login', {
@@ -212,7 +204,7 @@ export default function LoginPage() {
                 })
               });
               const completeJson = await completeResp.json().catch(() => ({} as any));
-              if (desired && desired !== 'student') {
+              if (requestedRole && requestedRole !== 'student') {
                 window.location.href = '/waiting';
               } else {
                 window.location.href = completeJson?.redirectTo || '/dashboard';
@@ -245,28 +237,28 @@ export default function LoginPage() {
             return;
           }
           // If email confirmation is disabled in dev, complete signup immediately with minimal details
-          if (process.env.NODE_ENV === 'development' && data.session?.access_token && data.session?.refresh_token) {
+          if (process.env.NODE_ENV !== 'production' && data.session?.access_token && data.session?.refresh_token) {
             const complete = await fetch('/api/auth/complete-signup', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                access_token: data.session.access_token,
-                refresh_token: data.session.refresh_token,
-                full_name: fullName.trim() || 'New Student',
-                university: university.trim() || undefined,
-                graduation_year: graduationYear ? Number(graduationYear) : undefined,
-                major: major.trim() || undefined,
-                location: location.trim() || undefined,
+                body: JSON.stringify({
+                  access_token: data.session.access_token,
+                  refresh_token: data.session.refresh_token,
+                  full_name: fullName.trim() || 'New Student',
+                  role: requestedRole, // Include the selected role
+                  university: university.trim() || undefined,
+                  graduation_year: graduationYear ? Number(graduationYear) : undefined,
+                  major: major.trim() || undefined,
+                  location: location.trim() || undefined,
                 gpa: gpa ? Number(gpa) : undefined,
               })
             });
             if (complete.ok) {
-              const desired = wantAdmin ? 'admin' : wantFaculty ? 'faculty' : wantRecruiter ? 'recruiter' : null;
-              if (desired && desired !== 'student') {
+              if (requestedRole && requestedRole !== 'student') {
                 await fetch('/api/role-requests', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ requested_role: desired, metadata: { university, company: university, major, location } })
+                  body: JSON.stringify({ requested_role: requestedRole, metadata: { university, company: university, major, location } })
                 }).catch(()=>null);
               }
               const go = await fetch('/api/auth/complete-login', {
@@ -278,7 +270,7 @@ export default function LoginPage() {
                 })
               });
               const payload = await go.json().catch(() => ({} as any));
-              if (desired && desired !== 'student') {
+              if (requestedRole && requestedRole !== 'student') {
                 window.location.href = '/waiting';
               } else {
                 window.location.href = payload?.redirectTo || '/dashboard';
@@ -295,7 +287,7 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  }, [mode, email, password, router, validateStudentEmail]);
+  }, [mode, email, password, router, validateEmail, requestedRole, fullName, university, graduationYear, major, location, gpa]);
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
@@ -416,21 +408,53 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-                {/* Desired Access (optional) */}
+                {/* Desired Access (required) */}
                 <div className="mt-2 space-y-2">
-                  <p className="text-white/80 font-semibold">Access type (optional)</p>
-                  <div className="flex flex-wrap gap-4 text-white/90">
+                  <p className="text-white/80 font-semibold">Access type <span className="text-red-400">*</span></p>
+                  <div className="space-y-2 text-white/90">
                     <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={wantRecruiter} onChange={(e)=>setWantRecruiter(e.target.checked)} />
-                      Recruiter
+                      <input 
+                        type="radio" 
+                        name="requestedRole" 
+                        value="student" 
+                        checked={requestedRole === 'student'} 
+                        onChange={(e) => setRequestedRole(e.target.value as any)} 
+                        className="w-4 h-4"
+                      />
+                      Student (Default)
                     </label>
                     <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={wantFaculty} onChange={(e)=>setWantFaculty(e.target.checked)} />
-                      Faculty
+                      <input 
+                        type="radio" 
+                        name="requestedRole" 
+                        value="recruiter" 
+                        checked={requestedRole === 'recruiter'} 
+                        onChange={(e) => setRequestedRole(e.target.value as any)} 
+                        className="w-4 h-4"
+                      />
+                      Recruiter (Any email allowed)
                     </label>
                     <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={wantAdmin} onChange={(e)=>setWantAdmin(e.target.checked)} />
-                      Admin
+                      <input 
+                        type="radio" 
+                        name="requestedRole" 
+                        value="faculty" 
+                        checked={requestedRole === 'faculty'} 
+                        onChange={(e) => setRequestedRole(e.target.value as any)} 
+                        className="w-4 h-4"
+                      />
+                      Faculty (Educational email required)
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input 
+                        type="radio" 
+                        name="requestedRole" 
+                        value="admin" 
+                        checked={requestedRole === 'admin'} 
+                        onChange={(e) => setRequestedRole(e.target.value as any)} 
+                        className="w-4 h-4"
+                      />
+                      Admin (Educational email required)
                     </label>
                   </div>
                   <p className="text-xs text-white/60">Selecting non-student access sends a request to admins for approval.</p>
@@ -454,7 +478,11 @@ export default function LoginPage() {
                   className={`cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white ${
                     emailError ? 'border-red-300 focus:border-red-500' : ''
                   }`}
-                  placeholder={mode === 'signup' ? 'student@university.edu' : 'your@email.com'}
+                  placeholder={
+                    mode === 'signup' 
+                      ? (requestedRole === 'recruiter' ? 'recruiter@company.com' : 'student@university.edu')
+                      : 'your@email.com'
+                  }
                   aria-invalid={Boolean(error || emailError)}
                 />
               </div>
@@ -511,7 +539,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading || (mode === 'signup' && (!!emailError || !email.trim()))}
+              disabled={loading || (mode === 'signup' && (!!emailError || !email.trim() || !requestedRole))}
               className="w-full group bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-4 rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-purple-500/25 transform hover:-translate-y-1 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
             >
               {loading ? (

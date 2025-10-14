@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '../../../../../lib/supabaseServer';
-import { ProductionVCVerifier, type VerificationOptions } from '../../../../../lib/vc/vcVerifier';
-import { ProductionKeyManager } from '../../../../../lib/vc/productionKeyManager';
-import type { VerifiableCredential } from '../../../../types';
+import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
+import { ProductionVCVerifier, type VerificationOptions } from '@/lib/vc/vcVerifier';
+import { ProductionKeyManager } from '@/lib/vc/productionKeyManager';
+import type { VerifiableCredential } from '@/types';
 
 export async function POST(req: NextRequest) {
   try {
@@ -48,6 +48,17 @@ export async function POST(req: NextRequest) {
       verificationOptions,
       auth.user?.id || 'anonymous'
     );
+
+    // Also consult status registry for latest status (CRL-like)
+    const { data: statusRow } = await (await createSupabaseServerClient())
+      .from('vc_status_registry')
+      .select('status, reason, recorded_at')
+      .eq('credential_id', body.credential.id)
+      .order('recorded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const isRevokedByRegistry = statusRow && statusRow.status !== 'active';
 
     // Store verification result in database
     const supabase = await createSupabaseServerClient();

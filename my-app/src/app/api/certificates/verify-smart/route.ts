@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '../../../../../lib/supabaseServer';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { VerificationEngine } from '../../../../../lib/verificationEngine';
 import type { OcrExtractionResult } from '../../../../types';
 
@@ -121,3 +121,4 @@ export async function POST(req: NextRequest) {
     }, { status: 500 });
   }
 }
+

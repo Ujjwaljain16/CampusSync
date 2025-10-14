@@ -19,29 +19,33 @@ export class LLMExtractor {
 
   async structureText(rawText: string): Promise<ExtractedFields> {
     if (!this.apiKey) {
-      console.warn('No Gemini API key found, using fallback extraction');
+      console.warn('⚠️ No Gemini API key found, using fallback extraction');
       return this.fallbackExtraction(rawText);
     }
 
-    // Skip if text is too short or empty
-    if (!rawText || rawText.trim().length < 20) {
-      console.warn('Text too short for Gemini processing, using fallback');
+    // Always use Gemini if we have an API key - no matter how short the text
+    if (!rawText || rawText.trim().length === 0) {
+      console.warn('⚠️ Empty text, using fallback');
       return this.fallbackExtraction(rawText);
     }
 
     try {
-      // Add timeout to prevent hanging
+      console.log('🤖 Using Gemini AI for extraction...');
+      console.log(`📝 Text length: ${rawText.trim().length} characters`);
+      
+      // Add timeout to prevent hanging (increased to 15s for better accuracy)
       const result = await Promise.race([
         this.extractWithLLM(rawText),
         new Promise<ExtractedFields>((_, reject) => 
-          setTimeout(() => reject(new Error('Gemini API timeout')), 10000)
+          setTimeout(() => reject(new Error('Gemini API timeout')), 15000)
         )
       ]);
       
-      console.log('Gemini extraction completed successfully');
+      console.log('✅ Gemini extraction completed successfully');
+      console.log('📊 Extracted fields:', result);
       return result;
     } catch (error) {
-      console.warn('Gemini extraction failed, using fallback:', error);
+      console.warn('❌ Gemini extraction failed, using fallback:', error);
       return this.fallbackExtraction(rawText);
     }
   }
