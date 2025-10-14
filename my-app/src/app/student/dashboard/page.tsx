@@ -35,12 +35,14 @@ export default function StudentDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [confidence, setConfidence] = useState<Record<string, number>>({});
   const [details, setDetails] = useState<Record<string, any>>({});
+  const [vcStatus, setVcStatus] = useState<Record<string, { status: 'active'|'revoked'|'suspended'|'expired', reason?: string }>>({});
   const [exporting, setExporting] = useState(false);
   const [recentUploads, setRecentUploads] = useState<Row[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; certId: string | null; certTitle: string }>({ show: false, certId: null, certTitle: '' });
 
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
@@ -57,14 +59,47 @@ export default function StudentDashboard() {
     }
   }, []);
 
+  const fetchVcStatus = useCallback(async (credentialId: string) => {
+    try {
+      const res = await fetch(`/api/vc/status?credentialId=${encodeURIComponent(credentialId)}`);
+      const json = await res.json();
+      if (res.ok) {
+        setVcStatus(prev => ({ ...prev, [credentialId]: json.data }));
+      }
+    } catch {}
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/certificates/mine');
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to load');
-      const list = json.data as Row[];
+      // Try new documents endpoint first
+      let list: Row[] = [];
+      try {
+        const docsRes = await fetch('/api/documents');
+        if (docsRes.ok) {
+          const docsJson = await docsRes.json();
+          const docs = (docsJson.data || []) as any[];
+          list = docs.map(d => ({
+            id: d.id,
+            title: d.title,
+            institution: d.institution || '',
+            date_issued: d.issue_date || '',
+            file_url: d.file_url,
+            verification_status: d.verification_status,
+            created_at: d.created_at,
+            // Optional fields; will be filled from metadata if available
+          })) as Row[];
+        }
+      } catch {}
+
+      if (!list || list.length === 0) {
+        // Fallback to legacy certificates API
+        const res = await fetch('/api/certificates/mine');
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to load');
+        list = json.data as Row[];
+      }
       setRows(list);
       
       // Sort by created_at to get recent uploads (last 5)
@@ -79,20 +114,35 @@ export default function StudentDashboard() {
       const confMap: Record<string, number> = {};
       const detMap: Record<string, any> = {};
       for (const r of list) {
-        const mdRes = await fetch(`/api/certificates/metadata/${encodeURIComponent(r.id)}`);
-        if (mdRes.ok) {
-          const md = await mdRes.json();
-          if (md?.data) {
-            const ai = md.data.ai_confidence_score;
-            confMap[r.id] = typeof ai === 'number' ? ai : (md.data.verification_details?.ai_confidence?.score ?? 0);
-            detMap[r.id] = md.data.verification_details ?? {};
-          } else {
-            // No metadata available yet, use default values
-            confMap[r.id] = 0;
-            detMap[r.id] = {};
+        // Prefer document metadata; fallback to certificate metadata
+        let got = false;
+        try {
+          const dmd = await fetch(`/api/documents/${encodeURIComponent(r.id)}/metadata`);
+          if (dmd.ok) {
+            const md = await dmd.json();
+            if (md?.data) {
+              const ai = md.data.ai_confidence_score;
+              confMap[r.id] = typeof ai === 'number' ? ai : (md.data.verification_details?.ai_confidence?.score ?? 0);
+              detMap[r.id] = md.data.verification_details ?? {};
+              got = true;
+            }
           }
-        } else {
-          // API call failed, use default values
+        } catch {}
+        if (!got) {
+          try {
+            const mdRes = await fetch(`/api/certificates/metadata/${encodeURIComponent(r.id)}`);
+            if (mdRes.ok) {
+              const md = await mdRes.json();
+              if (md?.data) {
+                const ai = md.data.ai_confidence_score;
+                confMap[r.id] = typeof ai === 'number' ? ai : (md.data.verification_details?.ai_confidence?.score ?? 0);
+                detMap[r.id] = md.data.verification_details ?? {};
+                got = true;
+              }
+            }
+          } catch {}
+        }
+        if (!got) {
           confMap[r.id] = 0;
           detMap[r.id] = {};
         }
@@ -141,12 +191,23 @@ export default function StudentDashboard() {
     }
   }, []);
 
-  const deleteCertificate = useCallback(async (certificateId: string) => {
-    if (!confirm('Are you sure you want to delete this certificate? This action cannot be undone.')) {
-      return;
-    }
+  const showDeleteConfirmation = useCallback((certificateId: string, certificateTitle: string) => {
+    setDeleteConfirm({ show: true, certId: certificateId, certTitle: certificateTitle });
+  }, []);
+
+  const cancelDelete = useCallback(() => {
+    setDeleteConfirm({ show: false, certId: null, certTitle: '' });
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    const certificateId = deleteConfirm.certId;
+    const certificateTitle = deleteConfirm.certTitle;
+    if (!certificateId) return;
 
     setDeleting(certificateId);
+    setDeleteConfirm({ show: false, certId: null, certTitle: '' });
+    setError(null); // Clear any previous errors
+    
     try {
       const response = await fetch('/api/certificates/delete', {
         method: 'DELETE',
@@ -159,7 +220,7 @@ export default function StudentDashboard() {
         throw new Error(errorData.error || 'Failed to delete certificate');
       }
 
-      // Remove from local state
+      // Remove from local state immediately
       setRows(prev => prev.filter(cert => cert.id !== certificateId));
       setRecentUploads(prev => prev.filter(cert => cert.id !== certificateId));
       
@@ -175,13 +236,18 @@ export default function StudentDashboard() {
         return newDetails;
       });
 
+      // Show success message briefly
+      console.log(`✅ Successfully deleted: ${certificateTitle}`);
+
     } catch (error) {
-      console.error('Delete certificate error:', error);
+      console.error('❌ Delete certificate error:', error);
       setError(error instanceof Error ? error.message : 'Failed to delete certificate');
+      // Re-open modal on error so user can try again
+      setDeleteConfirm({ show: true, certId: certificateId, certTitle: certificateTitle });
     } finally {
       setDeleting(null);
     }
-  }, []);
+  }, [deleteConfirm.certId, deleteConfirm.certTitle]);
 
   const getStatusIcon = (status: string, autoApproved?: boolean) => {
     switch (status) {
@@ -505,7 +571,24 @@ export default function StudentDashboard() {
                       <span className="text-xs md:text-sm font-medium">
                         {getStatusText(cert.verification_status, cert.auto_approved)}
                       </span>
+                      <button
+                        onClick={() => fetchVcStatus(cert.id)}
+                        className="ml-1 text-[10px] md:text-xs text-white/70 hover:text-white underline decoration-dotted"
+                        title="Check on-chain/registry status"
+                      >
+                        Check status
+                      </button>
                     </div>
+                    {vcStatus[cert.id] && (
+                      <div className={`px-2 py-1 rounded-full text-[10px] md:text-xs border ${
+                        vcStatus[cert.id].status === 'active' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
+                        vcStatus[cert.id].status === 'revoked' ? 'bg-red-500/10 text-red-300 border-red-500/30' :
+                        vcStatus[cert.id].status === 'suspended' ? 'bg-yellow-500/10 text-yellow-300 border-yellow-500/30' :
+                        'bg-gray-500/10 text-gray-300 border-gray-500/30'
+                      }`}>
+                        VC {vcStatus[cert.id].status}
+                      </div>
+                    )}
                     
                     {/* Actions */}
                     <div className="flex items-center gap-2">
@@ -527,7 +610,7 @@ export default function StudentDashboard() {
                         <Share2 className="w-4 h-4 text-white" />
                       </button>
                       <button 
-                        onClick={() => deleteCertificate(cert.id)}
+                        onClick={() => showDeleteConfirmation(cert.id, cert.title)}
                         disabled={deleting === cert.id}
                         className="p-2 bg-red-500/20 hover:bg-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
                         title="Delete Certificate"
@@ -866,6 +949,23 @@ export default function StudentDashboard() {
                           <div className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(row.verification_status, row.auto_approved)}`}>
                             {getStatusText(row.verification_status, row.auto_approved)}
                           </div>
+                          <button
+                            onClick={() => fetchVcStatus(row.id)}
+                            className="text-[10px] text-white/70 hover:text-white underline decoration-dotted"
+                            title="Check VC status"
+                          >
+                            Check
+                          </button>
+                          {vcStatus[row.id] && (
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] border ${
+                              vcStatus[row.id].status === 'active' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
+                              vcStatus[row.id].status === 'revoked' ? 'bg-red-500/10 text-red-300 border-red-500/30' :
+                              vcStatus[row.id].status === 'suspended' ? 'bg-yellow-500/10 text-yellow-300 border-yellow-500/30' :
+                              'bg-gray-500/10 text-gray-300 border-gray-500/30'
+                            }`}>
+                              VC {vcStatus[row.id].status}
+                            </span>
+                          )}
                           {row.auto_approved && (
                             <div className="flex items-center gap-1 text-xs text-emerald-400">
                               <Zap className="w-3 h-3" />
@@ -905,7 +1005,7 @@ export default function StudentDashboard() {
                             </a>
                           )}
                           <button
-                            onClick={() => deleteCertificate(row.id)}
+                            onClick={() => showDeleteConfirmation(row.id, row.title)}
                             disabled={deleting === row.id}
                             className="p-2 text-white/60 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
                             title="Delete Certificate"
@@ -926,6 +1026,39 @@ export default function StudentDashboard() {
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-800 border border-red-500/30 rounded-2xl p-8 max-w-md mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-red-500/20 rounded-full">
+                <Trash2 className="w-6 h-6 text-red-400" />
+              </div>
+              <h3 className="text-xl font-bold text-white">Delete Certificate?</h3>
+            </div>
+            
+            <p className="text-white/70 mb-6">
+              Are you sure you want to delete <span className="font-semibold text-white">&quot;{deleteConfirm.certTitle}&quot;</span>? This action cannot be undone.
+            </p>
+            
+            <div className="flex gap-4 justify-end">
+              <button
+                onClick={cancelDelete}
+                className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
+              >
+                Delete Certificate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
