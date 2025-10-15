@@ -58,8 +58,7 @@ export async function GET(req: NextRequest) {
           institution,
           date_issued,
           verification_status,
-          student_id,
-          user_id
+          student_id
         `)
         .eq('verification_status', 'verified')
         .limit(limit)
@@ -92,21 +91,20 @@ export async function GET(req: NextRequest) {
       if (certificates.length > 0) {
         console.log('[SEARCH-STUDENTS] First cert:', {
           id: certificates[0].id,
-          student_id: certificates[0].student_id,
-          user_id: certificates[0].user_id
+          student_id: certificates[0].student_id
         });
       }
     }
 
     // Get user IDs and filter for students only
-    type BaseCert = { id: string; title: string; institution: string; date_issued: string; verification_status: string; user_id: string; document_type: string };
+    type BaseCert = { id: string; title: string; institution: string; date_issued: string; verification_status: string; student_id: string; document_type: string };
     const base: BaseCert[] = (docs && docs.length > 0) ? docs.map((d: any): BaseCert => ({
       id: d.id,
       title: d.title,
       institution: d.institution,
       date_issued: d.issue_date,
       verification_status: d.verification_status,
-      user_id: d.user_id,
+      student_id: d.user_id, // documents table uses user_id field
       document_type: d.document_type,
     })) : (certificates as any[]).map((cert: any): BaseCert => ({
       id: cert.id,
@@ -114,13 +112,13 @@ export async function GET(req: NextRequest) {
       institution: cert.institution,
       date_issued: cert.date_issued,
       verification_status: cert.verification_status,
-      user_id: cert.student_id || cert.user_id, // Use student_id first, fallback to user_id
+      student_id: cert.student_id,
       document_type: 'certificate'
     }));
 
     console.log('[SEARCH-STUDENTS] Mapped base items:', base.length);
     if (base.length > 0) {
-      console.log('[SEARCH-STUDENTS] First mapped user_id:', base[0].user_id);
+      console.log('[SEARCH-STUDENTS] First mapped student_id:', base[0].student_id);
     }
 
     // If no certificates found, return empty result
@@ -146,7 +144,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const userIds = [...new Set(base.map(cert => cert.user_id))];
+    const userIds = [...new Set(base.map(cert => cert.student_id))];
     console.log('[SEARCH-STUDENTS] Querying user_roles for', userIds.length, 'user IDs:', userIds);
     
     // Use admin client to bypass RLS policies on user_roles table
@@ -167,16 +165,16 @@ export async function GET(req: NextRequest) {
     const studentUserIds = new Set(userRoles?.map(ur => ur.user_id) || []);
     console.log('[SEARCH-STUDENTS] Student user IDs after filtering:', Array.from(studentUserIds));
     
-    const studentCertificates = base.filter(cert => studentUserIds.has(cert.user_id));
+    const studentCertificates = base.filter(cert => studentUserIds.has(cert.student_id));
     console.log('[SEARCH-STUDENTS] Student certificates after role filter:', studentCertificates.length);
 
     // Group certificates by user
     const userMap = new Map();
     
     studentCertificates?.forEach(cert => {
-      if (!userMap.has(cert.user_id)) {
-        userMap.set(cert.user_id, {
-          user_id: cert.user_id,
+      if (!userMap.has(cert.student_id)) {
+        userMap.set(cert.student_id, {
+          user_id: cert.student_id,
           certificates: [],
           total_certificates: 0,
           verified_certificates: 0,
@@ -185,7 +183,7 @@ export async function GET(req: NextRequest) {
         });
       }
 
-      const user = userMap.get(cert.user_id);
+      const user = userMap.get(cert.student_id);
       user.certificates.push({
         id: cert.id,
         title: cert.title,
@@ -288,7 +286,7 @@ export async function GET(req: NextRequest) {
       .from('certificates')
       .select('*', { count: 'exact', head: true })
       .eq('verification_status', 'verified')
-      .in('user_id', Array.from(studentUserIds));
+      .in('student_id', Array.from(studentUserIds));
 
     console.log('[SEARCH-STUDENTS] ✅ FINAL RESULT:', students.length, 'students');
     console.log('[SEARCH-STUDENTS] First student:', students[0] ? {
@@ -371,7 +369,7 @@ export async function POST(req: NextRequest) {
         institution,
         date_issued,
         verification_status,
-        user_id
+        student_id
       `)
       .eq('verification_status', 'verified')
       .limit(limit)
@@ -413,8 +411,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Get user IDs and filter for students only
-    const userIds = [...new Set(certificates.map(cert => cert.user_id))];
-    const { data: userRoles, error: roleError } = await supabase
+    const userIds = [...new Set(certificates.map(cert => cert.student_id))];
+    const adminSupabase = createSupabaseAdminClient();
+    const { data: userRoles, error: roleError } = await adminSupabase
       .from('user_roles')
       .select('user_id, role')
       .in('user_id', userIds)
@@ -425,15 +424,15 @@ export async function POST(req: NextRequest) {
     }
 
     const studentUserIds = new Set(userRoles?.map(ur => ur.user_id) || []);
-    const studentCertificates = certificates.filter(cert => studentUserIds.has(cert.user_id));
+    const studentCertificates = certificates.filter(cert => studentUserIds.has(cert.student_id));
 
     // Group certificates by user and apply minimum certificate filter
     const userMap = new Map();
     
     studentCertificates?.forEach(cert => {
-      if (!userMap.has(cert.user_id)) {
-        userMap.set(cert.user_id, {
-          user_id: cert.user_id,
+      if (!userMap.has(cert.student_id)) {
+        userMap.set(cert.student_id, {
+          user_id: cert.student_id,
           certificates: [],
           total_certificates: 0,
           verified_certificates: 0,
@@ -442,7 +441,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const user = userMap.get(cert.user_id);
+      const user = userMap.get(cert.student_id);
       user.certificates.push({
         id: cert.id,
         title: cert.title,

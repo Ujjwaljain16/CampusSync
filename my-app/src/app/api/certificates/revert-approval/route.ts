@@ -48,7 +48,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { us
   const { data: vc, error: vcError } = await supabase
     .from('verifiable_credentials')
     .select('id')
-    .eq('user_id', certificate.user_id)
+    .eq('student_id', certificate.student_id)
     .contains('credential', { credentialSubject: { certificateId } })
     .single();
 
@@ -72,7 +72,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { us
   // Create audit log for the revert action
   try {
     await supabase.from('audit_logs').insert({
-      user_id: user.id,
+      actor_id: user.id,
       action: 'revert_approval',
       target_id: certificateId,
       details: { 

@@ -36,13 +36,13 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 			throw apiError.notFound('Certificate not found');
 		}
 		// Only allow issuing for own certificate unless faculty/admin
-		const isOwner = cert.user_id === user.id;
+		const isOwner = cert.student_id === user.id;
 		const canIssueOnBehalf = role === 'admin' || role === 'faculty';
 		if (!isOwner && !canIssueOnBehalf) {
 			throw apiError.forbidden('Forbidden to issue for another user');
 		}
 		subject = {
-			id: cert.user_id,
+			id: cert.student_id,
 			certificateId: cert.id,
 			title: cert.title,
 			institution: cert.institution,
@@ -76,7 +76,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 	const now = new Date().toISOString();
 	const { error } = await supabase.from('verifiable_credentials').insert({
 		id: vc.id,
-		user_id: subject.id, // Store with certificate owner's user_id, not issuer's
+		student_id: subject.id, // Store with certificate owner's student_id, not issuer's
 		issuer: vc.issuer,
 		issuance_date: vc.issuanceDate,
 		credential: vc,
@@ -89,7 +89,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 	try {
 		const { user: actor } = await getServerUserWithRole();
 		await supabase.from('audit_logs').insert({
-			user_id: actor?.id ?? null,
+			actor_id: actor?.id ?? null,
 			action: 'issue_vc',
 			entity_type: 'verifiable_credential',
 			entity_id: vc.id,

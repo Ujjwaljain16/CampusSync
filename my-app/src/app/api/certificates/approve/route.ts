@@ -29,7 +29,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
 	// Get certificate details for email notification
 	const { data: certificate, error: certError } = await supabase
 		.from('certificates')
-		.select('title, institution, user_id, description')
+		.select('title, institution, student_id, description')
 		.eq('id', body.certificateId)
 		.single();
 
@@ -38,7 +38,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
 	}
 
 	// Get user email for notification
-	const { data: user } = await supabase.auth.admin.getUserById(certificate.user_id);
+	const { data: user } = await supabase.auth.admin.getUserById(certificate.student_id);
 	const userEmail = user?.user?.email;
 
 	// Update certificate status in your DB table `certificates`
@@ -64,7 +64,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
 				studentName: user?.user?.user_metadata?.full_name || 'Student',
 				certificateTitle: certificate.title,
 				institution: certificate.institution,
-				portfolioUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${certificate.user_id}`,
+				portfolioUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${certificate.student_id}`,
 			};
 
 			if (body.status === 'approved') {
@@ -82,7 +82,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
 	try {
 		const { user } = await getServerUserWithRole();
 		await supabase.from('audit_logs').insert({
-			user_id: user?.id ?? null,
+			actor_id: user?.id ?? null,
 			action: body.status === 'approved' ? 'manual_approve' : 'manual_reject',
 			target_id: body.certificateId,
 			details: {

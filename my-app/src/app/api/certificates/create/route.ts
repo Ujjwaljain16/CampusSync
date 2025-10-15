@@ -34,7 +34,6 @@ export const POST = withAuth(async (req: NextRequest, { user: authUser }) => {
   const now = new Date().toISOString();
   
   const certificateData = {
-    user_id: user.id,
     student_id: user.id,
     title: body.ocr?.title ?? 'Untitled Certificate',
     institution: body.ocr?.institution ?? '',

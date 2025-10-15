@@ -24,7 +24,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
     .from('certificates')
     .select('*')
     .eq('id', body.certificateId)
-    .eq('user_id', user.id)
+    .eq('student_id', user.id)
     .single();
 
   if (certError || !certificate) {

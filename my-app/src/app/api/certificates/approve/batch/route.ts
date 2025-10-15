@@ -30,7 +30,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { us
       }
 
       await supabase.from('audit_logs').insert({
-        user_id: user.id,
+        actor_id: user.id,
         action: item.status === 'approved' ? 'manual_approve' : 'manual_reject',
         target_id: item.id,
         details: { reason: item.reason ?? null, metadataId: item.metadataId ?? null },
