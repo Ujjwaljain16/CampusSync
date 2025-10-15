@@ -144,7 +144,7 @@ export const POST = withAuth(async (req: NextRequest) => {
 
   // Send email notification for auto-approval or manual review requirement
   try {
-    const { data: userData } = await supabase.auth.admin.getUserById(certificate.user_id);
+    const { data: userData } = await supabase.auth.admin.getUserById(certificate.student_id);
     const userEmail = userData?.user?.email;
 
     if (userEmail) {
@@ -154,7 +154,7 @@ export const POST = withAuth(async (req: NextRequest) => {
         institution: certificate.institution,
         confidenceScore: vr.confidence_score,
         verificationMethod: vr.verification_method,
-        portfolioUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${certificate.user_id}`,
+        portfolioUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${certificate.student_id}`,
       };
 
       if (decision === 'auto_approved') {

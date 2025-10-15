@@ -11,7 +11,7 @@ interface PendingCert {
   date_issued: string;
   description?: string;
   file_url?: string;
-  user_id: string;
+  student_id: string; // Fixed: Use student_id instead of user_id
   created_at: string;
   confidence_score?: number;
   auto_approved?: boolean;
@@ -167,7 +167,7 @@ export default function FacultyDashboardPage() {
       // 2) Issue VC
       {
         const subject = {
-          id: cert.user_id,
+          id: cert.student_id, // Fixed: Use student_id instead of user_id
           certificateId: cert.id,
           title: cert.title,
           institution: cert.institution,
@@ -435,7 +435,7 @@ export default function FacultyDashboardPage() {
                         <h3 className="text-xl font-semibold text-white mb-2">{cert.title}</h3>
                         <p className="text-white/70 mb-1">{cert.institution}</p>
                         <p className="text-white/50 text-sm mb-2">
-                          Student: {cert.user_id} • Issued: {new Date(cert.date_issued).toLocaleDateString()}
+                          Student: {cert.student_id} • Issued: {new Date(cert.date_issued).toLocaleDateString()}
                         </p>
                         {cert.description && (
                           <p className="text-white/60 text-sm">{cert.description}</p>
