@@ -15,7 +15,7 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
       .select(`
         id,
         actor_id,
-        user_id,
+        target_user_id,
         action,
         target_id,
         details,
@@ -36,7 +36,7 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
     id: string;
     title: string;
     institution: string;
-    user_id: string;
+    student_id: string;
     verification_status: string;
     created_at: string;
   }> = [];
@@ -44,7 +44,7 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
   if (certificateIds.length > 0) {
     const { data: certs, error: certsError } = await supabase
       .from('certificates')
-      .select('id, title, institution, user_id, verification_status, created_at')
+      .select('id, title, institution, student_id, verification_status, created_at')
       .in('id', certificateIds);
     
     if (certsError) {
@@ -69,7 +69,7 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
   }
 
   // Get user details for the approvers
-  const approverIds = [...new Set(approvals?.map(a => a.user_id).filter(Boolean) || [])];
+  const approverIds = [...new Set(approvals?.map(a => a.actor_id).filter(Boolean) || [])];
   const { data: users } = await supabase
     .from('user_roles')
     .select('user_id, role')
@@ -86,11 +86,11 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
       id: approval.target_id,
       title: 'Certificate not found',
       institution: 'Unknown',
-      user_id: 'unknown',
+      student_id: 'unknown',
       verification_status: 'unknown',
       created_at: approval.created_at
     },
-    approverRole: userMap.get(approval.user_id) || 'unknown',
+    approverRole: userMap.get(approval.actor_id) || 'unknown',
     details: approval.details,
     createdAt: approval.created_at,
     canRevert: approval.action === 'manual_approve' || approval.action === 'batch_approve'

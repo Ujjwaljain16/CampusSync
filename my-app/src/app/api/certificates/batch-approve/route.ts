@@ -36,7 +36,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { us
   // Log the batch action
   try {
     await supabase.from('audit_logs').insert({
-      user_id: user.id,
+      actor_id: user.id,
       action: 'batch_certificate_review',
       target_id: body.certificateIds.join(','),
       details: {
