@@ -1,82 +1,76 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { withAuth, success, apiError, parseAndValidateBody } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-// GET - Fetch allowed domains
-export async function GET(req: NextRequest) {
-  try {
-    const supabase = await createSupabaseServerClient();
-    
-    const { data: domains, error } = await supabase
-      .from('allowed_domains')
-      .select('*')
-      .order('domain', { ascending: true });
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ data: domains });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+interface AddDomainBody {
+  domain: string;
+  description?: string;
 }
+
+// GET - Fetch allowed domains
+export const GET = withAuth(async () => {
+  const supabase = await createSupabaseServerClient();
+  
+  const { data: domains, error } = await supabase
+    .from('allowed_domains')
+    .select('*')
+    .order('domain', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching domains:', error);
+    throw apiError.internal(error.message);
+  }
+
+  return success({ domains });
+});
 
 // POST - Add new domain
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { domain, description } = body;
+export const POST = withAuth(async (req: NextRequest) => {
+  const result = await parseAndValidateBody<AddDomainBody>(req, ['domain']);
+  if (result.error) return result.error;
 
-    if (!domain) {
-      return NextResponse.json({ error: 'Domain is required' }, { status: 400 });
-    }
+  const { domain, description } = result.data;
+  const supabase = await createSupabaseServerClient();
 
-    const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from('allowed_domains')
+    .insert({
+      domain: domain.toLowerCase().trim(),
+      description: description || '',
+      created_at: new Date().toISOString()
+    })
+    .select()
+    .single();
 
-    const { data, error } = await supabase
-      .from('allowed_domains')
-      .insert({
-        domain: domain.toLowerCase().trim(),
-        description: description || '',
-        created_at: new Date().toISOString()
-      })
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ data, message: 'Domain added successfully' });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error('Error adding domain:', error);
+    throw apiError.internal(error.message);
   }
-}
+
+  return success(data, 'Domain added successfully', 201);
+});
 
 // DELETE - Remove domain
-export async function DELETE(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const domain = searchParams.get('domain');
+export const DELETE = withAuth(async (req: NextRequest) => {
+  const { searchParams } = new URL(req.url);
+  const domain = searchParams.get('domain');
 
-    if (!domain) {
-      return NextResponse.json({ error: 'Domain is required' }, { status: 400 });
-    }
-
-    const supabase = await createSupabaseServerClient();
-
-    const { error } = await supabase
-      .from('allowed_domains')
-      .delete()
-      .eq('domain', domain);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ message: 'Domain removed successfully' });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!domain) {
+    throw apiError.badRequest('Domain is required');
   }
-}
+
+  const supabase = await createSupabaseServerClient();
+
+  const { error } = await supabase
+    .from('allowed_domains')
+    .delete()
+    .eq('domain', domain);
+
+  if (error) {
+    console.error('Error deleting domain:', error);
+    throw apiError.internal(error.message);
+  }
+
+  return success({ message: 'Domain removed successfully' });
+});
 

@@ -1,18 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { withRole, success } from '@/lib/api';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
 
-export async function GET(request: NextRequest) {
-  try {
-    const { user, role } = await getServerUserWithRole();
-    
-    // Check if user is recruiter or admin
-    if (!user || (role !== 'recruiter' && role !== 'admin')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Use admin client to bypass RLS for reading student data
-    const adminSupabase = createSupabaseAdminClient();
-    const supabase = await createSupabaseServerClient();
+export const GET = withRole(['recruiter', 'admin'], async (_req, { user }) => {
+  // Use admin client to bypass RLS for reading student data
+  const adminSupabase = createSupabaseAdminClient();
+  const supabase = await createSupabaseServerClient();
 
     // Get total students count (use admin client)
     const { count: totalStudents } = await adminSupabase
@@ -30,15 +22,15 @@ export async function GET(request: NextRequest) {
     const pendingCount = statusCounts?.filter(c => c.verification_status === 'pending').length || 0;
     const rejectedCount = statusCounts?.filter(c => c.verification_status === 'rejected').length || 0;
 
-    // Get average confidence score (use admin client)
-    const { data: confidenceData } = await adminSupabase
-      .from('certificates')
-      .select('confidence_score')
-      .not('confidence_score', 'is', null);
+  // Get average confidence score (use admin client)
+  const { data: confidenceData } = await adminSupabase
+    .from('certificates')
+    .select('confidence_score')
+    .not('confidence_score', 'is', null);
 
-    const averageConfidence = confidenceData?.length > 0 
-      ? confidenceData.reduce((sum, cert) => sum + (cert.confidence_score || 0), 0) / confidenceData.length
-      : 0;
+  const averageConfidence = (confidenceData && confidenceData.length > 0)
+    ? confidenceData.reduce((sum, cert) => sum + (cert.confidence_score || 0), 0) / confidenceData.length
+    : 0;
 
     // Get top skills (extracted from certificate titles) - use admin client
     const { data: certificates } = await adminSupabase
@@ -70,23 +62,24 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // Get top universities - use admin client
-    const { data: universityData } = await adminSupabase
-      .from('user_roles')
-      .select(`
-        profiles!inner(
-          university
-        )
-      `)
-      .eq('role', 'student');
+  // Get top universities - use admin client
+  const { data: universityData } = await adminSupabase
+    .from('user_roles')
+    .select(`
+      profiles!inner(
+        university
+      )
+    `)
+    .eq('role', 'student');
 
-    const universityCounts = new Map<string, number>();
-    universityData?.forEach(item => {
-      const university = item.profiles?.university;
-      if (university) {
-        universityCounts.set(university, (universityCounts.get(university) || 0) + 1);
-      }
-    });
+  const universityCounts = new Map<string, number>();
+  universityData?.forEach((item: Record<string, unknown>) => {
+    const profiles = item.profiles as Array<{ university?: string }> | undefined;
+    const university = profiles?.[0]?.university;
+    if (university) {
+      universityCounts.set(university, (universityCounts.get(university) || 0) + 1);
+    }
+  });
 
     const topUniversities = Array.from(universityCounts.entries())
       .map(([university, count]) => ({ university, count }))
@@ -135,30 +128,25 @@ export async function GET(request: NextRequest) {
     const responseRate = contactedStudents > 0 ? Math.round((responseCount || 0) / contactedStudents * 100) : 0;
     
     // Calculate engagement rate as percentage of students in active pipeline vs total students
-    const activePipelineCount = pipelineCount || 0;
-    const engagementRate = totalStudents && totalStudents > 0 
-      ? Math.round((activePipelineCount / totalStudents) * 100) 
-      : 0;
+  const activePipelineCount = pipelineCount || 0;
+  const engagementRate = totalStudents && totalStudents > 0 
+    ? Math.round((activePipelineCount / totalStudents) * 100) 
+    : 0;
 
-    return NextResponse.json({
-      total_students: totalStudents || 0,
-      verified_certifications: verifiedCount,
-      pending_certifications: pendingCount,
-      rejected_certifications: rejectedCount,
-      average_confidence: averageConfidence,
-      top_skills: topSkills,
-      top_universities: topUniversities,
-      daily_activity: dailyActivityData,
-      // Recruiter-specific metrics
-      contacted_students: contactedStudents,
-      active_pipeline_count: activePipelineCount,
-      engagement_rate: engagementRate,
-      response_rate: responseRate
-    });
-
-  } catch (error) {
-    console.error('Recruiter analytics API error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
+  return success({
+    total_students: totalStudents || 0,
+    verified_certifications: verifiedCount,
+    pending_certifications: pendingCount,
+    rejected_certifications: rejectedCount,
+    average_confidence: averageConfidence,
+    top_skills: topSkills,
+    top_universities: topUniversities,
+    daily_activity: dailyActivityData,
+    // Recruiter-specific metrics
+    contacted_students: contactedStudents,
+    active_pipeline_count: activePipelineCount,
+    engagement_rate: engagementRate,
+    response_rate: responseRate
+  });
+});
 

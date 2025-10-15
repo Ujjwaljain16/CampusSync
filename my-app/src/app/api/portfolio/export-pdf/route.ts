@@ -1,44 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { apiError, parseAndValidateBody } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 
+interface ExportPdfBody {
+  userId: string;
+  includePersonalInfo?: boolean;
+}
+
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => null) as { 
-      userId: string;
-      includePersonalInfo?: boolean;
-    } | null;
+  const result = await parseAndValidateBody<ExportPdfBody>(req, ['userId']);
+  if (result.error) return result.error;
+  
+  const body = result.data;
 
-    if (!body || !body.userId) {
-      return NextResponse.json({ error: 'Missing userId' }, { status: 400 });
-    }
+  const supabase = await createSupabaseServerClient();
 
-    const supabase = await createSupabaseServerClient();
+  // Get user's certificates
+  const { data: certificates, error: certError } = await supabase
+    .from('certificates')
+    .select(`
+      id,
+      title,
+      institution,
+      date_issued,
+      description,
+      verification_status,
+      file_url,
+      created_at
+    `)
+    .eq('user_id', body.userId)
+    .eq('verification_status', 'verified')
+    .order('date_issued', { ascending: false });
 
-    // Get user's certificates
-    const { data: certificates, error: certError } = await supabase
-      .from('certificates')
-      .select(`
-        id,
-        title,
-        institution,
-        date_issued,
-        description,
-        verification_status,
-        file_url,
-        created_at
-      `)
-      .eq('user_id', body.userId)
-      .eq('verification_status', 'verified')
-      .order('date_issued', { ascending: false });
+  if (certError) {
+    throw apiError.internal('Failed to fetch certificates');
+  }
 
-    if (certError) {
-      throw new Error('Failed to fetch certificates');
-    }
-
-    if (!certificates || certificates.length === 0) {
-      return NextResponse.json({ error: 'No verified certificates found' }, { status: 404 });
-    }
+  if (!certificates || certificates.length === 0) {
+    throw apiError.notFound('No verified certificates found');
+  }
 
     // Get verification metadata for confidence scores
     const certificateIds = certificates.map(c => c.id);
@@ -109,7 +110,7 @@ export async function POST(req: NextRequest) {
     certificates.forEach((cert, index) => {
       // Check if we need a new page
       if (currentY < 150) {
-        const newPage = pdfDoc.addPage([595.28, 841.89]);
+        pdfDoc.addPage([595.28, 841.89]);
         currentY = height - 80;
       }
 
@@ -214,21 +215,13 @@ export async function POST(req: NextRequest) {
     // Generate PDF bytes
     const pdfBytes = await pdfDoc.save();
 
-    // Return PDF as response
-    return new NextResponse(pdfBytes, {
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="campusync-portfolio-${body.userId}.pdf"`,
-        'Content-Length': pdfBytes.length.toString(),
-      },
-    });
-
-  } catch (error) {
-    console.error('PDF export error:', error);
-    return NextResponse.json(
-      { error: 'Failed to generate PDF portfolio' },
-      { status: 500 }
-    );
-  }
+  // Return PDF as response (NextResponse required for binary data)
+  return new NextResponse(Buffer.from(pdfBytes), {
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="campusync-portfolio-${body.userId}.pdf"`,
+      'Content-Length': pdfBytes.length.toString(),
+    },
+  });
 }
 

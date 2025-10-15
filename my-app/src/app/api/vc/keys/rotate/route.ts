@@ -1,33 +1,28 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
+import { withRole, success } from '@/lib/api';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { ProductionKeyManager } from '../../../../../../lib/vc/productionKeyManager';
 
 // POST /api/vc/keys/rotate - admin only
-export async function POST(_req: NextRequest) {
-  const auth = await requireRole(['admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
+export const POST = withRole(['admin'], async (_req, { user }) => {
+  const km = ProductionKeyManager.getInstance();
+  const newKey = await km.rotateKey();
 
+  // Audit
+  const supabase = await createSupabaseServerClient();
   try {
-    const km = ProductionKeyManager.getInstance();
-    const newKey = await km.rotateKey();
-
-    // Audit
-    const supabase = await createSupabaseServerClient();
     await supabase.from('audit_logs').insert({
-      user_id: auth.user.id,
+      user_id: user.id,
       action: 'vc_key_rotate',
       target_id: newKey.kid,
       details: { alg: newKey.alg },
       created_at: new Date().toISOString(),
     });
-
-    return NextResponse.json({ success: true, keyId: newKey.kid });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Rotation failed' }, { status: 500 });
+  } catch (auditError) {
+    console.error('Audit log error:', auditError);
   }
-}
+
+  return success({ success: true, keyId: newKey.kid });
+});
 
 
 

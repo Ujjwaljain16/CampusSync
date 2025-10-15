@@ -1,20 +1,24 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireRole, createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { NextRequest } from 'next/server';
+import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
 import { emailService } from '../../../../../lib/emailService';
 
-export async function POST(req: NextRequest) {
-	const auth = await requireRole(['faculty', 'admin']);
-	if (!auth.authorized) {
-		return NextResponse.json({ error: auth.message }, { status: auth.status });
-	}
+interface ApproveBody {
+	certificateId: string;
+	status: 'approved' | 'rejected';
+	metadataId?: string;
+	approveReason?: string;
+	rejectReason?: string;
+}
 
-	const body = await req.json().catch(() => null);
-	if (!body || typeof body.certificateId !== 'string' || typeof body.status !== 'string') {
-		return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
-	}
-
+export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
+	const result = await parseAndValidateBody<ApproveBody>(req, ['certificateId', 'status']);
+	if (result.error) return result.error;
+	
+	const body = result.data;
+	
 	if (!['approved', 'rejected'].includes(body.status)) {
-		return NextResponse.json({ error: 'Status must be approved or rejected' }, { status: 400 });
+		throw apiError.badRequest('Status must be approved or rejected');
 	}
 
 	const supabase = await createSupabaseServerClient();
@@ -30,11 +34,11 @@ export async function POST(req: NextRequest) {
 		.single();
 
 	if (certError) {
-		return NextResponse.json({ error: 'Certificate not found' }, { status: 404 });
+		throw apiError.notFound('Certificate not found');
 	}
 
 	// Get user email for notification
-	const { data: user, error: userError } = await supabase.auth.admin.getUserById(certificate.user_id);
+	const { data: user } = await supabase.auth.admin.getUserById(certificate.user_id);
 	const userEmail = user?.user?.email;
 
 	// Update certificate status in your DB table `certificates`
@@ -43,7 +47,7 @@ export async function POST(req: NextRequest) {
 		.update({ verification_status: verificationStatus, updated_at: new Date().toISOString() })
 		.eq('id', body.certificateId);
 
-	if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
+	if (updateErr) throw apiError.internal(updateErr.message);
 
 	// If approved and metadataId provided, update verification method to manual
 	if (body.status === 'approved' && typeof body.metadataId === 'string') {
@@ -91,8 +95,11 @@ export async function POST(req: NextRequest) {
 		// ignore audit failures
 	}
 
-	return NextResponse.json({ data: { certificateId: body.certificateId, status: body.status } });
-}
+	return success(
+		{ certificateId: body.certificateId, status: body.status }, 
+		`Certificate ${body.status} successfully`
+	);
+});
 
 
 

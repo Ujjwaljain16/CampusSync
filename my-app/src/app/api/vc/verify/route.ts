@@ -1,120 +1,78 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
+import { NextRequest } from 'next/server';
+import { withRole, success, parseAndValidateBody } from '@/lib/api';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { ProductionVCVerifier, type VerificationOptions } from '@/lib/vc/vcVerifier';
 import { ProductionKeyManager } from '@/lib/vc/productionKeyManager';
-import type { VerifiableCredential } from '@/types';
 
-export async function POST(req: NextRequest) {
-  try {
-    const auth = await requireRole(['student', 'faculty', 'admin', 'recruiter']);
-    if (!auth.authorized) {
-      return NextResponse.json({ error: auth.message }, { status: auth.status });
-    }
-
-    const body = await req.json().catch(() => null) as {
-      credential: VerifiableCredential;
-      options?: VerificationOptions;
-    } | null;
-
-    if (!body || !body.credential) {
-      return NextResponse.json({ 
-        error: 'Missing required field: credential' 
-      }, { status: 400 });
-    }
-
-    // Initialize VC verifier
-    const vcVerifier = ProductionVCVerifier.getInstance();
-    
-    // Get trusted keys
-    const keyManager = ProductionKeyManager.getInstance();
-    const currentKey = keyManager.getCurrentKey();
-    
-    if (currentKey) {
-      vcVerifier.addTrustedKey(currentKey.kid, currentKey);
-    }
-
-    // Set default verification options
-    const verificationOptions: VerificationOptions = {
-      allowExpired: false,
-      strictMode: true,
-      checkRevocation: true,
-      allowedIssuers: [process.env.NEXT_PUBLIC_ISSUER_DID || 'did:web:localhost:3000'],
-      ...body.options
-    };
-
-    // Verify the credential
-    const result = await vcVerifier.verifyCredential(
-      body.credential,
-      verificationOptions,
-      auth.user?.id || 'anonymous'
-    );
-
-    // Also consult status registry for latest status (CRL-like)
-    const { data: statusRow } = await (await createSupabaseServerClient())
-      .from('vc_status_registry')
-      .select('status, reason, recorded_at')
-      .eq('credential_id', body.credential.id)
-      .order('recorded_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const isRevokedByRegistry = statusRow && statusRow.status !== 'active';
-
-    // Store verification result in database
-    const supabase = await createSupabaseServerClient();
-    await supabase.from('audit_logs').insert({
-      user_id: auth.user?.id || null,
-      action: 'verify_vc',
-      target_id: body.credential.id,
-      details: {
-        isValid: result.isValid,
-        errors: result.errors,
-        warnings: result.warnings,
-        verificationMethod: 'JsonWebSignature2020',
-        issuer: result.metadata.issuer,
-        subject: result.metadata.subject
-      },
-      created_at: new Date().toISOString(),
-    });
-
-    return NextResponse.json({
-      data: {
-        isValid: result.isValid,
-        credential: result.credential,
-        errors: result.errors,
-        warnings: result.warnings,
-        metadata: result.metadata,
-        revocationStatus: result.revocationStatus,
-        validationDetails: result.validationDetails
-      }
-    });
-
-  } catch (error: any) {
-    console.error('VC verification error:', error);
-    return NextResponse.json({ 
-      error: error.message || 'Internal server error' 
-    }, { status: 500 });
-  }
+interface VerifyVCBody {
+  credential: Record<string, unknown>; // VerifiableCredential from vcVerifier
+  options?: VerificationOptions;
 }
 
-export async function GET(req: NextRequest) {
-  try {
-    const auth = await requireRole(['faculty', 'admin']);
-    if (!auth.authorized) {
-      return NextResponse.json({ error: auth.message }, { status: auth.status });
-    }
+export const POST = withRole(['student', 'faculty', 'admin', 'recruiter'], async (req: NextRequest, { user }) => {
+  const result = await parseAndValidateBody<VerifyVCBody>(req, ['credential']);
+  if (result.error) return result.error;
 
-    const vcVerifier = ProductionVCVerifier.getInstance();
-    const stats = vcVerifier.getVerificationStats();
+  const body = result.data;
 
-    return NextResponse.json({
-      data: stats
-    });
-
-  } catch (error: any) {
-    console.error('VC verification stats error:', error);
-    return NextResponse.json({ 
-      error: error.message || 'Internal server error' 
-    }, { status: 500 });
+  // Initialize VC verifier
+  const vcVerifier = ProductionVCVerifier.getInstance();
+  
+  // Get trusted keys
+  const keyManager = ProductionKeyManager.getInstance();
+  const currentKey = keyManager.getCurrentKey();
+  
+  if (currentKey) {
+    vcVerifier.addTrustedKey(currentKey.kid, currentKey);
   }
-}
+
+  // Set default verification options
+  const verificationOptions: VerificationOptions = {
+    allowExpired: false,
+    strictMode: true,
+    checkRevocation: true,
+    allowedIssuers: [process.env.NEXT_PUBLIC_ISSUER_DID || 'did:web:localhost:3000'],
+    ...body.options
+  };
+
+  // Verify the credential
+  const verificationResult = await vcVerifier.verifyCredential(
+    body.credential,
+    verificationOptions,
+    user?.id || 'anonymous'
+  );
+
+  // Store verification result in database
+  const supabase = await createSupabaseServerClient();
+  await supabase.from('audit_logs').insert({
+    user_id: user?.id || null,
+    action: 'verify_vc',
+    target_id: body.credential.id,
+    details: {
+      isValid: verificationResult.isValid,
+      errors: verificationResult.errors,
+      warnings: verificationResult.warnings,
+      verificationMethod: 'JsonWebSignature2020',
+      issuer: verificationResult.metadata.issuer,
+      subject: verificationResult.metadata.subject
+    },
+    created_at: new Date().toISOString(),
+  });
+
+  return success({
+    isValid: verificationResult.isValid,
+    credential: verificationResult.credential,
+    errors: verificationResult.errors,
+    warnings: verificationResult.warnings,
+    metadata: verificationResult.metadata,
+    revocationStatus: verificationResult.revocationStatus,
+    validationDetails: verificationResult.validationDetails
+  });
+});
+
+export const GET = withRole(['faculty', 'admin'], async () => {
+  const vcVerifier = ProductionVCVerifier.getInstance();
+  const stats = vcVerifier.getVerificationStats();
+
+  return success(stats);
+});

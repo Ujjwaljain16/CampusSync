@@ -1,5 +1,6 @@
 // Background job processor endpoint
 import { NextRequest, NextResponse } from 'next/server';
+import { apiError } from '@/lib/api';
 import { JobWorker, JobQueue } from '../../../../lib/jobQueue';
 import { defaultNormalizer } from '../../../../lib/llmNormalizer';
 import { extractByType } from '../../../../lib/docExtractors';
@@ -12,7 +13,7 @@ const supabase = createClient(
 );
 
 // OCR processor
-async function processOCR(payload: any) {
+async function processOCR(payload: Record<string, unknown>) {
   try {
     const { documentId, fileUrl, documentType } = payload;
     
@@ -27,16 +28,16 @@ async function processOCR(payload: any) {
         documentType: documentType || 'certificate'
       }
     };
-  } catch (error: any) {
+  } catch (error) {
     return {
       success: false,
-      error: error.message || 'OCR processing failed'
+      error: error instanceof Error ? error.message : 'OCR processing failed'
     };
   }
 }
 
 // Verification processor
-async function processVerification(payload: any) {
+async function processVerification(payload: Record<string, unknown>) {
   try {
     const { documentId, extractedText, documentType } = payload;
     
@@ -71,16 +72,16 @@ async function processVerification(payload: any) {
         verificationStatus: outcome
       }
     };
-  } catch (error: any) {
+  } catch (error) {
     return {
       success: false,
-      error: error.message || 'Verification processing failed'
+      error: error instanceof Error ? error.message : 'Verification processing failed'
     };
   }
 }
 
 // Normalization processor
-async function processNormalization(payload: any) {
+async function processNormalization(payload: Record<string, unknown>) {
   try {
     const { documentId, extractedFields } = payload;
     
@@ -93,10 +94,10 @@ async function processNormalization(payload: any) {
         normalizedFields
       }
     };
-  } catch (error: any) {
+  } catch (error) {
     return {
       success: false,
-      error: error.message || 'Normalization processing failed'
+      error: error instanceof Error ? error.message : 'Normalization processing failed'
     };
   }
 }
@@ -138,19 +139,22 @@ export async function POST(request: NextRequest) {
         const result = await processor(job.payload);
         await JobQueue.completeJob(job.id, result);
         return NextResponse.json({ message: 'Job processed successfully', jobId: job.id });
-      } catch (error: any) {
+      } catch (error) {
         await JobQueue.completeJob(job.id, {
           success: false,
-          error: error.message || 'Unknown error'
+          error: error instanceof Error ? error.message : 'Unknown error'
         });
         return NextResponse.json({ error: 'Job processing failed' });
       }
     } else {
-      return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+      throw apiError.badRequest('Invalid action');
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error('Job processing error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    if (error && typeof error === 'object' && 'status' in error) {
+      throw error;
+    }
+    throw apiError.internal('Job processing failed');
   }
 }
 
@@ -181,8 +185,8 @@ export async function GET(request: NextRequest) {
       
       return NextResponse.json({ jobs });
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error('Job status fetch error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    throw apiError.internal('Failed to fetch job status');
   }
 }

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { success } from '@/lib/api';
 import { createClient } from '@supabase/supabase-js';
 
 export async function GET() {
@@ -24,7 +24,7 @@ export async function GET() {
     
     if (!supabaseUrl || !supabaseKey) {
       diagnostics.supabase.error = 'Missing environment variables';
-      return NextResponse.json(diagnostics);
+      return success(diagnostics);
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -32,7 +32,7 @@ export async function GET() {
 
     // Test auth
     try {
-      const { data: authData, error: authError } = await supabase.auth.getSession();
+      const { error: authError } = await supabase.auth.getSession();
       if (!authError) {
         diagnostics.supabase.auth = true;
       } else {
@@ -44,7 +44,7 @@ export async function GET() {
 
     // Test database
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('user_roles')
         .select('count')
         .limit(1);
@@ -76,5 +76,5 @@ export async function GET() {
     diagnostics.supabase.error = `Connection error: ${error instanceof Error ? error.message : 'Unknown'}`;
   }
 
-  return NextResponse.json(diagnostics);
+  return success(diagnostics);
 }

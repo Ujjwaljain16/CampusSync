@@ -1,15 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
+import { withRole, success } from '@/lib/api';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export async function GET(_req: NextRequest) {
-  try {
-    const auth = await requireRole(['faculty', 'admin']);
-    
-    if (!auth.authorized) {
-      return NextResponse.json({ error: auth.message }, { status: auth.status });
-    }
-
-    const supabase = await createSupabaseServerClient();
+export const GET = withRole(['faculty', 'admin'], async () => {
+  const supabase = await createSupabaseServerClient();
 
     // Get total certificates count
     const { count: totalCerts } = await supabase
@@ -84,7 +77,10 @@ export async function GET(_req: NextRequest) {
         acc[date] = { total: 0, verified: 0, pending: 0, rejected: 0 };
       }
       acc[date].total++;
-      acc[date][cert.verification_status]++;
+      const status = cert.verification_status as 'verified' | 'pending' | 'rejected';
+      if (status === 'verified' || status === 'pending' || status === 'rejected') {
+        acc[date][status]++;
+      }
       return acc;
     }, {} as Record<string, { total: number; verified: number; pending: number; rejected: number }>) || {};
 
@@ -115,29 +111,20 @@ export async function GET(_req: NextRequest) {
       .slice(0, 5)
       .map(([institution, count]) => ({ institution, count }));
 
-    return NextResponse.json({
-      data: {
-        overview: {
-          totalCertificates: totalCerts || 0,
-          autoApproved: autoApprovedCerts || 0,
-          pending: pendingCerts || 0,
-          verified: verifiedCerts || 0,
-          rejected: rejectedCerts || 0,
-          autoApprovalRate: Math.round(autoApprovalRate * 100) / 100,
-          averageConfidence: Math.round(avgConfidence * 100) / 100,
-        },
-        confidenceDistribution,
-        verificationMethods,
-        dailyActivity,
-        topInstitutions,
-      }
+    return success({
+      overview: {
+        totalCertificates: totalCerts || 0,
+        autoApproved: autoApprovedCerts || 0,
+        pending: pendingCerts || 0,
+        verified: verifiedCerts || 0,
+        rejected: rejectedCerts || 0,
+        autoApprovalRate: Math.round(autoApprovalRate * 100) / 100,
+        averageConfidence: Math.round(avgConfidence * 100) / 100,
+      },
+      confidenceDistribution,
+      verificationMethods,
+      dailyActivity,
+      topInstitutions,
     });
-
-  } catch (error: any) {
-    console.error('Faculty analytics error:', error);
-    return NextResponse.json({ 
-      error: error.message || 'Internal server error' 
-    }, { status: 500 });
-  }
-}
+  });
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 
+// OAuth callback handler - no auth required (public endpoint)
 export async function GET(request: NextRequest) {
 	const url = new URL(request.url);
 	const code = url.searchParams.get('code');

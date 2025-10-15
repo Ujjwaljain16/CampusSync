@@ -1,21 +1,30 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getIssuerJwk, verifyCredentialJws } from '../../../../../lib/vc';
-import type { VerifiableCredential } from '../../../../types';
+import { success, apiError } from '@/lib/api';
+
+interface VerifyBody {
+  jws?: string;
+  vc?: {
+    proof?: {
+      jws?: string;
+    };
+  };
+}
 
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => null) as { jws?: string; vc?: VerifiableCredential } | null;
-  if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  const body = await req.json().catch(() => null) as VerifyBody | null;
+  if (!body) throw apiError.badRequest('Invalid JSON');
 
   const jws = body.jws || body.vc?.proof?.jws;
-  if (!jws) return NextResponse.json({ error: 'Missing jws or vc.proof.jws' }, { status: 400 });
+  if (!jws) throw apiError.badRequest('Missing jws or vc.proof.jws');
 
   try {
     const jwk = await getIssuerJwk();
     const { payload, protectedHeader } = await verifyCredentialJws(jws, jwk);
-    return NextResponse.json({ data: { valid: true, payload, protectedHeader } });
+    return success({ valid: true, payload, protectedHeader }, 'Credential verified successfully');
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Verification failed';
-    return NextResponse.json({ data: { valid: false }, error: message }, { status: 200 });
+    return success({ valid: false, error: message }, 'Credential verification failed', 200);
   }
 }
 

@@ -1,13 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { withRole, success, apiError } from '@/lib/api';
 
-export async function GET(_req: NextRequest) {
-  const auth = await requireRole(['faculty', 'admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
+interface VerificationResult {
+  confidence_score?: number;
+  auto_approved?: boolean;
+  details?: unknown;
+}
 
+interface CertificateRow {
+  verification_results?: VerificationResult | VerificationResult[];
+  [key: string]: unknown;
+}
+
+export const GET = withRole(['faculty', 'admin'], async () => {
   const supabase = await createSupabaseServerClient();
+  
   // Flagged queue: pending certificates that are NOT auto-approved (from verification_results)
   const { data, error } = await supabase
     .from('certificates')
@@ -15,18 +22,16 @@ export async function GET(_req: NextRequest) {
     .eq('verification_status', 'pending')
     .order('created_at', { ascending: false });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (error) throw apiError.internal(error.message);
 
   // Filter to only those that require manual review (auto_approved === false)
-  const flagged = (data || []).filter((row: any) => {
+  const flagged = (data || []).filter((row: CertificateRow) => {
     const vr = Array.isArray(row.verification_results) ? row.verification_results[0] : row.verification_results;
     return vr ? vr.auto_approved === false : true; // if no result, keep for review
   });
 
-  return NextResponse.json({ data: flagged });
-}
+  return success(flagged);
+});
 
 
 

@@ -1,19 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { success, apiError } from '@/lib/api';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ studentId: string }> }
 ) {
-  try {
-    const { user, role } = await getServerUserWithRole();
-    
-    // Check if user is recruiter or admin
-    if (!user || (role !== 'recruiter' && role !== 'admin')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const { user, role } = await getServerUserWithRole();
+  
+  // Check if user is recruiter or admin
+  if (!user || (role !== 'recruiter' && role !== 'admin')) {
+    throw apiError.unauthorized();
+  }
 
-    const { studentId } = await params;
+  const { studentId } = await params;
     // Use admin client to bypass RLS policies
     const supabase = createSupabaseAdminClient();
 
@@ -25,7 +25,7 @@ export async function GET(
       .single();
 
     if (profileError || !profile) {
-      return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+      throw apiError.notFound('Student not found');
     }
 
     // Get student's certificates
@@ -50,7 +50,7 @@ export async function GET(
 
     if (certError) {
       console.error('Error fetching certificates:', certError);
-      return NextResponse.json({ error: 'Failed to fetch certificates' }, { status: 500 });
+      throw apiError.internal('Failed to fetch certificates');
     }
 
     // Process certificates
@@ -119,10 +119,5 @@ export async function GET(
       created_at: profile.created_at
     };
 
-    return NextResponse.json(student);
-
-  } catch (error) {
-    console.error('Student detail API error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
+  return success(student);
 }

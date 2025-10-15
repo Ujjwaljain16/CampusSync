@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { withAuth, success, apiError } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export async function GET(_req: NextRequest) {
+/**
+ * GET /api/certificates/mine
+ * Returns all certificates for the authenticated user
+ */
+export const GET = withAuth(async (_request, { user }) => {
   const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { data, error } = await supabase
     .from('certificates')
@@ -12,9 +14,9 @@ export async function GET(_req: NextRequest) {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data });
-}
+  if (error) return apiError.internal(error.message);
+  return success(data);
+});
 
 
 
