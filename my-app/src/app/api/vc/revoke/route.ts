@@ -74,7 +74,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { us
     reason_code: body.reasonCode,
     reason: revocationRecord.reason.description,
     issuer: credential.issuer,
-    subject_id: credential.user_id || null,
+    subject_id: credential.student_id || null,
     recorded_by: user.id,
     metadata: { revocationId: revocationRecord.id }
   });
