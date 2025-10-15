@@ -1,23 +1,34 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { NextRequest } from 'next/server';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { withAuth, success, apiError } from '@/lib/api';
 import type { OcrExtractionResult } from '../../../../types';
+import type { User } from '@supabase/supabase-js';
 
-export async function POST(req: NextRequest) {
+interface CreateCertificateBody {
+  filePath?: string;
+  publicUrl?: string;
+  ocr?: OcrExtractionResult;
+}
+
+export const POST = withAuth(async (req: NextRequest, { user: authUser }) => {
   const supabase = await createSupabaseServerClient();
-  const admin = createSupabaseAdminClient();
-  let { data: { user } } = await supabase.auth.getUser();
-  if (!user && process.env.NODE_ENV !== 'production' && req.headers.get('x-test-bypass-auth') === '1') {
-    user = { id: process.env.TEST_STUDENT_USER_ID || 'test-user' } as any;
+  
+  // Handle test bypass for non-production environments
+  let user: User = authUser;
+  if (process.env.NODE_ENV !== 'production' && req.headers.get('x-test-bypass-auth') === '1') {
+    user = { id: process.env.TEST_STUDENT_USER_ID || 'test-user' } as User;
   }
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = await req.json().catch(() => null) as { filePath?: string; publicUrl?: string; ocr?: OcrExtractionResult } | null;
+  const body = await req.json().catch(() => null) as CreateCertificateBody | null;
   const bypassStorage = process.env.NODE_ENV !== 'production' && req.headers.get('x-test-bypass-storage') === '1';
-  if (!body || (!bypassStorage && !body.publicUrl)) return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+  
+  if (!body || (!bypassStorage && !body.publicUrl)) {
+    throw apiError.badRequest('Invalid payload: publicUrl is required');
+  }
 
+  // Skip database operations in test bypass mode
   if (bypassStorage) {
-    // Skip database operations in test bypass mode
-    return NextResponse.json({ data: { status: 'created' } });
+    return success({ status: 'created' }, 'Certificate created (test bypass mode)');
   }
 
   const now = new Date().toISOString();
@@ -42,16 +53,15 @@ export async function POST(req: NextRequest) {
   if (error) {
     console.error('Certificate creation error:', error);
     console.error('Certificate data that failed:', certificateData);
-    return NextResponse.json({ 
-      error: error.message, 
+    throw apiError.internal(error.message, {
       details: error.details,
       hint: error.hint,
       code: error.code
-    }, { status: 500 });
+    });
   }
 
-  return NextResponse.json({ data: { status: 'created' } });
-}
+  return success({ status: 'created' }, 'Certificate created successfully', 201);
+});
 
 
 

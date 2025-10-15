@@ -1,26 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { NextRequest } from 'next/server';
+import { withRole, success, apiError } from '@/lib/api';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export async function GET(request: NextRequest) {
-  try {
-    const { user, role } = await getServerUserWithRole();
-    
-    // Check if user is recruiter or admin
-    if (!user || (role !== 'recruiter' && role !== 'admin')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest) => {
 
-    const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '10');
-    const search = searchParams.get('search') || '';
-    const skills = searchParams.get('skills')?.split(',') || [];
-    const universities = searchParams.get('universities')?.split(',') || [];
-    const graduation_years = searchParams.get('graduation_years')?.split(',').map(y => parseInt(y)).filter(y => !isNaN(y)) || [];
-    const verification_status = searchParams.get('verification_status')?.split(',') || [];
-    const confidence_min = parseFloat(searchParams.get('confidence_min') || '0');
-    const location = searchParams.get('location') || '';
-    const gpa_min = parseFloat(searchParams.get('gpa_min') || '0');
+  const { searchParams } = new URL(request.url);
+  const page = parseInt(searchParams.get('page') || '1');
+  const limit = parseInt(searchParams.get('limit') || '10');
+  const search = searchParams.get('search') || '';
+  const skills = searchParams.get('skills')?.split(',') || [];
+  const verification_status = searchParams.get('verification_status')?.split(',') || [];
+  const confidence_min = parseFloat(searchParams.get('confidence_min') || '0');
 
     const supabase = await createSupabaseServerClient();
     const offset = (page - 1) * limit;
@@ -33,12 +23,15 @@ export async function GET(request: NextRequest) {
 
     if (roleErr) {
       console.error('Error fetching student roles:', roleErr);
-      return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 });
+      throw apiError.internal('Failed to fetch students');
     }
 
-    const studentIds = (studentRoleRows || []).map((r: any) => r.user_id);
+  const studentIds = (studentRoleRows || []).map((r: { user_id: string }) => r.user_id);
     if (studentIds.length === 0) {
-      return NextResponse.json({ students: [], pagination: { page, limit, total: 0, totalPages: 0 } });
+      return success({ 
+        students: [], 
+        pagination: { page, limit, total: 0, totalPages: 0 } 
+      });
     }
 
     // First get certificates for students
@@ -77,11 +70,11 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.error('Error fetching certificates:', error);
-      return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 });
+      throw apiError.internal('Failed to fetch students');
     }
 
     if (!certificates || certificates.length === 0) {
-      return NextResponse.json({ 
+      return success({ 
         students: [], 
         pagination: { page, limit, total: 0, totalPages: 0 } 
       });
@@ -110,7 +103,7 @@ export async function GET(request: NextRequest) {
     // Group certificates by student
     const studentsMap = new Map();
     
-    certificates.forEach((cert: any) => {
+  certificates.forEach((cert: Record<string, unknown>) => {
       const studentId = cert.student_id;
       const profile = profileMap.get(studentId) || {
         id: studentId,
@@ -163,13 +156,13 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Convert to array and apply skills filter
-    let students: any[] = Array.from(studentsMap.values());
+  // Convert to array and apply skills filter
+  let students: Record<string, unknown>[] = Array.from(studentsMap.values());
 
-    // Apply skills filter (basic implementation)
-    if (skills.length > 0) {
-      students = students.filter((student: any) =>
-        student.certifications.some((cert: any) =>
+  // Apply skills filter (basic implementation)
+  if (skills.length > 0) {
+    students = students.filter((student: Record<string, unknown>) =>
+      (student.certifications as Record<string, unknown>[]).some((cert: Record<string, unknown>) =>
           skills.some((skill: string) =>
             (cert.title || '').toLowerCase().includes(skill.toLowerCase()) ||
             (cert.issuer || '').toLowerCase().includes(skill.toLowerCase())
@@ -179,24 +172,19 @@ export async function GET(request: NextRequest) {
     }
 
     // Get total count for pagination
-    const { count } = await supabase
-      .from('certificates')
-      .select('*', { count: 'exact', head: true })
-      .in('student_id', studentIds);
+  const { count } = await supabase
+    .from('certificates')
+    .select('*', { count: 'exact', head: true })
+    .in('student_id', studentIds);
 
-    return NextResponse.json({
-      students,
-      pagination: {
-        page,
-        limit,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit)
-      }
-    });
-
-  } catch (error) {
-    console.error('Recruiter students API error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
+  return success({
+    students,
+    pagination: {
+      page,
+      limit,
+      total: count || 0,
+      totalPages: Math.ceil((count || 0) / limit)
+    }
+  });
+});
 

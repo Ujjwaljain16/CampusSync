@@ -1,57 +1,50 @@
 // GEMINI VISION API - Direct certificate extraction
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { withAuth, success, apiError } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export async function POST(request: NextRequest) {
-	try {
-		// 1. Get authenticated user
-		const supabase = await createSupabaseServerClient();
-		const { data: { user } } = await supabase.auth.getUser();
-		
-		if (!user) {
-			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-		}
+export const POST = withAuth(async (request: NextRequest, { user }) => {
+	const formData = await request.formData();
+	const file = formData.get('file') as File;
+	
+	if (!file) {
+		throw apiError.badRequest('No file uploaded');
+	}
 
-		const formData = await request.formData();
-		const file = formData.get('file') as File;
-		
-		if (!file) {
-			return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
-		}
-
-		console.log('🤖 Using Gemini Vision API for certificate extraction');
-		console.log(`📄 File: ${file.name}, Size: ${file.size} bytes, Type: ${file.type}`);
-		
-		// 2. Upload file to Supabase Storage
-		const bytes = await file.arrayBuffer();
-		const buffer = Buffer.from(bytes);
-		
-		const timestamp = Date.now();
-		const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-		const filePath = `${user.id}/${timestamp}_${sanitizedFileName}`;
-		
-		console.log('📤 Uploading to Supabase Storage:', filePath);
-		console.log('📏 Original file size:', buffer.length, 'bytes');
-		
-		const { data: uploadData, error: uploadError } = await supabase.storage
-			.from('certificates')
-			.upload(filePath, buffer, {
-				contentType: file.type,
-				upsert: false
-			});
-		
-		if (uploadError) {
-			console.error('❌ Storage upload failed:', uploadError);
-			throw new Error(`Failed to upload file: ${uploadError.message}`);
-		}
-		
-		// 3. Get public URL
-		const { data: { publicUrl } } = supabase.storage
-			.from('certificates')
-			.getPublicUrl(filePath);
-		
-		console.log('✅ File uploaded successfully:', publicUrl);
+	console.log('🤖 Using Gemini Vision API for certificate extraction');
+	console.log(`📄 File: ${file.name}, Size: ${file.size} bytes, Type: ${file.type}`);
+	
+	// 2. Upload file to Supabase Storage
+	const bytes = await file.arrayBuffer();
+	const buffer = Buffer.from(bytes);
+	
+	const timestamp = Date.now();
+	const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+	const filePath = `${user.id}/${timestamp}_${sanitizedFileName}`;
+	
+	console.log('📤 Uploading to Supabase Storage:', filePath);
+	console.log('📏 Original file size:', buffer.length, 'bytes');
+	
+	const supabase = await createSupabaseServerClient();
+	const { data: uploadData, error: uploadError } = await supabase.storage
+		.from('certificates')
+		.upload(filePath, buffer, {
+			contentType: file.type,
+			upsert: false
+		});
+	
+	if (uploadError) {
+		console.error('❌ Storage upload failed:', uploadError);
+		throw apiError.internal(`Failed to upload file: ${uploadError.message}`);
+	}
+	
+	// 3. Get public URL
+	const { data: { publicUrl } } = supabase.storage
+		.from('certificates')
+		.getPublicUrl(filePath);
+	
+	console.log('✅ File uploaded successfully:', publicUrl);
 
 		// 4. Initialize Gemini for text extraction (use buffer we already have)
 		const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -104,47 +97,31 @@ Extract all text accurately. Return only valid JSON, no markdown.`;
 		}
 
 		const extracted = JSON.parse(jsonMatch[0]);
-		console.log('✅ Extraction successful!');
-		console.log('Title:', extracted.title);
-		console.log('Institution:', extracted.institution);
-		console.log('Recipient:', extracted.recipient);
-		console.log('Date:', extracted.date_issued);
-		console.log('Description:', extracted.description);
+	console.log('✅ Extraction successful!');
+	console.log('Title:', extracted.title);
+	console.log('Institution:', extracted.institution);
+	console.log('Recipient:', extracted.recipient);
+	console.log('Date:', extracted.date_issued);
+	console.log('Description:', extracted.description);
 
-		return NextResponse.json({
-			success: true,
-			data: {
-				publicUrl,
-				filePath: uploadData.path,
-				ocr: {
-					title: extracted.title || '',
-					institution: extracted.institution || '',
-					recipient: extracted.recipient || '',
-					date_issued: extracted.date_issued || '',
-					description: extracted.description || '',
-					raw_text: extracted.raw_text || text,
-					confidence: extracted.confidence || 0.9,
-					extracted_fields: {
-						title: extracted.title || '',
-						institution: extracted.institution || '',
-						recipient: extracted.recipient || '',
-						date_issued: extracted.date_issued || ''
-					}
-				}
+	return success({
+		success: true,
+		publicUrl,
+		filePath: uploadData.path,
+		ocr: {
+			title: extracted.title || '',
+			institution: extracted.institution || '',
+			recipient: extracted.recipient || '',
+			date_issued: extracted.date_issued || '',
+			description: extracted.description || '',
+			raw_text: extracted.raw_text || text,
+			confidence: extracted.confidence || 0.9,
+			extracted_fields: {
+				title: extracted.title || '',
+				institution: extracted.institution || '',
+				recipient: extracted.recipient || '',
+				date_issued: extracted.date_issued || ''
 			}
-		});
-
-	} catch (error) {
-		console.error('❌ Gemini Vision Error:', error);
-		const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-		
-		return NextResponse.json(
-			{ 
-				success: false, 
-				error: 'Certificate extraction failed',
-				details: errorMessage 
-			},
-			{ status: 500 }
-		);
-	}
-}
+		}
+	}, 'Certificate extraction successful');
+});

@@ -1,47 +1,42 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
+import { NextRequest } from 'next/server';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
 
-export async function POST(req: NextRequest) {
+interface BatchApproveBody {
+  certificateIds: string[];
+  status: 'approved' | 'rejected';
+  reason?: string;
+}
+
+export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { user }) => {
+  const result = await parseAndValidateBody<BatchApproveBody>(
+    req,
+    ['certificateIds', 'status']
+  );
+  if (result.error) return result.error;
+
+  const body = result.data;
+  const supabase = await createSupabaseServerClient();
+  
+  // Update all certificates
+  const { data, error } = await supabase
+    .from('certificates')
+    .update({
+      verification_status: body.status,
+      faculty_notes: body.reason,
+      reviewed_by: user.id,
+      reviewed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .in('id', body.certificateIds)
+    .select();
+
+  if (error) throw apiError.internal(error.message);
+
+  // Log the batch action
   try {
-    const auth = await requireRole(['faculty', 'admin']);
-    if (!auth.authorized) {
-      return NextResponse.json({ error: auth.message }, { status: auth.status });
-    }
-
-    const body = await req.json().catch(() => null) as {
-      certificateIds: string[];
-      status: 'approved' | 'rejected';
-      reason: string;
-    } | null;
-
-    if (!body || !body.certificateIds || !body.status) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: certificateIds, status' 
-      }, { status: 400 });
-    }
-
-    const supabase = await createSupabaseServerClient();
-    
-    // Update all certificates
-    const { data, error } = await supabase
-      .from('certificates')
-      .update({
-        verification_status: body.status,
-        faculty_notes: body.reason,
-        reviewed_by: auth.user?.id,
-        reviewed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .in('id', body.certificateIds)
-      .select();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    // Log the batch action
     await supabase.from('audit_logs').insert({
-      user_id: auth.user?.id,
+      user_id: user.id,
       action: 'batch_certificate_review',
       target_id: body.certificateIds.join(','),
       details: {
@@ -51,19 +46,14 @@ export async function POST(req: NextRequest) {
       },
       created_at: new Date().toISOString()
     });
-
-    return NextResponse.json({
-      data: {
-        updated: data?.length || 0,
-        status: body.status,
-        certificateIds: body.certificateIds
-      }
-    });
-
-  } catch (error: any) {
-    console.error('Batch approval error:', error);
-    return NextResponse.json({ 
-      error: error.message || 'Internal server error' 
-    }, { status: 500 });
+  } catch (auditError) {
+    console.error('Audit log error:', auditError);
+    // Don't fail the request
   }
-}
+
+  return success({
+    updated: data?.length || 0,
+    status: body.status,
+    certificateIds: body.certificateIds
+  }, `Successfully ${body.status} ${data?.length || 0} certificates`);
+});

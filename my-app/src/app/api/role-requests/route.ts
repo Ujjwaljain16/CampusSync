@@ -1,26 +1,38 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { withAuth, success, apiError, parseAndValidateBody } from '@/lib/api';
 
-export async function POST(req: NextRequest) {
-	try {
-		const supabase = await createSupabaseServerClient();
-		const { data: { user }, error: userError } = await supabase.auth.getUser();
-		if (userError || !user) {
-			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-		}
-		const { requested_role, metadata } = await req.json().catch(() => ({}));
-		if (!requested_role || !['recruiter','faculty','admin'].includes(requested_role)) {
-			return NextResponse.json({ error: 'Invalid requested_role' }, { status: 400 });
-		}
-		const { error } = await supabase.from('role_requests').insert({ user_id: user.id, requested_role, metadata: metadata || {} });
-		if (error) {
-			return NextResponse.json({ error: error.message }, { status: 500 });
-		}
-		return NextResponse.json({ ok: true });
-	} catch (e: any) {
-		return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
-	}
+const ALLOWED_ROLES = ['recruiter', 'faculty', 'admin'] as const;
+
+interface RoleRequestBody {
+	requested_role: string;
+	metadata?: Record<string, unknown>;
 }
+
+export const POST = withAuth(async (req: NextRequest, { user }) => {
+	const supabase = await createSupabaseServerClient();
+	
+	const result = await parseAndValidateBody<RoleRequestBody>(req, ['requested_role']);
+	if (result.error) return result.error;
+	
+	const { requested_role, metadata } = result.data;
+	
+	if (!ALLOWED_ROLES.includes(requested_role as typeof ALLOWED_ROLES[number])) {
+		throw apiError.badRequest('Invalid requested_role. Must be one of: recruiter, faculty, admin');
+	}
+	
+	const { error } = await supabase
+		.from('role_requests')
+		.insert({ 
+			user_id: user.id, 
+			requested_role, 
+			metadata: metadata || {} 
+		});
+	
+	if (error) throw apiError.internal(error.message);
+	
+	return success({ ok: true }, 'Role request submitted successfully');
+});
 
 
 

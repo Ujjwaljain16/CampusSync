@@ -1,21 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { success, apiError } from '@/lib/api';
 import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
 	const { user, role } = await getServerUserWithRole();
 	if (!user || role !== 'admin') {
-		return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		throw apiError.forbidden('Unauthorized');
 	}
 	const supabase = await createSupabaseServerClient();
-	const { id } = await params; // Await params before accessing properties
+	const { id } = await params;
 	
 	const { data: reqRow, error: loadErr } = await supabase
 		.from('role_requests')
 		.select('id, user_id, requested_role, status')
 		.eq('id', id)
 		.single();
-	if (loadErr || !reqRow) return NextResponse.json({ error: loadErr?.message || 'Not found' }, { status: 404 });
-	if (reqRow.status !== 'pending') return NextResponse.json({ error: 'Already processed' }, { status: 400 });
+	if (loadErr || !reqRow) throw apiError.notFound(loadErr?.message || 'Not found');
+	if (reqRow.status !== 'pending') throw apiError.badRequest('Already processed');
 
 	// Ensure admin has a profile (required for foreign key constraint)
 	const { data: adminProfile } = await supabase
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 	
 	if (updateError) {
 		console.error('[deny] Failed to update request status:', updateError);
-		return NextResponse.json({ error: 'Failed to update request status' }, { status: 500 });
+		throw apiError.internal('Failed to update request status');
 	}
 
 	// Audit log (optional, don't fail if it errors)
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 		console.warn('[deny] Audit log failed:', e);
 	}
 
-	return NextResponse.json({ ok: true });
+	return success({ ok: true }, 'Role request denied successfully');
 }
 
 

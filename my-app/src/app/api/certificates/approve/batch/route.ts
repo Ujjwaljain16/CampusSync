@@ -1,19 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '@/lib/supabaseServer';
+import { NextRequest } from 'next/server';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { withRole, success, apiError } from '@/lib/api';
 
-export async function POST(req: NextRequest) {
-  const auth = await requireRole(['faculty', 'admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
-
+export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { user }) => {
   const body = await req.json().catch(() => null) as { certificates: { id: string; status: 'approved' | 'rejected'; reason?: string; metadataId?: string; }[] } | null;
   if (!body || !Array.isArray(body.certificates) || body.certificates.length === 0) {
-    return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+    throw apiError.badRequest('Invalid payload');
   }
 
   const supabase = await createSupabaseServerClient();
-  const { user } = await getServerUserWithRole();
 
   const results: { id: string; ok: boolean; error?: string }[] = [];
   for (const item of body.certificates) {
@@ -35,7 +30,7 @@ export async function POST(req: NextRequest) {
       }
 
       await supabase.from('audit_logs').insert({
-        user_id: user?.id ?? null,
+        user_id: user.id,
         action: item.status === 'approved' ? 'manual_approve' : 'manual_reject',
         target_id: item.id,
         details: { reason: item.reason ?? null, metadataId: item.metadataId ?? null },
@@ -48,8 +43,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ data: { results } });
-}
+  return success({ results });
+});
 
 
 

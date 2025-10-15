@@ -1,5 +1,6 @@
 // Webhook system for verification callbacks
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { success, apiError } from '@/lib/api';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
@@ -22,72 +23,65 @@ function verifyWebhookSignature(payload: string, signature: string, secret: stri
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.text();
-    const signature = request.headers.get('x-webhook-signature');
-    const webhookSecret = process.env.WEBHOOK_SECRET;
+  const body = await request.text();
+  const signature = request.headers.get('x-webhook-signature');
+  const webhookSecret = process.env.WEBHOOK_SECRET;
 
-    // Skip signature verification in development/testing
-    if (process.env.NODE_ENV === 'production' && webhookSecret) {
-      if (!signature || !verifyWebhookSignature(body, signature, webhookSecret)) {
-        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-      }
-    } else if (process.env.NODE_ENV === 'production' && !webhookSecret) {
-      console.error('WEBHOOK_SECRET not configured');
-      return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 });
+  // Skip signature verification in development/testing
+  if (process.env.NODE_ENV === 'production' && webhookSecret) {
+    if (!signature || !verifyWebhookSignature(body, signature, webhookSecret)) {
+      throw apiError.unauthorized('Invalid signature');
     }
-
-    // Handle empty body gracefully
-    let data;
-    try {
-      data = JSON.parse(body);
-    } catch (error) {
-      // If JSON parsing fails, return 400 for missing data
-      return NextResponse.json({ error: 'Invalid JSON or missing data' }, { status: 400 });
-    }
-    
-    const { event, payload } = data;
-
-    // Handle different webhook events
-    switch (event) {
-      case 'verification.completed':
-        await handleVerificationCompleted(payload);
-        break;
-      
-      case 'verification.failed':
-        await handleVerificationFailed(payload);
-        break;
-      
-      case 'certificate.approved':
-        await handleCertificateApproved(payload);
-        break;
-      
-      case 'certificate.rejected':
-        await handleCertificateRejected(payload);
-        break;
-      
-      case 'vc.issued':
-        await handleVCIssued(payload);
-        break;
-      
-      case 'vc.revoked':
-        await handleVCRevoked(payload);
-        break;
-      
-      default:
-        console.log(`Unknown webhook event: ${event}`);
-        return NextResponse.json({ error: 'Unknown event type' }, { status: 400 });
-    }
-
-    return NextResponse.json({ success: true });
-
-  } catch (error) {
-    console.error('Webhook processing error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } else if (process.env.NODE_ENV === 'production' && !webhookSecret) {
+    console.error('WEBHOOK_SECRET not configured');
+    throw apiError.internal('Webhook not configured');
   }
+
+  // Handle empty body gracefully
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    throw apiError.badRequest('Invalid JSON or missing data');
+  }
+  
+  const { event, payload } = data;
+
+  // Handle different webhook events
+  switch (event) {
+    case 'verification.completed':
+      await handleVerificationCompleted(payload as Record<string, unknown>);
+      break;
+    
+    case 'verification.failed':
+      await handleVerificationFailed(payload as Record<string, unknown>);
+      break;
+    
+    case 'certificate.approved':
+      await handleCertificateApproved(payload as Record<string, unknown>);
+      break;
+    
+    case 'certificate.rejected':
+      await handleCertificateRejected(payload as Record<string, unknown>);
+      break;
+    
+    case 'vc.issued':
+      await handleVCIssued(payload as Record<string, unknown>);
+      break;
+    
+    case 'vc.revoked':
+      await handleVCRevoked(payload as Record<string, unknown>);
+      break;
+    
+    default:
+      console.log(`Unknown webhook event: ${event}`);
+      throw apiError.badRequest('Unknown event type');
+  }
+
+  return success({ success: true });
 }
 
-async function handleVerificationCompleted(payload: any) {
+async function handleVerificationCompleted(payload: Record<string, unknown>) {
   const { credentialId, status, confidence, method, timestamp } = payload;
   
   // Log verification completion
@@ -119,7 +113,7 @@ async function handleVerificationCompleted(payload: any) {
   }
 }
 
-async function handleVerificationFailed(payload: any) {
+async function handleVerificationFailed(payload: Record<string, unknown>) {
   const { credentialId, error, reason, timestamp } = payload;
   
   // Log verification failure
@@ -151,7 +145,7 @@ async function handleVerificationFailed(payload: any) {
   }
 }
 
-async function handleCertificateApproved(payload: any) {
+async function handleCertificateApproved(payload: Record<string, unknown>) {
   const { certificateId, approvedBy, timestamp, reason } = payload;
   
   // Log certificate approval
@@ -168,7 +162,7 @@ async function handleCertificateApproved(payload: any) {
   });
 }
 
-async function handleCertificateRejected(payload: any) {
+async function handleCertificateRejected(payload: Record<string, unknown>) {
   const { certificateId, rejectedBy, timestamp, reason } = payload;
   
   // Log certificate rejection
@@ -185,7 +179,7 @@ async function handleCertificateRejected(payload: any) {
   });
 }
 
-async function handleVCIssued(payload: any) {
+async function handleVCIssued(payload: Record<string, unknown>) {
   const { credentialId, issuedTo, timestamp, credentialType } = payload;
   
   // Log VC issuance
@@ -203,7 +197,7 @@ async function handleVCIssued(payload: any) {
   });
 }
 
-async function handleVCRevoked(payload: any) {
+async function handleVCRevoked(payload: Record<string, unknown>) {
   const { credentialId, revokedBy, timestamp, reason } = payload;
   
   // Log VC revocation
@@ -222,7 +216,7 @@ async function handleVCRevoked(payload: any) {
 
 // GET endpoint for webhook health check
 export async function GET() {
-  return NextResponse.json({ 
+  return success({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
     version: '1.0.0'

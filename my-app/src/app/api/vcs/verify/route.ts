@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { success, apiError } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { getIssuerJwk, verifyCredentialJws } from '../../../../../lib/vc';
 
@@ -6,7 +7,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const vcId = searchParams.get('vcId');
   if (!vcId) {
-    return NextResponse.json({ error: 'Missing vcId' }, { status: 400 });
+    throw apiError.badRequest('Missing vcId');
   }
 
   const supabase = await createSupabaseServerClient();
@@ -19,12 +20,12 @@ export async function GET(req: NextRequest) {
     .single();
 
   if (error || !vcRow) {
-    return NextResponse.json({ data: { valid: false, revoked: false, reason: 'Credential not found' } }, { status: 200 });
+    return success({ valid: false, revoked: false, reason: 'Credential not found' });
   }
 
   // Check revocation via status field first
   if (vcRow.status === 'revoked') {
-    return NextResponse.json({ data: { valid: false, revoked: true, reason: vcRow.revoked_reason || 'revoked' } }, { status: 200 });
+    return success({ valid: false, revoked: true, reason: vcRow.revoked_reason || 'revoked' });
   }
 
   // Check revocation_list as source of truth
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
     .maybeSingle();
 
   if (rev) {
-    return NextResponse.json({ data: { valid: false, revoked: true, reason: rev.reason || 'revoked' } }, { status: 200 });
+    return success({ valid: false, revoked: true, reason: rev.reason || 'revoked' });
   }
 
   // Verify signature
@@ -45,13 +46,13 @@ export async function GET(req: NextRequest) {
     const jwk = await getIssuerJwk();
     const jws: string | undefined = vcRow.credential?.proof?.jws;
     if (!jws) {
-      return NextResponse.json({ data: { valid: false, revoked: false, reason: 'Missing JWS' } }, { status: 200 });
+      return success({ valid: false, revoked: false, reason: 'Missing JWS' });
     }
     await verifyCredentialJws(jws, jwk);
-    return NextResponse.json({ data: { valid: true, revoked: false } }, { status: 200 });
+    return success({ valid: true, revoked: false });
   } catch (e) {
     const reason = e instanceof Error ? e.message : 'Signature invalid';
-    return NextResponse.json({ data: { valid: false, revoked: false, reason } }, { status: 200 });
+    return success({ valid: false, revoked: false, reason });
   }
 }
 

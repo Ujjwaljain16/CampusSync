@@ -1,13 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
-import type { TrustedIssuer } from '../../../../types';
+import { NextRequest } from 'next/server';
+import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export async function GET(_req: NextRequest) {
-  const auth = await requireRole(['admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
+interface TrustedIssuerInput {
+  name: string;
+  domain?: string;
+  template_patterns?: string[];
+  confidence_threshold?: number;
+  qr_verification_url?: string;
+  is_active?: boolean;
+}
 
+export const GET = withRole(['admin'], async () => {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from('trusted_issuers')
@@ -15,22 +19,18 @@ export async function GET(_req: NextRequest) {
     .order('name');
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Error fetching trusted issuers:', error);
+    throw apiError.internal(error.message);
   }
 
-  return NextResponse.json({ data });
-}
+  return success(data);
+});
 
-export async function POST(req: NextRequest) {
-  const auth = await requireRole(['admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
+export const POST = withRole(['admin'], async (req: NextRequest) => {
+  const result = await parseAndValidateBody<TrustedIssuerInput>(req, ['name']);
+  if (result.error) return result.error;
 
-  const body = await req.json().catch(() => null) as Partial<TrustedIssuer> | null;
-  if (!body || !body.name) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-  }
+  const body = result.data;
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
@@ -47,22 +47,18 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Error creating trusted issuer:', error);
+    throw apiError.internal(error.message);
   }
 
-  return NextResponse.json({ data });
-}
+  return success(data, 'Trusted issuer created successfully', 201);
+});
 
-export async function PUT(req: NextRequest) {
-  const auth = await requireRole(['admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
+export const PUT = withRole(['admin'], async (req: NextRequest) => {
+  const result = await parseAndValidateBody<{ id: string } & TrustedIssuerInput>(req, ['id']);
+  if (result.error) return result.error;
 
-  const body = await req.json().catch(() => null) as { id: string } & Partial<TrustedIssuer> | null;
-  if (!body || !body.id) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-  }
+  const body = result.data;
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
@@ -81,23 +77,19 @@ export async function PUT(req: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Error updating trusted issuer:', error);
+    throw apiError.internal(error.message);
   }
 
-  return NextResponse.json({ data });
-}
+  return success(data, 'Trusted issuer updated successfully');
+});
 
-export async function DELETE(req: NextRequest) {
-  const auth = await requireRole(['admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
-
+export const DELETE = withRole(['admin'], async (req: NextRequest) => {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get('id');
   
   if (!id) {
-    return NextResponse.json({ error: 'Missing id parameter' }, { status: 400 });
+    throw apiError.badRequest('Missing id parameter');
   }
 
   const supabase = await createSupabaseServerClient();
@@ -107,9 +99,10 @@ export async function DELETE(req: NextRequest) {
     .eq('id', id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Error deleting trusted issuer:', error);
+    throw apiError.internal(error.message);
   }
 
-  return NextResponse.json({ data: { deleted: true } });
-}
+  return success({ deleted: true }, 'Trusted issuer deleted successfully');
+});
 

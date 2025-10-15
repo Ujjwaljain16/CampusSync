@@ -1,16 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '@/lib/supabaseServer';
+import { NextRequest } from 'next/server';
+import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export async function POST(req: NextRequest) {
-  const auth = await requireRole(['admin', 'faculty']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
+interface RevokeBody {
+  credentialId: string;
+  reason?: string;
+}
 
-  const body = await req.json().catch(() => null) as { credentialId?: string; reason?: string } | null;
-  if (!body || !body.credentialId) {
-    return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
-  }
+export const POST = withRole(['admin', 'faculty'], async (req: NextRequest, { user }) => {
+  const result = await parseAndValidateBody<RevokeBody>(req, ['credentialId']);
+  if (result.error) return result.error;
+  
+  const body = result.data;
 
   const supabase = await createSupabaseServerClient();
 
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
     .eq('id', body.credentialId);
 
   if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
+    throw apiError.internal(updateError.message);
   }
 
   // Insert into revocation_list
@@ -37,21 +38,20 @@ export async function POST(req: NextRequest) {
 
   // Audit log
   try {
-    const { user } = await getServerUserWithRole();
     await supabase.from('audit_logs').insert({
-      user_id: user?.id ?? null,
+      user_id: user.id,
       action: 'revoke_vc',
       entity_type: 'verifiable_credential',
       entity_id: body.credentialId,
       details: { reason: body.reason ?? null },
       created_at: now,
     });
-  } catch {
-    // ignore audit failures
+  } catch (auditError) {
+    console.error('Audit log error:', auditError);
   }
 
-  return NextResponse.json({ data: { status: 'revoked', credentialId: body.credentialId } });
-}
+  return success({ status: 'revoked', credentialId: body.credentialId });
+});
 
 
 

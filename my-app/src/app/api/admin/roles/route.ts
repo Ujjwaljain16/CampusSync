@@ -1,13 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { NextRequest } from 'next/server';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
 
-// GET /api/admin/roles - List all users and their roles
-export async function GET(_req: NextRequest) {
-  const auth = await requireRole(['admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
-
+/**
+ * GET /api/admin/roles
+ * List all users and their roles (Admin only)
+ */
+export const GET = withRole(['admin'], async () => {
   const adminSupabase = createSupabaseAdminClient();
   
   // Get all users with their roles using admin client to bypass RLS
@@ -23,18 +22,15 @@ export async function GET(_req: NextRequest) {
     `)
     .order('created_at', { ascending: false });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (error) return apiError.internal(error.message);
 
   // Get user details separately since we can't join auth.users directly
-  const userIds = users?.map(u => u.user_id) || [];
   const { data: authUsers, error: authError } = await adminSupabase.auth.admin.listUsers();
 
   if (authError) {
     console.error('Error fetching auth users:', authError);
     // Return users without email details if auth fetch fails
-    return NextResponse.json({ data: users });
+    return success(users);
   }
 
   // Merge user roles with auth user data
@@ -49,30 +45,28 @@ export async function GET(_req: NextRequest) {
     };
   }) || [];
 
-  return NextResponse.json({ data: usersWithAuth });
-}
+  return success(usersWithAuth);
+});
 
-// POST /api/admin/roles - Assign or update user role
-export async function POST(req: NextRequest) {
-  const auth = await requireRole(['admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
-
-  const body = await req.json().catch(() => null);
-  if (!body || !body.user_id || !body.role) {
-    return NextResponse.json({ error: 'Missing user_id or role' }, { status: 400 });
-  }
+/**
+ * POST /api/admin/roles
+ * Assign or update user role (Admin only)
+ */
+export const POST = withRole(['admin'], async (request, { user }) => {
+  const { data: body, error: validationError } = await parseAndValidateBody<{
+    user_id: string;
+    role: string;
+  }>(request, ['user_id', 'role']);
+  
+  if (validationError) return validationError;
 
   if (!['student', 'faculty', 'admin', 'recruiter'].includes(body.role)) {
-    return NextResponse.json({ error: 'Invalid role. Must be student, faculty, admin, or recruiter' }, { status: 400 });
+    return apiError.validation('Invalid role. Must be student, faculty, admin, or recruiter');
   }
 
   // 🛡️ SAFETY CHECK: Prevent admins from demoting themselves
-  if (body.user_id === auth.user.id && body.role !== 'admin') {
-    return NextResponse.json({ 
-      error: 'Security violation: Admins cannot demote themselves. This prevents system lockout.' 
-    }, { status: 403 });
+  if (body.user_id === user.id && body.role !== 'admin') {
+    return apiError.forbidden('Security violation: Admins cannot demote themselves. This prevents system lockout.');
   }
 
   const adminSupabase = createSupabaseAdminClient();
@@ -85,7 +79,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (userError && userError.code !== 'PGRST116') { // PGRST116 = no rows found
-    return NextResponse.json({ error: userError.message }, { status: 500 });
+    return apiError.internal(userError.message);
   }
 
   const now = new Date().toISOString();
@@ -96,14 +90,12 @@ export async function POST(req: NextRequest) {
       .from('user_roles')
       .update({
         role: body.role,
-        assigned_by: auth.user.id,
+        assigned_by: user.id,
         updated_at: now
       })
       .eq('user_id', body.user_id);
     
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    if (error) return apiError.internal(error.message);
   } else {
     // Insert new role
     const { error } = await adminSupabase
@@ -111,62 +103,49 @@ export async function POST(req: NextRequest) {
       .insert({
         user_id: body.user_id,
         role: body.role,
-        assigned_by: auth.user.id,
+        assigned_by: user.id,
         created_at: now,
         updated_at: now
       });
     
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    if (error) return apiError.internal(error.message);
   }
 
-  return NextResponse.json({ 
-    data: { 
-      user_id: body.user_id, 
-      role: body.role,
-      message: 'Role updated successfully' 
-    } 
-  });
-}
+  return success({ 
+    user_id: body.user_id, 
+    role: body.role
+  }, 'Role updated successfully');
+});
 
 // DELETE /api/admin/roles - Remove user role (revert to default student)
-export async function DELETE(req: NextRequest) {
-  const auth = await requireRole(['admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
+export const DELETE = withRole(['admin'], async (req: NextRequest, { user }) => {
 
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get('user_id');
   
   if (!userId) {
-    return NextResponse.json({ error: 'Missing user_id parameter' }, { status: 400 });
+    throw apiError.badRequest('Missing user_id parameter');
   }
 
   // 🛡️ CRITICAL SAFETY CHECK: Prevent admins from removing themselves
-  if (userId === auth.user.id) {
-    return NextResponse.json({ 
-      error: 'Security violation: Admins cannot remove their own role. This prevents system lockout.' 
-    }, { status: 403 });
+  if (userId === user.id) {
+    throw apiError.forbidden('Security violation: Admins cannot remove their own role. This prevents system lockout.');
   }
 
   const adminSupabase = createSupabaseAdminClient();
   
   // 🛡️ SAFETY CHECK: Ensure there's at least one admin remaining
-  const { data: adminCount, error: countError } = await adminSupabase
+  const { count: adminCount, error: countError } = await adminSupabase
     .from('user_roles')
     .select('user_id', { count: 'exact', head: true })
     .eq('role', 'admin');
 
   if (countError) {
-    return NextResponse.json({ error: 'Failed to check admin count' }, { status: 500 });
+    throw apiError.internal('Failed to check admin count');
   }
 
   if (adminCount && adminCount <= 1) {
-    return NextResponse.json({ 
-      error: 'Cannot remove role: At least one admin must remain in the system' 
-    }, { status: 403 });
+    throw apiError.forbidden('Cannot remove role: At least one admin must remain in the system');
   }
 
   // 🛡️ SAFETY CHECK: Check if the user being removed is an admin
@@ -177,13 +156,11 @@ export async function DELETE(req: NextRequest) {
     .single();
 
   if (userError) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    throw apiError.notFound('User not found');
   }
 
   if (targetUser.role === 'admin' && adminCount && adminCount <= 1) {
-    return NextResponse.json({ 
-      error: 'Cannot remove the last admin in the system' 
-    }, { status: 403 });
+    throw apiError.forbidden('Cannot remove the last admin in the system');
   }
   
   // Delete the role record (user will default to 'student')
@@ -193,14 +170,12 @@ export async function DELETE(req: NextRequest) {
     .eq('user_id', userId);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    throw apiError.internal(error.message);
   }
 
-  return NextResponse.json({ 
-    data: { 
-      user_id: userId, 
-      message: 'Role removed, user reverted to default student role' 
-    } 
+  return success({ 
+    user_id: userId, 
+    message: 'Role removed, user reverted to default student role' 
   });
-}
+});
 

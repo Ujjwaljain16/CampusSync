@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { apiError } from '@/lib/api';
 
 export async function GET(request: NextRequest) {
 	const { searchParams } = new URL(request.url);
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
 	});
 
 	if (error || !data.url) {
-		return NextResponse.json({ error: error?.message || 'Failed to initialize OAuth' }, { status: 500 });
+		throw apiError.internal(error?.message || 'Failed to initialize OAuth');
 	}
 
 	// Convert the prepared response into a redirect so cookies are preserved

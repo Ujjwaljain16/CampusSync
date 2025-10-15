@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { NextRequest } from 'next/server';
+import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 
 interface RoleChangeRequest {
   user_id: string;
@@ -8,38 +9,33 @@ interface RoleChangeRequest {
   transfer_data?: boolean; // Whether to transfer any role-specific data
 }
 
-export async function POST(req: NextRequest) {
-  const auth = await requireRole(['admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
-  }
+export const POST = withRole(['admin'], async (req: NextRequest, { user }) => {
+  const result = await parseAndValidateBody<RoleChangeRequest>(req, ['user_id', 'new_role']);
+  if (result.error) return result.error;
 
-  const body: RoleChangeRequest = await req.json().catch(() => null);
-  if (!body || !body.user_id || !body.new_role) {
-    return NextResponse.json({ error: 'Missing user_id or new_role' }, { status: 400 });
-  }
+  const body = result.data;
 
   if (!['student', 'faculty', 'recruiter', 'admin'].includes(body.new_role)) {
-    return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
+    throw apiError.badRequest('Invalid role');
   }
 
   // 🛡️ SAFETY CHECK: Prevent admin self-demotion
-  if (body.user_id === auth.user.id && body.new_role !== 'admin') {
-    return NextResponse.json({ 
-      error: 'Security violation: Admins cannot demote themselves' 
-    }, { status: 403 });
+  if (body.user_id === user.id && body.new_role !== 'admin') {
+    throw apiError.forbidden('Security violation: Admins cannot demote themselves');
   }
 
+  const adminSupabase = createSupabaseAdminClient();
+
   // 🛡️ SAFETY CHECK: Prevent demoting the last admin
-  const { data: adminCount } = await adminSupabase
+  const { count: adminCountValue } = await adminSupabase
     .from('user_roles')
-    .select('user_id', { count: 'exact', head: true })
+    .select('*', { count: 'exact', head: true })
     .eq('role', 'admin');
 
-  if (adminCount && adminCount <= 1) {
-    return NextResponse.json({ 
-      error: 'Cannot demote the last admin in the system' 
-    }, { status: 403 });
+  const adminCount = adminCountValue || 0;
+
+  if (adminCount <= 1) {
+    throw apiError.forbidden('Cannot demote the last admin in the system');
   }
 
   // 🛡️ SAFETY CHECK: Check if target user is an admin
@@ -50,17 +46,15 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (targetError && targetError.code !== 'PGRST116') {
-    return NextResponse.json({ error: 'Failed to check target user role' }, { status: 500 });
+    throw apiError.internal('Failed to check target user role');
   }
 
   const targetRole = targetUser?.role || 'student';
 
   // If demoting an admin, ensure there will be at least one admin left
   if (targetRole === 'admin' && body.new_role !== 'admin') {
-    if (adminCount && adminCount <= 1) {
-      return NextResponse.json({ 
-        error: 'Cannot demote the last admin in the system' 
-      }, { status: 403 });
+    if (adminCount <= 1) {
+      throw apiError.forbidden('Cannot demote the last admin in the system');
     }
   }
 
@@ -70,109 +64,95 @@ export async function POST(req: NextRequest) {
   });
 
   if (isSuperAdmin && body.new_role !== 'admin') {
-    return NextResponse.json({ 
-      error: 'CRITICAL: Cannot demote the super admin (original/founder admin). This admin serves as the system recovery mechanism and cannot be demoted under any circumstances.' 
-    }, { status: 403 });
+    throw apiError.forbidden('CRITICAL: Cannot demote the super admin (original/founder admin). This admin serves as the system recovery mechanism and cannot be demoted under any circumstances.');
   }
 
   // 🛡️ ADDITIONAL SAFETY: Require reason for admin demotion
   if (targetRole === 'admin' && body.new_role !== 'admin') {
     if (!body.reason || body.reason.length < 10) {
-      return NextResponse.json({ 
-        error: 'Admin demotion requires a detailed reason (minimum 10 characters)' 
-      }, { status: 400 });
+      throw apiError.badRequest('Admin demotion requires a detailed reason (minimum 10 characters)');
     }
   }
-
-  const adminSupabase = createSupabaseAdminClient();
   const now = new Date().toISOString();
 
-  try {
-    // 1. Get current role
-    const { data: currentRole, error: roleError } = await adminSupabase
-      .from('user_roles')
-      .select('role, created_at')
-      .eq('user_id', body.user_id)
-      .single();
+  // 1. Get current role
+  const { data: currentRole, error: roleError } = await adminSupabase
+    .from('user_roles')
+    .select('role, created_at')
+    .eq('user_id', body.user_id)
+    .single();
 
-    if (roleError && roleError.code !== 'PGRST116') {
-      return NextResponse.json({ error: 'Failed to fetch current role' }, { status: 500 });
-    }
-
-    const oldRole = currentRole?.role || 'student';
-
-    // 2. Handle role-specific data before change
-    await handleRoleSpecificData(adminSupabase, body.user_id, oldRole, body.new_role);
-
-    // 3. Update the role
-    if (currentRole) {
-      // Update existing role
-      const { error: updateError } = await adminSupabase
-        .from('user_roles')
-        .update({
-          role: body.new_role,
-          assigned_by: auth.user.id,
-          updated_at: now
-        })
-        .eq('user_id', body.user_id);
-
-      if (updateError) {
-        return NextResponse.json({ error: updateError.message }, { status: 500 });
-      }
-    } else {
-      // Insert new role
-      const { error: insertError } = await adminSupabase
-        .from('user_roles')
-        .insert({
-          user_id: body.user_id,
-          role: body.new_role,
-          assigned_by: auth.user.id,
-          created_at: now,
-          updated_at: now
-        });
-
-      if (insertError) {
-        return NextResponse.json({ error: insertError.message }, { status: 500 });
-      }
-    }
-
-    // 4. Log the role change
-    await adminSupabase.from('audit_logs').insert({
-      actor_id: auth.user.id,
-      user_id: body.user_id,
-      action: 'role_change',
-      target_id: body.user_id,
-      details: {
-        old_role: oldRole,
-        new_role: body.new_role,
-        reason: body.reason || 'No reason provided',
-        changed_by: auth.user.id,
-        timestamp: now
-      },
-      created_at: now
-    });
-
-    // 5. Handle post-change actions
-    await handlePostRoleChange(adminSupabase, body.user_id, oldRole, body.new_role);
-
-    return NextResponse.json({ 
-      data: { 
-        user_id: body.user_id,
-        old_role: oldRole,
-        new_role: body.new_role,
-        message: 'Role changed successfully',
-        data_handling: 'User data preserved, access permissions updated'
-      } 
-    });
-
-  } catch (error: any) {
-    console.error('Role change error:', error);
-    return NextResponse.json({ error: error.message || 'Failed to change role' }, { status: 500 });
+  if (roleError && roleError.code !== 'PGRST116') {
+    throw apiError.internal('Failed to fetch current role');
   }
-}
+
+  const oldRole = currentRole?.role || 'student';
+
+  // 2. Handle role-specific data before change
+  await handleRoleSpecificData(adminSupabase, body.user_id, oldRole, body.new_role);
+
+  // 3. Update the role
+  if (currentRole) {
+    // Update existing role
+    const { error: updateError } = await adminSupabase
+      .from('user_roles')
+      .update({
+        role: body.new_role,
+        assigned_by: user.id,
+        updated_at: now
+      })
+      .eq('user_id', body.user_id);
+
+    if (updateError) {
+      throw apiError.internal(updateError.message);
+    }
+  } else {
+    // Insert new role
+    const { error: insertError } = await adminSupabase
+      .from('user_roles')
+      .insert({
+        user_id: body.user_id,
+        role: body.new_role,
+        assigned_by: user.id,
+        created_at: now,
+        updated_at: now
+      });
+
+    if (insertError) {
+      throw apiError.internal(insertError.message);
+    }
+  }
+
+  // 4. Log the role change
+  await adminSupabase.from('audit_logs').insert({
+    actor_id: user.id,
+    user_id: body.user_id,
+    action: 'role_change',
+    target_id: body.user_id,
+    details: {
+      old_role: oldRole,
+      new_role: body.new_role,
+      reason: body.reason || 'No reason provided',
+      changed_by: user.id,
+      timestamp: now
+    },
+    created_at: now
+  });
+
+  // 5. Handle post-change actions
+  await handlePostRoleChange(adminSupabase, body.user_id, oldRole, body.new_role);
+
+  return success({ 
+    user_id: body.user_id,
+    old_role: oldRole,
+    new_role: body.new_role,
+    message: 'Role changed successfully',
+    data_handling: 'User data preserved, access permissions updated'
+  });
+});
 
 async function handleRoleSpecificData(
-  supabase: any, 
+  supabase: ReturnType<typeof createSupabaseAdminClient>, 
   userId: string, 
   oldRole: string, 
   newRole: string
@@ -200,19 +180,20 @@ async function handleRoleSpecificData(
     console.log(`Admin ${userId} demoted to ${newRole} - ensuring admin access is revoked`);
     
     // Ensure at least one admin remains
-    const { data: adminCount } = await supabase
+    const { count: adminCountValue } = await supabase
       .from('user_roles')
-      .select('user_id', { count: 'exact', head: true })
+      .select('*', { count: 'exact', head: true })
       .eq('role', 'admin');
     
-    if (adminCount && adminCount <= 1) {
+    const adminCountCheck = adminCountValue || 0;
+    if (adminCountCheck <= 1) {
       throw new Error('Cannot demote the last admin in the system');
     }
   }
 }
 
 async function handlePostRoleChange(
-  supabase: any, 
+  supabase: ReturnType<typeof createSupabaseAdminClient>, 
   userId: string, 
   oldRole: string, 
   newRole: string

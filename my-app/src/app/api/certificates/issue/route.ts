@@ -1,16 +1,27 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { withAuth, success, apiError } from '@/lib/api';
 import { signCredential } from '../../../../../lib/vc';
-import type { CredentialSubject } from '../../../../types';
+interface CredentialSubject {
+	id: string;
+	certificateId?: string;
+	title?: string;
+	institution?: string;
+	dateIssued?: string;
+	description?: string;
+}
 
-export async function POST(req: NextRequest) {
+interface IssueBody {
+	credentialSubject?: CredentialSubject;
+	certificateId?: string;
+}
+
+export const POST = withAuth(async (req: NextRequest, { user }) => {
 	const supabase = await createSupabaseServerClient();
+	const { role } = await getServerUserWithRole();
 
-	const { user, role } = await getServerUserWithRole();
-	if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-	const body = await req.json().catch(() => null) as { credentialSubject?: CredentialSubject; certificateId?: string } | null;
-	if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+	const body = await req.json().catch(() => null) as IssueBody | null;
+	if (!body) throw apiError.badRequest('Invalid JSON');
 
 	let subject: CredentialSubject | undefined = body.credentialSubject;
 
@@ -22,13 +33,13 @@ export async function POST(req: NextRequest) {
 			.eq('id', body.certificateId)
 			.single();
 		if (certErr || !cert) {
-			return NextResponse.json({ error: 'Certificate not found' }, { status: 404 });
+			throw apiError.notFound('Certificate not found');
 		}
 		// Only allow issuing for own certificate unless faculty/admin
 		const isOwner = cert.user_id === user.id;
 		const canIssueOnBehalf = role === 'admin' || role === 'faculty';
 		if (!isOwner && !canIssueOnBehalf) {
-			return NextResponse.json({ error: 'Forbidden to issue for another user' }, { status: 403 });
+			throw apiError.forbidden('Forbidden to issue for another user');
 		}
 		subject = {
 			id: cert.user_id,
@@ -42,12 +53,12 @@ export async function POST(req: NextRequest) {
 		const isSelfIssue = subject.id === user.id;
 		const canIssueOnBehalf = role === 'admin' || role === 'faculty';
 		if (!isSelfIssue && !canIssueOnBehalf) {
-			return NextResponse.json({ error: 'Forbidden to issue for another user' }, { status: 403 });
+			throw apiError.forbidden('Forbidden to issue for another user');
 		}
 	}
 
 	if (!subject) {
-		return NextResponse.json({ error: 'Invalid credentialSubject or certificateId' }, { status: 400 });
+		throw apiError.badRequest('Invalid credentialSubject or certificateId');
 	}
 
 	const issuerDid = process.env.NEXT_PUBLIC_ISSUER_DID || 'did:web:example.org';
@@ -72,7 +83,7 @@ export async function POST(req: NextRequest) {
 		status: 'active',
 		created_at: now,
 	});
-	if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+	if (error) throw apiError.internal(error.message);
 
 	// Audit log: issue_vc
 	try {
@@ -89,8 +100,8 @@ export async function POST(req: NextRequest) {
 		// ignore audit failures
 	}
 
-	return NextResponse.json({ data: vc });
-}
+	return success(vc, 'Verifiable credential issued successfully', 201);
+});
 
 
 
