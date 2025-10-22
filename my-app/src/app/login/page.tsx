@@ -1,11 +1,21 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
 import { validateStudentEmailSync } from "../../../lib/emailValidation";
-import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Check, Building, Calendar, GraduationCap, MapPin, Star } from "lucide-react";
+import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Check, AlertCircle } from "lucide-react";
+import {
+  FormField,
+  FormLabel,
+  FormInput,
+  FormError,
+  FormHelper,
+  CVButton,
+  CVAlert,
+  CVBadge,
+} from "@/components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -379,34 +389,31 @@ export default function LoginPage() {
             </button>
           </div>
 
-          {/* Error Alert */}
+          {/* Error Alert - Using CVAlert component */}
           {error && (
-            <div className="mb-6 p-4 bg-red-100/90 border border-red-300 rounded-xl" role="alert" aria-live="polite">
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 text-red-600 flex-shrink-0">⚠️</div>
-                <p className="text-sm text-red-700 font-medium">{error}</p>
-              </div>
-            </div>
+            <CVAlert variant="error" className="mb-6">
+              {error}
+            </CVAlert>
           )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} noValidate className="space-y-6" id={mode === "login" ? "login-panel" : "signup-panel"}>
             {mode === 'signup' && (
               <>
-                <div className="space-y-3">
-                  <label htmlFor="full_name" className="cv-form-label text-white font-semibold">Full Name</label>
-                  <div className="cv-input-wrapper">
-                    <input
-                      id="full_name"
-                      type="text"
-                      required
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="cv-form-input cv-input-focus-ring bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
-                      placeholder="Jane Doe"
-                    />
-                  </div>
-                </div>
+                <FormField>
+                  <FormLabel htmlFor="full_name" required className="text-white font-semibold">
+                    Full Name
+                  </FormLabel>
+                  <FormInput
+                    id="full_name"
+                    type="text"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className="bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
+                    placeholder="Jane Doe"
+                  />
+                </FormField>
 
                 {/* Desired Access (required) */}
                 <div className="mt-2 space-y-2">
@@ -457,49 +464,47 @@ export default function LoginPage() {
                       Admin (Educational email required)
                     </label>
                   </div>
-                  <p className="text-xs text-white/60">Selecting non-student access sends a request to admins for approval.</p>
+                  <FormHelper>
+                    Selecting non-student access sends a request to admins for approval.
+                  </FormHelper>
                 </div>
               </>
             )}
-            <div className="space-y-3">
-              <label htmlFor="email" className="cv-form-label text-white font-semibold">
+            <FormField>
+              <FormLabel htmlFor="email" required className="text-white font-semibold">
                 Email Address
-              </label>
-              <div className="cv-input-wrapper">
-                <Mail className="cv-input-icon" />
-                <input
-                  id="email"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={handleEmailChange}
-                  className={`cv-form-input cv-input-focus-ring pl-10 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white ${
-                    emailError ? 'border-red-300 focus:border-red-500' : ''
-                  }`}
-                  placeholder={
-                    mode === 'signup' 
-                      ? (requestedRole === 'recruiter' ? 'recruiter@company.com' : 'student@university.edu')
-                      : 'your@email.com'
-                  }
-                  aria-invalid={Boolean(error || emailError)}
-                />
-              </div>
+              </FormLabel>
+              <FormInput
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                required
+                icon={<Mail />}
+                value={email}
+                onChange={handleEmailChange}
+                error={!!emailError}
+                className="bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
+                placeholder={
+                  mode === 'signup' 
+                    ? (requestedRole === 'recruiter' ? 'recruiter@company.com' : 'student@university.edu')
+                    : 'your@email.com'
+                }
+                aria-invalid={Boolean(error || emailError)}
+              />
               {emailError && (
-                <p className="text-red-300 text-sm mt-1 flex items-center gap-1">
-                  <span>⚠️</span>
+                <FormError icon={<AlertCircle className="w-4 h-4" />}>
                   {emailError}
-                </p>
+                </FormError>
               )}
-            </div>
+            </FormField>
 
-            <div className="space-y-3">
-              <label htmlFor="password" className="cv-form-label text-white font-semibold">
+            <FormField>
+              <FormLabel htmlFor="password" required className="text-white font-semibold">
                 Password
-              </label>
+              </FormLabel>
               <div className="cv-input-wrapper">
-                <Lock className="cv-input-icon" />
+                <Lock className="cv-input-icon w-5 h-5" />
                 <input
                   id="password"
                   type={showPassword ? "text" : "password"}
@@ -507,7 +512,7 @@ export default function LoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="cv-form-input cv-input-focus-ring pl-10 pr-12 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
+                  className="cv-form-input cv-input-focus-ring !pl-14 pr-12 bg-white/90 text-gray-900 border-white/30 focus:border-white focus:bg-white"
                   placeholder={mode === "login" ? "Enter your password" : "Create a strong password"}
                 />
                 <button
@@ -520,7 +525,7 @@ export default function LoginPage() {
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
-            </div>
+            </FormField>
 
             {mode === "login" && (
               <div className="flex items-center justify-between">
@@ -537,25 +542,20 @@ export default function LoginPage() {
               </div>
             )}
 
-            <button
+            <CVButton
               type="submit"
+              variant="primary"
+              loading={loading}
               disabled={loading || (mode === 'signup' && (!!emailError || !email.trim() || !requestedRole))}
-              className="w-full group bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-4 rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-purple-500/25 transform hover:-translate-y-1 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+              icon={!loading ? <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" /> : undefined}
+              iconPosition="right"
+              className="w-full bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 py-4 shadow-lg hover:shadow-xl hover:shadow-blue-500/25 transform hover:-translate-y-1 hover:scale-[1.02] active:scale-[0.98]"
             >
-              {loading ? (
-                <span className="flex items-center justify-center gap-3">
-                  <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>{mode === "login" ? "Signing you in..." : "Creating your account..."}</span>
-                </span>
-              ) : (
-                <>
-                  <span>{mode === "login" ? "Access CredentiVault" : "Create Account"}</span>
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </>
-              )}
-            </button>
+              {loading 
+                ? (mode === "login" ? "Signing you in..." : "Creating your account...")
+                : (mode === "login" ? "Access CredentiVault" : "Create Account")
+              }
+            </CVButton>
           </form>
 
           {/* Social Login */}
@@ -600,9 +600,13 @@ export default function LoginPage() {
           </div>
 
           {/* Trust indicators */}
-          <div className="mt-8 flex items-center justify-center gap-6 text-white/80 text-xs">
-            <span className="cv-badge cv-badge-verified text-xs">SSL Secured</span>
-            <span className="cv-badge cv-badge-verified text-xs">GDPR Compliant</span>
+          <div className="mt-8 flex items-center justify-center gap-6 text-xs">
+            <CVBadge variant="verified" icon={<Check className="w-3 h-3" />}>
+              SSL Secured
+            </CVBadge>
+            <CVBadge variant="verified" icon={<Check className="w-3 h-3" />}>
+              GDPR Compliant
+            </CVBadge>
           </div>
 
           {/* Footer */}
