@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Share2, Star, Zap, Shield, Brain, FileText, Upload, ExternalLink, Trash2, User2, Edit3, Building, Calendar, GraduationCap, MapPin } from 'lucide-react';
+import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Share2, Star, Zap, Shield, Brain, FileText, Upload, ExternalLink, Trash2, User2, Edit3, Building, Calendar, GraduationCap, MapPin, Award, FileCheck, ScrollText } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 
 interface Row {
@@ -347,7 +347,7 @@ export default function StudentDashboard() {
           <p className="text-white/60 mb-6">Upload your first certificate to get started!</p>
           <a 
             href="/student/upload" 
-            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-medium transition-colors"
+            className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 text-white px-6 py-3 rounded-xl font-medium transition-colors shadow-lg hover:shadow-blue-500/25"
           >
             <Download className="w-4 h-4" />
             Upload Certificate
@@ -358,12 +358,12 @@ export default function StudentDashboard() {
 
     return (
       <div className="space-y-4">
-        {/* Portfolio Preview Section */}
+        {/* Portfolio Preview Section with brand gradient */}
         {rows.length > 0 && (
-          <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 backdrop-blur-xl border border-white/10 rounded-2xl p-6 mb-6">
+          <div className="bg-gradient-to-r from-blue-500/10 to-emerald-500/10 backdrop-blur-xl border border-white/10 rounded-2xl p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl">
+                <div className="p-2 bg-gradient-to-r from-blue-500/20 to-emerald-500/20 rounded-xl">
                   <ExternalLink className="w-5 h-5 text-blue-300" />
                 </div>
                 <div>
@@ -413,19 +413,22 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* Recent Uploads Progress */}
+        {/* Recent Uploads Progress - Enhanced */}
         {recentUploads.length > 0 && (
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 mb-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-gradient-to-r from-green-500/20 to-blue-500/20 rounded-xl">
-                <Upload className="w-5 h-5 text-green-300" />
+          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 md:p-8 mb-8 shadow-2xl group">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-blue-400 rounded-2xl blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
+                <div className="relative p-3 bg-gradient-to-r from-emerald-500/20 to-blue-500/20 rounded-2xl">
+                  <Upload className="w-6 h-6 text-emerald-300" />
+                </div>
               </div>
               <div>
-                <h2 className="text-xl font-semibold text-white">Recent Uploads</h2>
-                <p className="text-white/70 text-sm">Track your latest certificate uploads</p>
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-blue-400 bg-clip-text text-transparent">Recent Uploads</h2>
+                <p className="text-white/80 text-sm font-medium">Track your latest certificate uploads</p>
               </div>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-4">
               {recentUploads.map((upload, index) => {
                 const confScore = confidence[upload.id] || 0;
                 const verificationMethod = getVerificationMethod(details[upload.id]);
@@ -490,58 +493,58 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* Summary Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-3 md:p-4">
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="p-1.5 md:p-2 bg-emerald-500/20 rounded-lg">
-                <CheckCircle className="w-4 h-4 md:w-5 md:h-5 text-emerald-400" />
+        {/* Summary Stats - Enhanced design */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5 mb-8">
+          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-emerald-400/30 transition-all duration-300 group cursor-pointer">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-emerald-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
+                <CheckCircle className="w-5 h-5 md:w-6 md:h-6 text-emerald-400" />
               </div>
               <div className="min-w-0">
-                <p className="text-white/60 text-xs md:text-sm">Verified</p>
-                <p className="text-lg md:text-2xl font-bold text-white">
+                <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Verified</p>
+                <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-emerald-400 to-emerald-300 bg-clip-text text-transparent">
                   {rows.filter(r => r.verification_status === 'verified').length}
                 </p>
               </div>
             </div>
           </div>
           
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-3 md:p-4">
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="p-1.5 md:p-2 bg-yellow-500/20 rounded-lg">
-                <Clock className="w-4 h-4 md:w-5 md:h-5 text-yellow-400" />
+          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-yellow-400/30 transition-all duration-300 group cursor-pointer">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-yellow-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
+                <Clock className="w-5 h-5 md:w-6 md:h-6 text-yellow-400" />
               </div>
               <div className="min-w-0">
-                <p className="text-white/60 text-xs md:text-sm">Pending</p>
-                <p className="text-lg md:text-2xl font-bold text-white">
+                <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Pending</p>
+                <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-yellow-400 to-yellow-300 bg-clip-text text-transparent">
                   {rows.filter(r => r.verification_status === 'pending').length}
                 </p>
               </div>
             </div>
           </div>
           
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-3 md:p-4">
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="p-1.5 md:p-2 bg-blue-500/20 rounded-lg">
-                <Zap className="w-4 h-4 md:w-5 md:h-5 text-blue-400" />
+          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-blue-400/30 transition-all duration-300 group cursor-pointer">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-blue-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
+                <Zap className="w-5 h-5 md:w-6 md:h-6 text-blue-400" />
               </div>
               <div className="min-w-0">
-                <p className="text-white/60 text-xs md:text-sm">Auto-Approved</p>
-                <p className="text-lg md:text-2xl font-bold text-white">
+                <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Auto-Verified</p>
+                <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
                   {rows.filter(r => r.auto_approved).length}
                 </p>
               </div>
             </div>
           </div>
           
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-3 md:p-4">
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="p-1.5 md:p-2 bg-purple-500/20 rounded-lg">
-                <Star className="w-4 h-4 md:w-5 md:h-5 text-purple-400" />
+          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-purple-400/30 transition-all duration-300 group cursor-pointer">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-purple-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
+                <Star className="w-5 h-5 md:w-6 md:h-6 text-purple-400" />
               </div>
               <div className="min-w-0">
-                <p className="text-white/60 text-xs md:text-sm">Total</p>
-                <p className="text-lg md:text-2xl font-bold text-white">{rows.length}</p>
+                <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Total</p>
+                <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">{rows.length}</p>
               </div>
             </div>
           </div>
@@ -658,44 +661,68 @@ export default function StudentDashboard() {
   }, [rows, loading, error, confidence, details]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-10">
-      <div className="max-w-6xl mx-auto px-6">
-        {/* Header */}
-        <div className="mb-6 md:mb-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 md:p-3 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-2xl backdrop-blur-sm border border-white/10">
-                <Star className="w-6 h-6 md:w-8 md:h-8 text-blue-300" />
+    <div className="min-h-screen relative overflow-hidden bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900">
+      {/* Animated background - matching landing page */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Floating particles */}
+        <div className="absolute top-20 left-[10%] w-2 h-2 bg-blue-400/40 rounded-full animate-float" style={{ animationDelay: '0s', animationDuration: '3s' }} />
+        <div className="absolute top-40 right-[15%] w-1.5 h-1.5 bg-emerald-400/40 rounded-full animate-float" style={{ animationDelay: '0.5s', animationDuration: '4s' }} />
+        <div className="absolute bottom-32 left-[20%] w-2.5 h-2.5 bg-purple-400/30 rounded-full animate-float" style={{ animationDelay: '1s', animationDuration: '5s' }} />
+        <div className="absolute top-[60%] right-[25%] w-1 h-1 bg-blue-300/50 rounded-full animate-float" style={{ animationDelay: '1.5s', animationDuration: '3.5s' }} />
+        <div className="absolute bottom-[20%] right-[10%] w-2 h-2 bg-emerald-300/40 rounded-full animate-float" style={{ animationDelay: '2s', animationDuration: '4.5s' }} />
+        
+        {/* Gradient orbs */}
+        <div className="absolute top-1/4 -left-48 w-96 h-96 bg-gradient-to-br from-blue-500/30 to-purple-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '4s' }} />
+        <div className="absolute bottom-1/4 -right-48 w-96 h-96 bg-gradient-to-br from-emerald-500/30 to-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '5s', animationDelay: '1s' }} />
+        
+        {/* Grid overlay */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(59,130,246,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(59,130,246,0.05)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_80%)]" />
+      </div>
+
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
+        {/* Header with enhanced design */}
+        <div className="mb-8 md:mb-10">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-6">
+            <div className="flex items-start gap-4">
+              <div className="relative group flex-shrink-0">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-2xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity duration-500" />
+                <div className="relative p-3 md:p-4 bg-gradient-to-br from-blue-500/20 to-emerald-500/20 backdrop-blur-sm rounded-2xl border border-white/10 group-hover:scale-110 transition-transform duration-300">
+                  <ScrollText className="w-7 h-7 md:w-9 md:h-9 text-blue-300 drop-shadow-lg" />
+                </div>
               </div>
-              <div className="min-w-0">
-                <h1 className="text-2xl md:text-4xl font-bold bg-gradient-to-r from-white via-blue-200 to-purple-200 bg-clip-text text-transparent">
+              <div className="min-w-0 flex-1 pt-1">
+                <h1 className="text-3xl md:text-5xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient mb-2 leading-[1.1]">
                   My Certificates
                 </h1>
-                <p className="text-white/70 text-sm md:text-lg">Track your verified achievements and credentials</p>
+                <p className="text-white/80 text-sm md:text-lg font-medium">Track your verified achievements and credentials</p>
               </div>
             </div>
             
             <div className="flex items-center gap-3">
               <a
                 href="/student/upload"
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-6 py-2 md:py-3 rounded-xl font-medium transition-colors flex items-center gap-2 text-sm md:text-base"
+                className="relative overflow-hidden bg-gradient-to-r from-blue-400 via-cyan-500 to-emerald-400 hover:from-blue-500 hover:via-cyan-600 hover:to-emerald-500 text-white px-5 md:px-7 py-3 md:py-3.5 rounded-xl font-bold transition-all duration-300 flex items-center gap-2 text-sm md:text-base shadow-xl hover:shadow-2xl hover:shadow-cyan-500/50 transform hover:-translate-y-1 hover:scale-105 group"
               >
-                <Upload className="w-4 h-4 md:w-5 md:h-5" />
-                <span className="hidden sm:inline">Upload Certificate</span>
-                <span className="sm:hidden">Upload</span>
+                <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/30 to-white/0 transform -skew-x-12 translate-x-[-100%] group-hover:translate-x-[200%] transition-transform duration-1000"></span>
+                <Upload className="w-4 h-4 md:w-5 md:h-5 relative z-10" />
+                <span className="hidden sm:inline relative z-10">Upload Certificate</span>
+                <span className="sm:hidden relative z-10">Upload</span>
               </a>
               <LogoutButton variant="minimal" />
             </div>
           </div>
         </div>
 
-        {/* Profile Section */}
+        {/* Profile Section - Enhanced glassmorphism */}
         {!profileLoading && profile && (
-          <div className="mb-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-gradient-to-r from-green-500/20 to-blue-500/20 rounded-xl">
-                  <User2 className="w-6 h-6 text-green-300" />
+          <div className="mb-8 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl hover:shadow-blue-500/10 transition-shadow duration-500 group">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-blue-400 rounded-2xl blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
+                  <div className="relative p-3 bg-gradient-to-r from-emerald-500/20 to-blue-500/20 rounded-2xl">
+                    <User2 className="w-7 h-7 text-emerald-300" />
+                  </div>
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-white">My Profile</h2>
@@ -885,10 +912,18 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* All Certificates Table */}
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-white/10">
-            <h3 className="text-lg font-semibold text-white">All Certificates</h3>
+        {/* All Certificates Table - Enhanced */}
+        <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+          <div className="px-6 md:px-8 py-5 md:py-6 border-b border-white/10 bg-white/5">
+            <div className="flex items-center gap-4">
+              <div className="relative group">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-xl blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
+                <div className="relative p-2 bg-gradient-to-r from-blue-500/20 to-emerald-500/20 rounded-xl">
+                  <ScrollText className="w-6 h-6 text-blue-300" />
+                </div>
+              </div>
+              <h3 className="text-2xl font-bold text-white">All Certificates</h3>
+            </div>
           </div>
           
           {loading ? (
@@ -902,15 +937,20 @@ export default function StudentDashboard() {
               <p className="text-red-300">{error}</p>
             </div>
           ) : rows.length === 0 ? (
-            <div className="p-8 text-center">
-              <FileText className="w-12 h-12 text-white/30 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-white mb-2">No certificates yet</h3>
-              <p className="text-white/60 mb-4">Upload your first certificate to get started</p>
+            <div className="p-12 text-center">
+              <div className="relative inline-block mb-6">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-2xl blur-2xl opacity-30" />
+                <div className="relative p-6 bg-gradient-to-br from-blue-500/20 to-emerald-500/20 backdrop-blur-sm rounded-2xl border border-white/10">
+                  <ScrollText className="w-16 h-16 text-blue-300" />
+                </div>
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-3">No certificates yet</h3>
+              <p className="text-white/70 mb-6 text-lg">Upload your first certificate to get started</p>
               <a
                 href="/student/upload"
-                className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-400 via-cyan-500 to-emerald-400 hover:from-blue-500 hover:via-cyan-600 hover:to-emerald-500 text-white px-6 py-3 rounded-xl font-bold transition-all duration-300 shadow-xl hover:shadow-cyan-500/50 hover:scale-105"
               >
-                <Upload className="w-4 h-4" />
+                <Upload className="w-5 h-5" />
                 Upload Certificate
               </a>
             </div>
@@ -918,46 +958,46 @@ export default function StudentDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-white/10">
-                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Certificate</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Institution</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Confidence</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Date Issued</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-white/70 uppercase tracking-wider">Actions</th>
+                  <tr className="border-b border-white/10 bg-white/5">
+                    <th className="px-6 py-4 text-left text-xs font-bold text-white/80 uppercase tracking-wider">Certificate</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-white/80 uppercase tracking-wider">Institution</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-white/80 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-white/80 uppercase tracking-wider">Confidence</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-white/80 uppercase tracking-wider">Date Issued</th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-white/80 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10">
                   {rows.map((row) => (
-                    <tr key={row.id} className="hover:bg-white/5 transition-colors">
-                      <td className="px-6 py-4">
+                    <tr key={row.id} className="hover:bg-white/5 transition-all duration-300 group">
+                      <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
                           <div className="flex-shrink-0">
-                            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                              <FileText className="w-5 h-5 text-white" />
+                            <div className="w-10 h-10 bg-gradient-to-br from-blue-500/30 to-emerald-500/30 backdrop-blur-sm rounded-xl flex items-center justify-center border border-white/10 group-hover:scale-110 transition-transform">
+                              <ScrollText className="w-5 h-5 text-blue-300" />
                             </div>
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-white font-medium truncate">{row.title}</p>
+                            <p className="text-white font-semibold truncate">{row.title}</p>
                             <p className="text-white/60 text-sm truncate">{row.institution}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-white/80">{row.institution}</td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-5 text-white/90 font-medium">{row.institution}</td>
+                      <td className="px-6 py-5">
                         <div className="flex items-center gap-2">
-                          <div className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(row.verification_status, row.auto_approved)}`}>
+                          <div className={`px-3 py-1.5 rounded-xl text-xs font-semibold border ${getStatusColor(row.verification_status, row.auto_approved)}`}>
                             {getStatusText(row.verification_status, row.auto_approved)}
                           </div>
                           <button
                             onClick={() => fetchVcStatus(row.id)}
-                            className="text-[10px] text-white/70 hover:text-white underline decoration-dotted"
+                            className="text-[10px] text-blue-300 hover:text-blue-200 underline decoration-dotted transition-colors"
                             title="Check VC status"
                           >
                             Check
                           </button>
                           {vcStatus[row.id] && (
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] border ${
+                            <span className={`px-2 py-1 rounded-lg text-[10px] font-medium border ${
                               vcStatus[row.id].status === 'active' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
                               vcStatus[row.id].status === 'revoked' ? 'bg-red-500/10 text-red-300 border-red-500/30' :
                               vcStatus[row.id].status === 'suspended' ? 'bg-yellow-500/10 text-yellow-300 border-yellow-500/30' :
@@ -967,38 +1007,38 @@ export default function StudentDashboard() {
                             </span>
                           )}
                           {row.auto_approved && (
-                            <div className="flex items-center gap-1 text-xs text-emerald-400">
+                            <div className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 rounded-lg text-xs text-emerald-300 font-medium border border-emerald-400/30">
                               <Zap className="w-3 h-3" />
                               Auto
                             </div>
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-5">
                         {row.confidence_score ? (
                           <div className="flex items-center gap-2">
-                            <div className="w-16">
+                            <div className="w-20">
                               {getConfidenceBar(row.confidence_score)}
                             </div>
-                            <span className={`text-sm font-medium ${getConfidenceColor(row.confidence_score)}`}>
+                            <span className={`text-sm font-bold ${getConfidenceColor(row.confidence_score)}`}>
                               {Math.round(row.confidence_score * 100)}%
                             </span>
                           </div>
                         ) : (
-                          <span className="text-white/50 text-sm">N/A</span>
+                          <span className="text-white/50 text-sm font-medium">N/A</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-white/80 text-sm">
+                      <td className="px-6 py-5 text-white/90 text-sm font-medium">
                         {row.date_issued ? new Date(row.date_issued).toLocaleDateString() : 'N/A'}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-5">
                         <div className="flex items-center gap-2">
                           {row.file_url && (
                             <a
                               href={row.file_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                              className="p-2 text-blue-300 hover:text-blue-200 hover:bg-blue-500/20 rounded-lg transition-all duration-300 border border-transparent hover:border-blue-400/30 hover:scale-110"
                               title="View Certificate"
                             >
                               <Eye className="w-4 h-4" />
@@ -1007,7 +1047,7 @@ export default function StudentDashboard() {
                           <button
                             onClick={() => showDeleteConfirmation(row.id, row.title)}
                             disabled={deleting === row.id}
-                            className="p-2 text-white/60 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                            className="p-2 text-red-300 hover:text-red-200 hover:bg-red-500/20 rounded-lg transition-all duration-300 disabled:opacity-50 border border-transparent hover:border-red-400/30 hover:scale-110"
                             title="Delete Certificate"
                           >
                             {deleting === row.id ? (
@@ -1029,31 +1069,35 @@ export default function StudentDashboard() {
 
       {/* Delete Confirmation Modal */}
       {deleteConfirm.show && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-slate-800 border border-red-500/30 rounded-2xl p-8 max-w-md mx-4">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-3 bg-red-500/20 rounded-full">
-                <Trash2 className="w-6 h-6 text-red-400" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl">
+          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-red-500/30 rounded-3xl p-8 max-w-md mx-4 shadow-2xl">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="relative group">
+                <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 rounded-xl blur-lg opacity-50" />
+                <div className="relative p-3 bg-red-500/20 rounded-xl border border-red-400/30">
+                  <Trash2 className="w-6 h-6 text-red-300" />
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-white">Delete Certificate?</h3>
+              <h3 className="text-2xl font-bold bg-gradient-to-r from-red-400 to-orange-400 bg-clip-text text-transparent">Delete Certificate?</h3>
             </div>
             
-            <p className="text-white/70 mb-6">
-              Are you sure you want to delete <span className="font-semibold text-white">&quot;{deleteConfirm.certTitle}&quot;</span>? This action cannot be undone.
+            <p className="text-white/80 mb-8 text-base">
+              Are you sure you want to delete <span className="font-bold text-white">&quot;{deleteConfirm.certTitle}&quot;</span>? This action cannot be undone.
             </p>
             
             <div className="flex gap-4 justify-end">
               <button
                 onClick={cancelDelete}
-                className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg font-medium transition-colors"
+                className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-semibold transition-all duration-300 border border-white/20 hover:border-white/30 hover:scale-105"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDelete}
-                className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
+                className="relative overflow-hidden px-6 py-3 bg-gradient-to-r from-red-500 via-red-600 to-orange-500 hover:from-red-600 hover:via-red-700 hover:to-orange-600 text-white rounded-xl font-semibold transition-all duration-300 shadow-xl hover:shadow-red-500/50 hover:scale-105 group"
               >
-                Delete Certificate
+                <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 transform -skew-x-12 translate-x-[-100%] group-hover:translate-x-[200%] transition-transform duration-1000"></span>
+                <span className="relative z-10">Delete Certificate</span>
               </button>
             </div>
           </div>
@@ -1194,7 +1238,7 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
         <button
           type="submit"
           disabled={loading || !formData.full_name.trim()}
-          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+          className="px-6 py-2 bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors shadow-lg hover:shadow-blue-500/25"
         >
           {loading ? 'Saving...' : 'Save Changes'}
         </button>
