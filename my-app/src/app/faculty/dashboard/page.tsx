@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
+import { PageHeader } from '@/components/layout';
 
 interface PendingCert {
   id: string;
@@ -43,6 +44,21 @@ interface Analytics {
   };
   dailyActivity: Record<string, { total: number; verified: number; pending: number; rejected: number }>;
   topInstitutions: Array<{ institution: string; count: number }>;
+  ocrMetrics?: {
+    totalExtractions: number;
+    highQuality: number;
+    mediumQuality: number;
+    lowQuality: number;
+    averageScore: number;
+    successRate: number;
+  };
+  confidencePercentiles?: {
+    p25: number;
+    p50: number;
+    p75: number;
+    p90: number;
+  };
+  confidenceTrend?: Record<string, { scores: number[]; avgScore: number; count: number }>;
 }
 
 export default function FacultyDashboardPage() {
@@ -331,18 +347,23 @@ export default function FacultyDashboardPage() {
   const content = useMemo(() => {
     if (loading) {
       return (
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
-          <span className="ml-3 text-white/80">Loading certificates...</span>
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="relative">
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full blur-xl opacity-50 animate-pulse"></div>
+            <div className="relative animate-spin rounded-full h-12 w-12 border-4 border-white/20 border-t-blue-400"></div>
+          </div>
+          <span className="mt-4 text-white/80 font-medium">Loading certificates...</span>
         </div>
       );
     }
     
     if (error) {
       return (
-        <div className="bg-red-500/10 border border-red-500/20 text-red-300 rounded-2xl p-6 text-center">
-          <AlertCircle className="w-8 h-8 mx-auto mb-3" />
-          <p className="font-medium">{error}</p>
+        <div className="bg-gradient-to-br from-red-500/10 to-red-500/5 backdrop-blur-xl border border-red-500/30 text-red-300 rounded-2xl p-6 text-center">
+          <div className="w-12 h-12 bg-red-500/20 rounded-xl flex items-center justify-center mx-auto mb-3">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <p className="font-semibold text-lg">{error}</p>
         </div>
       );
     }
@@ -352,9 +373,14 @@ export default function FacultyDashboardPage() {
     if (filteredRows.length === 0) {
       return (
         <div className="text-center py-12">
-          <CheckCircle className="w-16 h-16 text-white/30 mx-auto mb-4" />
-          <h3 className="text-xl font-semibold text-white mb-2">No certificates to review</h3>
-          <p className="text-white/60">
+          <div className="relative inline-block mb-6">
+            <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-green-500 rounded-2xl blur-xl opacity-40"></div>
+            <div className="relative w-20 h-20 bg-gradient-to-br from-emerald-500/20 to-green-500/20 backdrop-blur-sm rounded-2xl border border-emerald-400/30 flex items-center justify-center mx-auto">
+              <CheckCircle className="w-10 h-10 text-emerald-300" />
+            </div>
+          </div>
+          <h3 className="text-2xl font-bold text-white mb-3">No certificates to review</h3>
+          <p className="text-white/70 max-w-md mx-auto">
             {filterStatus === 'low_confidence' 
               ? 'All certificates have high confidence scores and are auto-approved!'
               : 'No certificates match the current filter criteria.'
@@ -366,13 +392,15 @@ export default function FacultyDashboardPage() {
 
     return (
       <div className="space-y-6">
-        {/* Batch Actions */}
+        {/* Batch Actions - Enhanced */}
         {selectedCerts.size > 0 && (
-          <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
-            <div className="flex items-center justify-between">
+          <div className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 backdrop-blur-xl border border-blue-400/30 rounded-2xl p-5 shadow-lg shadow-blue-500/20 animate-in slide-in-from-top duration-300">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <CheckSquare className="w-5 h-5 text-blue-400" />
-                <span className="text-blue-300 font-medium">
+                <div className="p-2 bg-blue-500/20 rounded-xl">
+                  <CheckSquare className="w-5 h-5 text-blue-300" />
+                </div>
+                <span className="text-blue-200 font-semibold text-lg">
                   {selectedCerts.size} certificate{selectedCerts.size > 1 ? 's' : ''} selected
                 </span>
               </div>
@@ -380,22 +408,24 @@ export default function FacultyDashboardPage() {
                 <button
                   onClick={batchApprove}
                   disabled={batchActioning}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                  className="group relative overflow-hidden bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white px-5 py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg hover:shadow-emerald-500/50 hover:scale-105"
                 >
-                  <CheckCircle className="w-4 h-4" />
-                  Approve All
+                  <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                  <CheckCircle className="w-4 h-4 relative z-10" />
+                  <span className="relative z-10">Approve All</span>
                 </button>
                 <button
                   onClick={batchReject}
                   disabled={batchActioning}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                  className="group relative overflow-hidden bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white px-5 py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg hover:shadow-red-500/50 hover:scale-105"
                 >
-                  <XCircle className="w-4 h-4" />
-                  Reject All
+                  <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                  <XCircle className="w-4 h-4 relative z-10" />
+                  <span className="relative z-10">Reject All</span>
                 </button>
                 <button
                   onClick={clearSelection}
-                  className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                  className="bg-gradient-to-br from-white/10 to-white/5 hover:from-white/15 hover:to-white/10 border border-white/10 hover:border-white/20 text-white px-4 py-2.5 rounded-xl font-medium transition-all backdrop-blur-xl"
                 >
                   Clear
                 </button>
@@ -412,8 +442,10 @@ export default function FacultyDashboardPage() {
             const isSelected = selectedCerts.has(cert.id);
             
             return (
-              <div key={cert.id} className={`bg-white/5 backdrop-blur-xl border rounded-2xl p-6 transition-all duration-200 ${
-                isSelected ? 'border-blue-500/50 bg-blue-500/10' : 'border-white/10 hover:bg-white/10'
+              <div key={cert.id} className={`bg-gradient-to-br backdrop-blur-2xl border rounded-2xl p-6 transition-all duration-300 hover:scale-[1.01] ${
+                isSelected 
+                  ? 'from-blue-500/15 to-cyan-500/15 border-blue-400/50 shadow-lg shadow-blue-500/20' 
+                  : 'from-white/10 to-white/5 border-white/10 hover:border-white/20'
               }`}>
                 <div className="flex items-start gap-4">
                   {/* Selection Checkbox */}
@@ -483,23 +515,25 @@ export default function FacultyDashboardPage() {
                       </div>
                     </div>
                     
-                    {/* Individual Actions */}
+                    {/* Individual Actions - Enhanced */}
                     <div className="flex items-center gap-2">
                       <button 
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                        className="group relative overflow-hidden flex-1 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white px-4 py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-emerald-500/50 hover:scale-105"
                         onClick={() => onApprove(cert.id, cert)}
                         disabled={actioning === cert.id}
                       >
-                        <CheckCircle className="w-4 h-4" />
-                        Approve + Issue
+                        <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                        <CheckCircle className="w-4 h-4 relative z-10" />
+                        <span className="relative z-10">Approve + Issue</span>
                       </button>
                       <button 
-                        className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                        className="group relative overflow-hidden flex-1 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white px-4 py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-red-500/50 hover:scale-105"
                         onClick={() => onReject(cert.id)}
                         disabled={actioning === cert.id}
                       >
-                        <XCircle className="w-4 h-4" />
-                        Reject
+                        <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                        <XCircle className="w-4 h-4 relative z-10" />
+                        <span className="relative z-10">Reject</span>
                       </button>
                     </div>
                   </div>
@@ -513,20 +547,43 @@ export default function FacultyDashboardPage() {
   }, [loading, error, getFilteredRows, selectedCerts, batchApprove, batchReject, clearSelection, toggleSelect, onApprove, onReject, actioning]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-10">
-      <div className="max-w-6xl mx-auto px-6">
-        {/* Header */}
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden">
+      {/* Animated Background Elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Floating particles */}
+        <div className="absolute top-[10%] left-[5%] w-2 h-2 bg-blue-400/30 rounded-full blur-sm animate-float" style={{ animationDuration: '4s' }}></div>
+        <div className="absolute top-[20%] right-[10%] w-2 h-2 bg-emerald-400/30 rounded-full blur-sm animate-float" style={{ animationDuration: '5s', animationDelay: '0.5s' }}></div>
+        <div className="absolute top-[60%] left-[15%] w-2 h-2 bg-cyan-400/30 rounded-full blur-sm animate-float" style={{ animationDuration: '3.5s', animationDelay: '1s' }}></div>
+        <div className="absolute bottom-[15%] right-[20%] w-2 h-2 bg-blue-400/30 rounded-full blur-sm animate-float" style={{ animationDuration: '4.5s', animationDelay: '0.3s' }}></div>
+        <div className="absolute bottom-[30%] left-[25%] w-2 h-2 bg-emerald-400/30 rounded-full blur-sm animate-float" style={{ animationDuration: '5s', animationDelay: '0.7s' }}></div>
+        
+        {/* Gradient orbs */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '8s' }}></div>
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-gradient-to-tr from-emerald-500/20 to-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '10s', animationDelay: '2s' }}></div>
+        
+        {/* Grid overlay */}
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_85%)] opacity-10"></div>
+      </div>
+
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header with enhanced design */}
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-gradient-to-r from-orange-500/20 to-red-500/20 rounded-2xl backdrop-blur-sm border border-white/10">
-                <Users className="w-8 h-8 text-orange-300" />
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-4">
+              <div className="relative group">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-2xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity duration-500" />
+                <div className="relative p-4 bg-gradient-to-br from-blue-500/20 to-emerald-500/20 backdrop-blur-sm rounded-2xl border border-white/10 group-hover:scale-110 transition-transform duration-300">
+                  <Users className="w-10 h-10 text-blue-300 drop-shadow-lg" />
+                </div>
               </div>
               <div>
-                <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-orange-200 to-red-200 bg-clip-text text-transparent">
+                <h1 className="text-4xl md:text-5xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient">
                   Faculty Dashboard
                 </h1>
-                <p className="text-white/70 text-lg">Review and approve certificate submissions</p>
+                <p className="text-white/80 text-base md:text-lg mt-1 font-medium">
+                  Review and approve certificate submissions
+                  <span className="text-emerald-300"> with AI assistance</span>
+                </p>
               </div>
             </div>
             
@@ -535,27 +592,27 @@ export default function FacultyDashboardPage() {
             </div>
           </div>
           
-          {/* Filters and Actions */}
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
+          {/* Filters and Actions - Enhanced */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setShowFilters(!showFilters)}
-                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-colors"
+                className="group relative overflow-hidden flex items-center gap-2 bg-gradient-to-br from-white/10 to-white/5 hover:from-white/15 hover:to-white/10 border border-white/10 hover:border-white/20 text-white px-4 py-2.5 rounded-xl font-medium transition-all backdrop-blur-xl"
               >
                 <Filter className="w-4 h-4" />
                 Filters
               </button>
               
               {showFilters && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 animate-in slide-in-from-left duration-300">
                   <select
                     value={filterStatus}
                     onChange={(e) => setFilterStatus(e.target.value as any)}
-                    className="bg-white/10 border border-white/20 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 text-white px-4 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/30 font-medium transition-all"
                   >
-                    <option value="low_confidence">Low Confidence (&lt; 90%)</option>
-                    <option value="manual_review">Manual Review Required</option>
-                    <option value="all">All Certificates</option>
+                    <option value="low_confidence" className="bg-slate-900">Low Confidence (&lt; 90%)</option>
+                    <option value="manual_review" className="bg-slate-900">Manual Review Required</option>
+                    <option value="all" className="bg-slate-900">All Certificates</option>
                   </select>
                 </div>
               )}
@@ -564,64 +621,75 @@ export default function FacultyDashboardPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={selectAll}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+                className="group relative overflow-hidden bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white px-4 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2 shadow-lg hover:shadow-blue-500/50 hover:scale-105"
               >
-                <CheckSquare className="w-4 h-4" />
-                Select All
+                <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                <CheckSquare className="w-4 h-4 relative z-10" />
+                <span className="relative z-10">Select All</span>
               </button>
               <button
                 onClick={clearSelection}
-                className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                className="bg-gradient-to-br from-white/10 to-white/5 hover:from-white/15 hover:to-white/10 border border-white/10 hover:border-white/20 text-white px-4 py-2.5 rounded-xl font-medium transition-all backdrop-blur-xl"
               >
-                Clear Selection
+                Clear
               </button>
               <a
                 href="/faculty/history"
-                className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                className="bg-gradient-to-br from-white/10 to-white/5 hover:from-white/15 hover:to-white/10 border border-white/10 hover:border-white/20 text-white px-4 py-2.5 rounded-xl font-medium transition-all backdrop-blur-xl inline-flex items-center gap-2"
               >
+                <Clock className="w-4 h-4" />
                 History
               </a>
             </div>
           </div>
           
-          {/* Summary Stats */}
+          {/* Summary Stats - Enhanced */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-red-500/20 rounded-lg">
-                  <AlertCircle className="w-5 h-5 text-red-400" />
+            <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-5 hover:border-red-400/30 transition-all group">
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 rounded-xl blur-lg opacity-40 group-hover:opacity-60 transition-opacity" />
+                  <div className="relative p-3 bg-gradient-to-r from-red-500/20 to-orange-500/20 rounded-xl">
+                    <AlertCircle className="w-6 h-6 text-red-400" />
+                  </div>
                 </div>
                 <div>
-                  <p className="text-white/60 text-sm">Low Confidence</p>
-                  <p className="text-2xl font-bold text-white">
+                  <p className="text-white/60 text-sm font-medium">Low Confidence</p>
+                  <p className="text-3xl font-bold text-white">
                     {rows.filter(r => (r.confidence_score || 0) < 0.7).length}
                   </p>
                 </div>
               </div>
             </div>
             
-            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-emerald-500/20 rounded-lg">
-                  <Zap className="w-5 h-5 text-emerald-400" />
+            <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-5 hover:border-emerald-400/30 transition-all group">
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-green-500 rounded-xl blur-lg opacity-40 group-hover:opacity-60 transition-opacity" />
+                  <div className="relative p-3 bg-gradient-to-r from-emerald-500/20 to-green-500/20 rounded-xl">
+                    <Zap className="w-6 h-6 text-emerald-400" />
+                  </div>
                 </div>
                 <div>
-                  <p className="text-white/60 text-sm">Auto-Approved</p>
-                  <p className="text-2xl font-bold text-white">
+                  <p className="text-white/60 text-sm font-medium">Auto-Approved</p>
+                  <p className="text-3xl font-bold text-white">
                     {rows.filter(r => r.auto_approved).length}
                   </p>
                 </div>
               </div>
             </div>
             
-            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-500/20 rounded-lg">
-                  <Star className="w-5 h-5 text-purple-400" />
+            <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-5 hover:border-cyan-400/30 transition-all group">
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-xl blur-lg opacity-40 group-hover:opacity-60 transition-opacity" />
+                  <div className="relative p-3 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 rounded-xl">
+                    <Clock className="w-6 h-6 text-cyan-400" />
+                  </div>
                 </div>
                 <div>
-                  <p className="text-white/60 text-sm">Pending Review</p>
-                  <p className="text-2xl font-bold text-white">
+                  <p className="text-white/60 text-sm font-medium">Pending Review</p>
+                  <p className="text-3xl font-bold text-white">
                     {rows.length}
                   </p>
                 </div>
@@ -637,7 +705,7 @@ export default function FacultyDashboardPage() {
                 <button
                   onClick={fetchAnalytics}
                   disabled={analyticsLoading}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                  className="bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2 shadow-lg hover:shadow-blue-500/25"
                 >
                   <RefreshCw className={`w-4 h-4 ${analyticsLoading ? 'animate-spin' : ''}`} />
                   Refresh
@@ -729,6 +797,109 @@ export default function FacultyDashboardPage() {
                     ))}
                   </div>
                 </div>
+
+                {/* OCR Extraction Quality Metrics */}
+                {analytics.ocrMetrics && (
+                  <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 backdrop-blur-xl border border-purple-500/20 rounded-2xl p-6 lg:col-span-2">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="p-2 bg-purple-500/20 rounded-lg">
+                        <Brain className="w-5 h-5 text-purple-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-white">OCR Extraction Quality</h3>
+                        <p className="text-white/60 text-sm">AI-powered document analysis metrics</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                      <div className="bg-white/5 rounded-xl p-4">
+                        <p className="text-white/60 text-xs mb-1">Total Extractions</p>
+                        <p className="text-2xl font-bold text-white">{analytics.ocrMetrics.totalExtractions}</p>
+                      </div>
+                      <div className="bg-white/5 rounded-xl p-4">
+                        <p className="text-white/60 text-xs mb-1">Success Rate</p>
+                        <p className="text-2xl font-bold text-emerald-400">{analytics.ocrMetrics.successRate}%</p>
+                      </div>
+                      <div className="bg-white/5 rounded-xl p-4">
+                        <p className="text-white/60 text-xs mb-1">Avg Score</p>
+                        <p className="text-2xl font-bold text-blue-400">{Math.round(analytics.ocrMetrics.averageScore * 100)}%</p>
+                      </div>
+                      <div className="bg-white/5 rounded-xl p-4">
+                        <p className="text-white/60 text-xs mb-1">High Quality</p>
+                        <p className="text-2xl font-bold text-purple-400">{analytics.ocrMetrics.highQuality}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-white/70 text-sm">High Quality (≥90%)</span>
+                          <span className="text-emerald-400 font-semibold">{analytics.ocrMetrics.highQuality} extractions</span>
+                        </div>
+                        <div className="w-full bg-gray-700 rounded-full h-2">
+                          <div 
+                            className="bg-gradient-to-r from-emerald-500 to-green-500 h-2 rounded-full"
+                            style={{ width: `${(analytics.ocrMetrics.highQuality / analytics.ocrMetrics.totalExtractions) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-white/70 text-sm">Medium Quality (70-89%)</span>
+                          <span className="text-yellow-400 font-semibold">{analytics.ocrMetrics.mediumQuality} extractions</span>
+                        </div>
+                        <div className="w-full bg-gray-700 rounded-full h-2">
+                          <div 
+                            className="bg-gradient-to-r from-yellow-500 to-orange-500 h-2 rounded-full"
+                            style={{ width: `${(analytics.ocrMetrics.mediumQuality / analytics.ocrMetrics.totalExtractions) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-white/70 text-sm">Low Quality (&lt;70%)</span>
+                          <span className="text-red-400 font-semibold">{analytics.ocrMetrics.lowQuality} extractions</span>
+                        </div>
+                        <div className="w-full bg-gray-700 rounded-full h-2">
+                          <div 
+                            className="bg-gradient-to-r from-red-500 to-pink-500 h-2 rounded-full"
+                            style={{ width: `${(analytics.ocrMetrics.lowQuality / analytics.ocrMetrics.totalExtractions) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Confidence Percentiles */}
+                {analytics.confidencePercentiles && (
+                  <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-2 bg-cyan-500/20 rounded-lg">
+                        <Activity className="w-5 h-5 text-cyan-400" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-white">Score Percentiles</h3>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-white/70 text-sm">25th Percentile</span>
+                        <span className="text-white font-semibold">{Math.round(analytics.confidencePercentiles.p25 * 100)}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-white/70 text-sm">50th Percentile (Median)</span>
+                        <span className="text-cyan-400 font-semibold">{Math.round(analytics.confidencePercentiles.p50 * 100)}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-white/70 text-sm">75th Percentile</span>
+                        <span className="text-white font-semibold">{Math.round(analytics.confidencePercentiles.p75 * 100)}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-white/70 text-sm">90th Percentile</span>
+                        <span className="text-emerald-400 font-semibold">{Math.round(analytics.confidencePercentiles.p90 * 100)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
