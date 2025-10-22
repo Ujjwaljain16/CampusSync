@@ -24,7 +24,8 @@
     "test:setup-only": "node run-tests.js --setup-only",
     "admin:setup": "node scripts/create-first-admin.js",
     "db:reset": "node scripts/reset-database.js",
-    "db:quick-reset": "node scripts/quick-reset.js"
+    "db:quick-reset": "node scripts/quick-reset.js",
+    "backfill:confidence": "npx tsx scripts/backfill-confidence-scores.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

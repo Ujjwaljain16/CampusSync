@@ -41,6 +41,7 @@ export const POST = withAuth(async (req: NextRequest, { user: authUser }) => {
     description: body.ocr?.description ?? body.ocr?.raw_text ?? '',
     file_url: body.publicUrl,
     verification_status: 'pending' as const,
+    confidence_score: body.ocr?.confidence ?? null,
     created_at: now,
     updated_at: now,
   };
