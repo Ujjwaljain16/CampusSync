@@ -1,0 +1,195 @@
+<svg width="800" height="600" viewBox="0 0 800 600" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Certificate Background with Gradient Border -->
+  <rect width="800" height="600" fill="#FFFFFF"/>
+  
+  <!-- Decorative Border -->
+  <rect x="20" y="20" width="760" height="560" fill="none" stroke="url(#borderGradient)" stroke-width="3"/>
+  <rect x="30" y="30" width="740" height="540" fill="none" stroke="#E5E7EB" stroke-width="1"/>
+  
+  <!-- Top Decorative Pattern -->
+  <circle cx="400" cy="80" r="50" fill="url(#logoGradient)" opacity="0.1"/>
+  <circle cx="400" cy="80" r="40" fill="url(#logoGradient)" opacity="0.15"/>
+  
+  <!-- University Seal/Logo -->
+  <g transform="translate(360, 50)">
+    <!-- Shield -->
+    <path d="M 20 60 L 20 10 L 40 0 L 60 10 L 60 60 C 60 60 50 70 40 70 C 30 70 20 60 20 60 Z" fill="url(#sealGradient)" stroke="#2563EB" stroke-width="2"/>
+    <!-- Checkmark -->
+    <path d="M 32 38 L 37 44 L 50 28" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Stars decoration -->
+    <circle cx="30" cy="20" r="2" fill="#FFFFFF" opacity="0.8"/>
+    <circle cx="50" cy="20" r="2" fill="#FFFFFF" opacity="0.8"/>
+    <circle cx="40" cy="15" r="2" fill="#FFFFFF" opacity="0.8"/>
+  </g>
+  
+  <!-- University Name -->
+  <text x="400" y="140" font-family="'Georgia', serif" font-size="28" font-weight="700" fill="#1E293B" text-anchor="middle">
+    STANFORD UNIVERSITY
+  </text>
+  
+  <!-- Certificate Title -->
+  <text x="400" y="200" font-family="'Georgia', serif" font-size="48" font-weight="700" fill="url(#titleGradient)" text-anchor="middle">
+    Certificate of Achievement
+  </text>
+  
+  <!-- Decorative Line -->
+  <line x1="200" y1="220" x2="600" y2="220" stroke="url(#borderGradient)" stroke-width="2"/>
+  
+  <!-- Presented to Label -->
+  <text x="400" y="260" font-family="'Georgia', serif" font-size="18" font-style="italic" fill="#64748B" text-anchor="middle">
+    This is to certify that
+  </text>
+  
+  <!-- Student Name -->
+  <text x="400" y="310" font-family="'Brush Script MT', cursive" font-size="42" font-weight="400" fill="#1E293B" text-anchor="middle">
+    Sarah Johnson
+  </text>
+  
+  <!-- Underline for name -->
+  <line x1="250" y1="320" x2="550" y2="320" stroke="#CBD5E1" stroke-width="1"/>
+  
+  <!-- Achievement Description -->
+  <text x="400" y="360" font-family="'Georgia', serif" font-size="16" fill="#475569" text-anchor="middle">
+    has successfully completed the requirements for
+  </text>
+  
+  <!-- Course Name -->
+  <text x="400" y="400" font-family="'Georgia', serif" font-size="24" font-weight="600" fill="#1E293B" text-anchor="middle">
+    Bachelor of Science in Computer Science
+  </text>
+  
+  <!-- Specialization -->
+  <text x="400" y="430" font-family="'Georgia', serif" font-size="16" font-style="italic" fill="#64748B" text-anchor="middle">
+    With Distinction in Artificial Intelligence
+  </text>
+  
+  <!-- Bottom Details Grid -->
+  <g transform="translate(0, 470)">
+    <!-- Left: Date -->
+    <g>
+      <text x="180" y="0" font-family="'Inter', sans-serif" font-size="13" fill="#64748B" text-anchor="middle">
+        Date of Completion
+      </text>
+      <text x="180" y="25" font-family="'Inter', sans-serif" font-size="16" font-weight="600" fill="#1E293B" text-anchor="middle">
+        June 15, 2024
+      </text>
+      <line x1="120" y1="35" x2="240" y2="35" stroke="#CBD5E1" stroke-width="1"/>
+    </g>
+    
+    <!-- Center: Grade/GPA -->
+    <g>
+      <text x="400" y="0" font-family="'Inter', sans-serif" font-size="13" fill="#64748B" text-anchor="middle">
+        Overall Grade
+      </text>
+      <text x="400" y="25" font-family="'Inter', sans-serif" font-size="16" font-weight="600" fill="#10B981" text-anchor="middle">
+        GPA: 3.87 / 4.0
+      </text>
+      <line x1="340" y1="35" x2="460" y2="35" stroke="#CBD5E1" stroke-width="1"/>
+    </g>
+    
+    <!-- Right: Certificate ID -->
+    <g>
+      <text x="620" y="0" font-family="'Inter', sans-serif" font-size="13" fill="#64748B" text-anchor="middle">
+        Certificate ID
+      </text>
+      <text x="620" y="25" font-family="'Courier New', monospace" font-size="14" font-weight="600" fill="#1E293B" text-anchor="middle">
+        CERT-2024-CS-8742
+      </text>
+      <line x1="560" y1="35" x2="680" y2="35" stroke="#CBD5E1" stroke-width="1"/>
+    </g>
+  </g>
+  
+  <!-- Signatures Section -->
+  <g transform="translate(0, 530)">
+    <!-- Left Signature: Dean -->
+    <g>
+      <text x="180" y="-10" font-family="'Brush Script MT', cursive" font-size="28" fill="#1E293B" text-anchor="middle">
+        Dr. Michael Chen
+      </text>
+      <line x1="120" y1="0" x2="240" y2="0" stroke="#1E293B" stroke-width="1.5"/>
+      <text x="180" y="20" font-family="'Inter', sans-serif" font-size="12" fill="#64748B" text-anchor="middle">
+        Dean of Engineering
+      </text>
+    </g>
+    
+    <!-- Right Signature: Registrar -->
+    <g>
+      <text x="620" y="-10" font-family="'Brush Script MT', cursive" font-size="28" fill="#1E293B" text-anchor="middle">
+        Emily Rodriguez
+      </text>
+      <line x1="560" y1="0" x2="680" y2="0" stroke="#1E293B" stroke-width="1.5"/>
+      <text x="620" y="20" font-family="'Inter', sans-serif" font-size="12" fill="#64748B" text-anchor="middle">
+        University Registrar
+      </text>
+    </g>
+  </g>
+  
+  <!-- Verification Badge (Bottom Right) -->
+  <g transform="translate(700, 520)">
+    <circle cx="0" cy="0" r="35" fill="url(#badgeGradient)" opacity="0.9"/>
+    <path d="M -8 -2 L -3 5 L 10 -12" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <text x="0" y="20" font-family="'Inter', sans-serif" font-size="9" font-weight="600" fill="#10B981" text-anchor="middle">
+      VERIFIED
+    </text>
+  </g>
+  
+  <!-- QR Code Placeholder (Bottom Left) -->
+  <g transform="translate(50, 500)">
+    <rect width="60" height="60" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+    <!-- QR-like pattern -->
+    <rect x="5" y="5" width="10" height="10" fill="#1E293B"/>
+    <rect x="20" y="5" width="10" height="10" fill="#1E293B"/>
+    <rect x="35" y="5" width="10" height="10" fill="#1E293B"/>
+    <rect x="5" y="20" width="10" height="10" fill="#1E293B"/>
+    <rect x="35" y="20" width="10" height="10" fill="#1E293B"/>
+    <rect x="5" y="35" width="10" height="10" fill="#1E293B"/>
+    <rect x="20" y="35" width="10" height="10" fill="#1E293B"/>
+    <rect x="35" y="35" width="10" height="10" fill="#1E293B"/>
+    <rect x="45" y="45" width="10" height="10" fill="#1E293B"/>
+    
+    <text x="30" y="75" font-family="'Inter', sans-serif" font-size="8" fill="#64748B" text-anchor="middle">
+      Scan to Verify
+    </text>
+  </g>
+  
+  <!-- Watermark Pattern (Subtle) -->
+  <g opacity="0.03">
+    <circle cx="150" cy="300" r="80" fill="#3B82F6"/>
+    <circle cx="650" cy="300" r="80" fill="#10B981"/>
+  </g>
+  
+  <!-- Bottom Security Text -->
+  <text x="400" y="585" font-family="'Inter', sans-serif" font-size="9" fill="#94A3B8" text-anchor="middle">
+    This certificate is cryptographically signed and verifiable on the blockchain • campussync.io/verify
+  </text>
+  
+  <!-- Gradients -->
+  <defs>
+    <linearGradient id="borderGradient" x1="0" y1="0" x2="800" y2="600">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="50%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    
+    <linearGradient id="titleGradient" x1="200" y1="200" x2="600" y2="200">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="50%" stop-color="#0891B2"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    
+    <radialGradient id="logoGradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </radialGradient>
+    
+    <linearGradient id="sealGradient" x1="20" y1="0" x2="60" y2="70">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    
+    <linearGradient id="badgeGradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+</svg>
