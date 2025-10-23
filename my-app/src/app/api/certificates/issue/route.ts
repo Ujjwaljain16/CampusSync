@@ -4,10 +4,10 @@ import { withAuth, success, apiError } from '@/lib/api';
 import { signCredential } from '../../../../../lib/vc';
 interface CredentialSubject {
 	id: string;
-	certificateId?: string;
-	title?: string;
-	institution?: string;
-	dateIssued?: string;
+	certificateId: string;
+	title: string;
+	institution: string;
+	dateIssued: string;
 	description?: string;
 }
 

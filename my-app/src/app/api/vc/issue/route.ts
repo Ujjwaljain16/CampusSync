@@ -2,6 +2,20 @@ import { NextRequest } from 'next/server';
 import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { ProductionVCIssuer, type IssuanceRequest } from '@/lib/vc/vcIssuer';
+
+import type { CredentialSubject } from '@/types/index';
+
+function isCredentialSubject(obj: any): obj is CredentialSubject {
+  return (
+    obj &&
+    typeof obj === 'object' &&
+    typeof obj.id === 'string' &&
+    typeof obj.certificateId === 'string' &&
+    typeof obj.title === 'string' &&
+    typeof obj.institution === 'string' &&
+    typeof obj.dateIssued === 'string'
+  );
+}
 import { ProductionKeyManager } from '@/lib/vc/productionKeyManager';
 
 interface IssueVCBody {
@@ -37,8 +51,13 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { us
   }
 
   // Create issuance request
+
+  if (!isCredentialSubject(body.credentialSubject)) {
+    return apiError.badRequest('Invalid credentialSubject: missing required fields');
+  }
+
   const issuanceRequest: IssuanceRequest = {
-    credentialSubject: body.credentialSubject as Record<string, unknown>,
+    credentialSubject: body.credentialSubject,
     credentialType: body.credentialType,
     validityPeriod: body.validityPeriod,
     customFields: body.customFields as Record<string, unknown> | undefined,

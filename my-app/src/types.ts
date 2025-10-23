@@ -70,12 +70,4 @@ export interface CertificateMetadata {
   updated_at: string;
 }
 
-export interface VerificationResult {
-  verified: boolean;
-  confidence: number;
-  method: string;
-  details: Record<string, any>;
-  certificate_id?: string;
-  errors?: string[];
-  warnings?: string[];
-}
+

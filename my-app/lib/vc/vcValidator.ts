@@ -1,5 +1,5 @@
 import { jwtVerify, importJWK } from 'jose';
-import type { VerifiableCredential } from '../../src/types';
+import type { VerifiableCredential } from '../../src/types/index';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -82,7 +82,14 @@ export class VCValidator {
         isValid: false,
         errors: [`Validation error: ${error instanceof Error ? error.message : 'Unknown error'}`],
         warnings: [],
-        metadata: {}
+        metadata: {
+          issuer: '',
+          subject: '',
+          issuedAt: new Date(0),
+          expiresAt: undefined,
+          credentialType: [],
+          keyId: ''
+        }
       };
     }
   }
@@ -275,18 +282,20 @@ export class VCValidator {
     errors: string[], 
     metadata: any
   ): Promise<void> {
-    const proof = vc.proof;
 
+    const proof = vc.proof;
+    if (!proof) {
+      errors.push('Proof is missing');
+      return;
+    }
     if (!proof.type) {
       errors.push('Proof missing type');
       return;
     }
-
     if (!proof.verificationMethod) {
       errors.push('Proof missing verificationMethod');
       return;
     }
-
     if (!proof.jws) {
       errors.push('Proof missing jws');
       return;
@@ -347,7 +356,14 @@ export class VCValidator {
       isValid: errors.length === 0,
       errors,
       warnings,
-      metadata: {}
+      metadata: {
+        issuer: '',
+        subject: '',
+        issuedAt: new Date(0),
+        expiresAt: undefined,
+        credentialType: [],
+        keyId: ''
+      }
     };
   }
 }

@@ -113,12 +113,19 @@ export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest)
       };
 
       if (!studentsMap.has(studentId)) {
+        let gradYear = new Date().getFullYear();
+        if (typeof cert.date_issued === 'string') {
+          const parsedDate = new Date(cert.date_issued);
+          if (!isNaN(parsedDate.getTime())) {
+            gradYear = parsedDate.getFullYear();
+          }
+        }
         studentsMap.set(studentId, {
           id: studentId,
           name: profile.full_name || 'Unknown Student',
           email: `${studentId}@example.com`, // Generate email from ID
           university: cert.institution || 'Unknown University', // Use certificate institution
-          graduation_year: new Date(cert.date_issued).getFullYear() || new Date().getFullYear(),
+          graduation_year: gradYear,
           location: 'Unknown', // Not in profiles schema
           gpa: 0, // Not in profiles schema
           major: 'Unknown', // Not in profiles schema
@@ -151,7 +158,7 @@ export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest)
       }
 
       // Update last activity
-      if (new Date(cert.created_at) > new Date(student.last_activity)) {
+      if (typeof cert.created_at === 'string' && new Date(cert.created_at) > new Date(student.last_activity)) {
         student.last_activity = cert.created_at;
       }
     });
@@ -163,13 +170,17 @@ export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest)
   if (skills.length > 0) {
     students = students.filter((student: Record<string, unknown>) =>
       (student.certifications as Record<string, unknown>[]).some((cert: Record<string, unknown>) =>
-          skills.some((skill: string) =>
-            (cert.title || '').toLowerCase().includes(skill.toLowerCase()) ||
-            (cert.issuer || '').toLowerCase().includes(skill.toLowerCase())
-          )
-        )
-      );
-    }
+        skills.some((skill: string) => {
+          const title = typeof cert.title === 'string' ? cert.title : '';
+          const issuer = typeof cert.issuer === 'string' ? cert.issuer : '';
+          return (
+            title.toLowerCase().includes(skill.toLowerCase()) ||
+            issuer.toLowerCase().includes(skill.toLowerCase())
+          );
+        })
+      )
+    );
+  }
 
     // Get total count for pagination
   const { count } = await supabase

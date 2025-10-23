@@ -222,7 +222,7 @@ SMTP_PASS=your_smtp_password`;
   }
 
   // Show database setup if environment is configured but database is not working
-  if (envConfigured && diagnostics && !diagnostics.supabase.database) {
+  if (envConfigured && diagnostics?.supabase && !diagnostics.supabase.database) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-12 px-4">
         <div className="max-w-4xl mx-auto">
@@ -248,12 +248,12 @@ SMTP_PASS=your_smtp_password`;
                 <h3 className="text-lg font-semibold text-white">Environment</h3>
                 <div className="space-y-2">
                   <div className="flex items-center gap-3">
-                    {diagnostics.environment.hasUrl ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
-                    <span className="text-white/80">Supabase URL: {diagnostics.environment.hasUrl ? 'Configured' : 'Missing'}</span>
+                    {diagnostics.environment?.hasUrl ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
+                    <span className="text-white/80">Supabase URL: {diagnostics.environment?.hasUrl ? 'Configured' : 'Missing'}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    {diagnostics.environment.hasKey ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
-                    <span className="text-white/80">API Key: {diagnostics.environment.hasKey ? 'Configured' : 'Missing'}</span>
+                    {diagnostics.environment?.hasKey ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
+                    <span className="text-white/80">API Key: {diagnostics.environment?.hasKey ? 'Configured' : 'Missing'}</span>
                   </div>
                 </div>
               </div>
@@ -262,25 +262,25 @@ SMTP_PASS=your_smtp_password`;
                 <h3 className="text-lg font-semibold text-white">Supabase</h3>
                 <div className="space-y-2">
                   <div className="flex items-center gap-3">
-                    {diagnostics.supabase.connection ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
-                    <span className="text-white/80">Connection: {diagnostics.supabase.connection ? 'Working' : 'Failed'}</span>
+                    {diagnostics.supabase?.connection ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
+                    <span className="text-white/80">Connection: {diagnostics.supabase?.connection ? 'Working' : 'Failed'}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    {diagnostics.supabase.auth ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
-                    <span className="text-white/80">Authentication: {diagnostics.supabase.auth ? 'Working' : 'Failed'}</span>
+                    {diagnostics.supabase?.auth ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
+                    <span className="text-white/80">Authentication: {diagnostics.supabase?.auth ? 'Working' : 'Failed'}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    {diagnostics.supabase.database ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
-                    <span className="text-white/80">Database: {diagnostics.supabase.database ? 'Ready' : 'Needs Setup'}</span>
+                    {diagnostics.supabase?.database ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
+                    <span className="text-white/80">Database: {diagnostics.supabase?.database ? 'Ready' : 'Needs Setup'}</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {diagnostics.supabase.error && (
+            {diagnostics.supabase?.error && (
               <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
                 <p className="text-red-200 text-sm">
-                  <strong>Error:</strong> {diagnostics.supabase.error}
+                  <strong>Error:</strong> {diagnostics.supabase?.error}
                 </p>
               </div>
             )}

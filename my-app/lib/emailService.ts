@@ -51,7 +51,7 @@ class EmailService {
     };
 
     if (config.auth.user && config.auth.pass) {
-      this.transporter = nodemailer.createTransporter(config);
+      this.transporter = nodemailer.createTransport(config);
       this.isConfigured = true;
     } else {
       console.warn('Email service not configured. Set SMTP_USER and SMTP_PASS environment variables.');
@@ -166,7 +166,7 @@ class EmailService {
             <h3>🎉 Role Request Approved!</h3>
             <p>Great news! Your role request has been approved by our admin team.</p>
             <p><strong>Requested Role:</strong> ${data.requestedRole}</p>
-            <p><strong>Institution:</strong> ${data.university}</p>
+            <p><strong>Institution:</strong> ${data.institution}</p>
             <p><strong>Admin Notes:</strong> ${data.adminNotes}</p>
             <p>You can now access your new dashboard and features.</p>
             <a href="${data.dashboardUrl}" class="button">Access Dashboard</a>

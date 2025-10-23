@@ -2,7 +2,7 @@ import { SignJWT, importJWK } from 'jose';
 import { randomUUID } from 'crypto';
 import { ProductionKeyManager, type ProductionJWK } from './productionKeyManager';
 import { VCValidator, type ValidationResult } from './vcValidator';
-import type { VerifiableCredential, CredentialSubject } from '../../src/types';
+import type { VerifiableCredential, CredentialSubject } from '../../src/types/index';
 
 export interface IssuancePolicy {
   allowedTypes: string[];

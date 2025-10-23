@@ -1,5 +1,6 @@
 // Global TypeScript type definitions for CredentiVault
 
+
 export interface User {
   id: string;
   email: string;
@@ -159,7 +160,7 @@ export interface VerificationRule {
   rule_type: 'qr_verification' | 'logo_match' | 'template_match' | 'ai_confidence';
   weight: number;
   threshold: number;
-  config: Record<string, any>;
+  config: Record<string, unknown>;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -170,17 +171,17 @@ export interface CertificateMetadata {
   certificate_id: string;
   qr_code_data?: string;
   qr_verified: boolean;
-  logo_hash?: string;
   logo_match_score?: number;
   template_match_score?: number;
   ai_confidence_score?: number;
   verification_method?: string;
-  verification_details: Record<string, any>;
+  verification_details: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
 
 export interface VerificationResult {
+
   certificate_id: string;
   is_verified: boolean;
   confidence_score: number;

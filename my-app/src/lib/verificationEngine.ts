@@ -6,9 +6,9 @@ import type {
   TrustedIssuer, 
   VerificationRule, 
   CertificateMetadata, 
-  VerificationResult,
   OcrExtractionResult 
-} from '../src/types';
+} from '@/types';
+import type { VerificationResult } from '@/types/index';
 
 export class VerificationEngine {
   private supabase: any;
@@ -144,11 +144,9 @@ export class VerificationEngine {
       const isPDF = fileBuffer.subarray(0, 4).toString() === '%PDF';
       if (isPDF) {
         return {
-          found: false,
           verified: false,
-          payload: null,
-          confidence: 0,
-          error: 'QR code detection not supported for PDF files'
+          data: undefined,
+          issuer: undefined
         };
       }
 
@@ -198,11 +196,9 @@ export class VerificationEngine {
       const isPDF = fileBuffer.subarray(0, 4).toString() === '%PDF';
       if (isPDF) {
         return {
-          found: false,
-          verified: false,
-          confidence: 0,
-          institution: null,
-          error: 'Logo matching not supported for PDF files'
+          matched: false,
+          score: 0,
+          issuer: undefined
         };
       }
 
@@ -255,7 +251,7 @@ export class VerificationEngine {
       let issuerScore = 0;
       let matchedPatterns: string[] = [];
 
-      for (const pattern of issuer.template_patterns) {
+      for (const pattern of issuer.template_patterns ?? []) {
         try {
           const regex = new RegExp(pattern, 'gi');
           if (regex.test(text)) {
@@ -268,8 +264,8 @@ export class VerificationEngine {
       }
 
       // Normalize score by number of patterns
-      const normalizedScore = issuer.template_patterns.length > 0 
-        ? issuerScore / issuer.template_patterns.length 
+      const normalizedScore = (issuer.template_patterns?.length ?? 0) > 0
+        ? issuerScore / (issuer.template_patterns?.length ?? 1)
         : 0;
 
       if (normalizedScore > bestScore) {
@@ -504,14 +500,10 @@ export class VerificationEngine {
       const metadata: Partial<CertificateMetadata> = {
         certificate_id: certificateId,
         qr_code_data: details.qr_verification?.data,
-        qr_verified: details.qr_verification?.verified || false,
-        logo_hash: details.logo_match ? this.calculatePerceptualHash(await Jimp.read(Buffer.alloc(0))) : undefined,
-        logo_match_score: details.logo_match?.score,
-        template_match_score: details.template_match?.score,
-        ai_confidence_score: details.ai_confidence?.score,
-        verification_method: verificationMethod,
         verification_details: {
           ...details,
+          verification_method: verificationMethod,
+          confidence_score: confidenceScore,
           file_hash: undefined,
           ocr_text: undefined
         }

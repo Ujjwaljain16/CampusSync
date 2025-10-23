@@ -1,7 +1,7 @@
-import { jwtVerify, importJWK } from 'jose';
+import { jwtVerify, importJWK, type JWK } from 'jose';
 import { VCValidator, type ValidationResult } from './vcValidator';
 import { VCRevocationManager, type RevocationCheckResult } from './vcRevocationManager';
-import type { VerifiableCredential } from '../../src/types';
+import type { VerifiableCredential } from '../../types/index';
 
 export interface VerificationOptions {
   allowExpired?: boolean;
@@ -9,7 +9,7 @@ export interface VerificationOptions {
   checkRevocation?: boolean;
   requiredTypes?: string[];
   allowedIssuers?: string[];
-  trustedKeys?: Map<string, any>;
+  trustedKeys?: Map<string, JWK>;
 }
 
 export interface VerificationResult {
@@ -43,7 +43,7 @@ export class ProductionVCVerifier {
   private static instance: ProductionVCVerifier;
   private revocationManager: VCRevocationManager;
   private verificationHistory: Map<string, VerificationReport> = new Map();
-  private trustedKeys: Map<string, any> = new Map();
+  private trustedKeys: Map<string, JWK> = new Map();
 
   constructor() {
     this.revocationManager = VCRevocationManager.getInstance();
@@ -67,7 +67,22 @@ export class ProductionVCVerifier {
     const startTime = Date.now();
     const errors: string[] = [];
     const warnings: string[] = [];
-    const metadata: any = {};
+    const metadata: {
+      issuer: string;
+      subject: string;
+      issuedAt: Date;
+      expiresAt?: Date;
+      credentialType: string[];
+      keyId: string;
+      verificationMethod: string;
+    } = {
+      issuer: vc.issuer,
+      subject: vc.credentialSubject.id,
+      issuedAt: new Date(vc.issuanceDate),
+      credentialType: vc.type,
+      keyId: vc.proof?.verificationMethod?.split('#')[1] || '',
+      verificationMethod: vc.proof?.verificationMethod || ''
+    };
 
     try {
       // 1. Basic structure validation
@@ -113,7 +128,7 @@ export class ProductionVCVerifier {
       let revocationStatus: RevocationCheckResult | undefined;
       if (options.checkRevocation !== false) {
         revocationStatus = await this.revocationManager.checkRevocationStatus(
-          vc.id,
+          vc.id ?? '',
           vc.issuer
         );
 
@@ -146,7 +161,7 @@ export class ProductionVCVerifier {
       // 8. Record verification
       const processingTime = Date.now() - startTime;
       const report: VerificationReport = {
-        credentialId: vc.id,
+  credentialId: vc.id ?? '',
         verifiedAt: new Date(),
         verifierId,
         result: {
@@ -162,14 +177,14 @@ export class ProductionVCVerifier {
         processingTime
       };
 
-      this.verificationHistory.set(vc.id, report);
+  this.verificationHistory.set(vc.id ?? '', report);
 
       return report.result;
 
     } catch (error) {
       const processingTime = Date.now() - startTime;
       const report: VerificationReport = {
-        credentialId: vc.id,
+  credentialId: vc.id ?? '',
         verifiedAt: new Date(),
         verifierId,
         result: {
@@ -177,19 +192,19 @@ export class ProductionVCVerifier {
           credential: vc,
           errors: [`Verification error: ${error instanceof Error ? error.message : 'Unknown error'}`],
           warnings: [],
-          metadata: {},
+          metadata,
           validationDetails: {
             isValid: false,
             errors: [`Verification error: ${error instanceof Error ? error.message : 'Unknown error'}`],
             warnings: [],
-            metadata: {}
+            metadata
           }
         },
         verificationMethod: 'JsonWebSignature2020',
         processingTime
       };
 
-      this.verificationHistory.set(vc.id, report);
+  this.verificationHistory.set(vc.id ?? '', report);
 
       return report.result;
     }
@@ -212,7 +227,7 @@ export class ProductionVCVerifier {
       
       if (!signingKey) {
         // Try to fetch key from issuer's key registry
-        signingKey = await this.fetchIssuerKey(vc.issuer, keyId);
+  signingKey = await this.fetchIssuerKey(vc.issuer, keyId) ?? undefined;
       }
 
       if (!signingKey) {
@@ -242,10 +257,10 @@ export class ProductionVCVerifier {
   /**
    * Fetch issuer key from key registry
    */
-  private async fetchIssuerKey(issuer: string, keyId: string): Promise<any> {
+  private async fetchIssuerKey(_issuer: string, _keyId: string): Promise<JWK | undefined> {
     // In a production system, this would fetch from the issuer's key registry
-    // For now, we'll return null and rely on trusted keys being provided
-    return null;
+    // For now, we'll return undefined and rely on trusted keys being provided
+    return undefined;
   }
 
   /**
@@ -369,7 +384,7 @@ export class ProductionVCVerifier {
   /**
    * Add trusted key
    */
-  addTrustedKey(keyId: string, key: any): void {
+  addTrustedKey(keyId: string, key: JWK): void {
     this.trustedKeys.set(keyId, key);
   }
 
@@ -383,7 +398,7 @@ export class ProductionVCVerifier {
   /**
    * Get all trusted keys
    */
-  getTrustedKeys(): Map<string, any> {
+  getTrustedKeys(): Map<string, JWK> {
     return new Map(this.trustedKeys);
   }
 

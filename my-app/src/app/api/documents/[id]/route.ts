@@ -3,23 +3,25 @@ import { success, apiError } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 // GET /api/documents/[id]
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from('documents')
     .select('*')
-    .eq('id', params.id)
+    .eq('id', id)
     .single();
-  
   if (error) throw apiError.notFound('Document not found');
   return success(data);
 }
 
 // PATCH /api/documents/[id]
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const supabase = await createSupabaseServerClient();
   const body = await req.json();
-  
   const { data, error } = await supabase
     .from('documents')
     .update({
@@ -29,10 +31,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       verification_status: body.verification_status,
       metadata: body.metadata
     })
-    .eq('id', params.id)
+    .eq('id', id)
     .select()
     .single();
-  
   if (error) throw apiError.internal(error.message);
   return success(data);
 }

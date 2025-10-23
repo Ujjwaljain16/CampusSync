@@ -6,12 +6,12 @@ import type {
   TrustedIssuer, 
   VerificationRule, 
   CertificateMetadata, 
-  VerificationResult,
   OcrExtractionResult 
-} from '../src/types';
+} from '@/types';
+import type { VerificationResult } from '@/types/index';
 
 export class VerificationEngine {
-  private supabase: any;
+  private supabase: Awaited<ReturnType<typeof createSupabaseServerClient>> | null;
   private qrReader: QRCodeReader;
   private trustedIssuers: TrustedIssuer[] = [];
   private verificationRules: VerificationRule[] = [];
@@ -103,14 +103,17 @@ export class VerificationEngine {
       }
 
       // Store verification metadata
-      await this.storeVerificationMetadata(certificateId, verificationDetails, confidenceScore, verificationMethod);
+  await this.storeVerificationMetadata(certificateId, verificationDetails);
 
       const result: VerificationResult = {
         certificate_id: certificateId,
-        verified: autoApproved,
-        confidence: confidenceScore,
-        method: verificationMethod,
-        details: verificationDetails
+        is_verified: autoApproved,
+        confidence_score: confidenceScore,
+        verification_method: verificationMethod,
+        details: verificationDetails,
+        auto_approved: autoApproved,
+        requires_manual_review: !autoApproved,
+        created_at: startTime
       };
 
       return result;
@@ -121,11 +124,13 @@ export class VerificationEngine {
       // Return a failed verification result
       return {
         certificate_id: certificateId,
-        verified: false,
-        confidence: 0,
-        method: 'error',
+        is_verified: false,
+        confidence_score: 0,
+        verification_method: 'error',
         details: verificationDetails,
-        errors: [error instanceof Error ? error.message : 'Unknown error']
+        auto_approved: false,
+        requires_manual_review: true,
+        created_at: startTime
       };
     }
   }
@@ -156,15 +161,15 @@ export class VerificationEngine {
       const bitmap = new BinaryBitmap(new HybridBinarizer(source));
       
       let result;
+
       try {
         result = this.qrReader.decode(bitmap);
-      } catch (error) {
+  } catch {
         // No QR code found - this is normal, not an error
         return {
-          found: false,
-          data: null,
-          issuer: null,
-          confidence: 0
+          verified: false,
+          data: undefined,
+          issuer: undefined
         };
       }
 
@@ -232,11 +237,10 @@ export class VerificationEngine {
     const text = ocrResult.raw_text || '';
     const patternsMatched: string[] = [];
     let bestScore = 0;
-    let bestIssuer: TrustedIssuer | null = null;
 
     for (const issuer of this.trustedIssuers) {
       let issuerScore = 0;
-      let matchedPatterns: string[] = [];
+  const matchedPatterns: string[] = [];
 
       for (const pattern of issuer.template_patterns || []) {
         try {
@@ -245,8 +249,8 @@ export class VerificationEngine {
             issuerScore += 1;
             matchedPatterns.push(pattern);
           }
-        } catch (error) {
-          console.log('Invalid regex pattern:', pattern);
+        } catch {
+          // ignore invalid regex
         }
       }
 
@@ -257,7 +261,7 @@ export class VerificationEngine {
 
       if (normalizedScore > bestScore) {
         bestScore = normalizedScore;
-        bestIssuer = issuer;
+  // bestIssuer = issuer; // not used
         patternsMatched.push(...matchedPatterns);
       }
     }
@@ -292,6 +296,7 @@ export class VerificationEngine {
     try {
       const fileHash = createHash('sha256').update(fileBuffer).digest('hex');
 
+      if (!this.supabase) throw new Error('Supabase client not initialized');
       // Lookup any certificate_metadata with same file hash (if stored)
       const { data: existing, error } = await this.supabase
         .from('certificate_metadata')
@@ -420,7 +425,7 @@ export class VerificationEngine {
   /**
    * Calculate perceptual hash for image
    */
-  private calculatePerceptualHash(image: any): string {
+  private calculatePerceptualHash(image: { bitmap: { data: Buffer; width: number; height: number } }): string {
     try {
       const hash = createHash('md5');
       
@@ -492,18 +497,13 @@ export class VerificationEngine {
   private async storeVerificationMetadata(
     certificateId: string,
     details: VerificationResult['details'],
-    confidenceScore: number,
-    verificationMethod: string
+  // confidenceScore: number,
+  // verificationMethod: string
   ): Promise<void> {
     try {
       const metadata: Partial<CertificateMetadata> = {
         certificate_id: certificateId,
         qr_code_data: details.qr_verification?.data,
-        // logo_hash: details.logo_match ? this.calculatePerceptualHash(await Jimp.read(Buffer.alloc(0))) : undefined,
-        // logo_match_score: details.logo_match?.score,
-        // template_match_score: details.template_match?.score,
-        // ai_confidence_score: details.ai_confidence?.score,
-        // verification_method: verificationMethod,
         verification_details: {
           ...details,
           file_hash: undefined,
@@ -511,6 +511,7 @@ export class VerificationEngine {
         }
       };
 
+      if (!this.supabase) throw new Error('Supabase client not initialized');
       await this.supabase.from('certificate_metadata').upsert(metadata);
     } catch (error) {
       console.error('Failed to store verification metadata:', error);
@@ -522,20 +523,15 @@ export class VerificationEngine {
    */
   private async loadTrustedIssuers(): Promise<void> {
     try {
+      if (!this.supabase) throw new Error('Supabase client not initialized');
       const { data, error } = await this.supabase
         .from('trusted_issuers')
         .select('*')
         .eq('is_active', true);
 
       if (error) throw error;
-      
       // Parse template_patterns from JSONB to string array
-      this.trustedIssuers = (data || []).map((issuer: any) => ({
-        ...issuer,
-        template_patterns: Array.isArray(issuer.template_patterns) 
-          ? issuer.template_patterns 
-          : JSON.parse(issuer.template_patterns || '[]')
-      }));
+      this.trustedIssuers = (data || []) as TrustedIssuer[];
     } catch (error) {
       console.error('Failed to load trusted issuers:', error);
       this.trustedIssuers = [];
@@ -547,6 +543,7 @@ export class VerificationEngine {
    */
   private async loadVerificationRules(): Promise<void> {
     try {
+      if (!this.supabase) throw new Error('Supabase client not initialized');
       const { data, error } = await this.supabase
         .from('verification_rules')
         .select('*')

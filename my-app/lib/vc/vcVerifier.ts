@@ -1,24 +1,7 @@
 import { jwtVerify, importJWK } from 'jose';
 import { VCValidator, type ValidationResult } from './vcValidator';
 import { VCRevocationManager, type RevocationCheckResult } from './vcRevocationManager';
-// Define VerifiableCredential interface locally
-interface VerifiableCredential {
-  id: string;
-  type: string[];
-  issuer: string;
-  issuanceDate: string;
-  expirationDate?: string;
-  credentialSubject: {
-    id: string;
-    [key: string]: any;
-  };
-  proof: {
-    type: string;
-    verificationMethod: string;
-    jws: string;
-    created: string;
-  };
-}
+import type { VerifiableCredential } from '../../src/types/index';
 
 export interface VerificationOptions {
   allowExpired?: boolean;
@@ -129,13 +112,16 @@ export class ProductionVCVerifier {
       // 4. Check revocation status
       let revocationStatus: RevocationCheckResult | undefined;
       if (options.checkRevocation !== false) {
-        revocationStatus = await this.revocationManager.checkRevocationStatus(
-          vc.id,
-          vc.issuer
-        );
-
-        if (revocationStatus.isRevoked) {
-          errors.push(`Credential has been revoked: ${revocationStatus.revocationRecord?.reason.description}`);
+        if (!vc.id) {
+          errors.push('Credential is missing an id');
+        } else {
+          revocationStatus = await this.revocationManager.checkRevocationStatus(
+            vc.id,
+            vc.issuer
+          );
+          if (revocationStatus.isRevoked) {
+            errors.push(`Credential has been revoked: ${revocationStatus.revocationRecord?.reason.description}`);
+          }
         }
       }
 
@@ -163,7 +149,7 @@ export class ProductionVCVerifier {
       // 8. Record verification
       const processingTime = Date.now() - startTime;
       const report: VerificationReport = {
-        credentialId: vc.id,
+        credentialId: vc.id || '',
         verifiedAt: new Date(),
         verifierId,
         result: {
@@ -179,14 +165,16 @@ export class ProductionVCVerifier {
         processingTime
       };
 
-      this.verificationHistory.set(vc.id, report);
+      if (vc.id) {
+        this.verificationHistory.set(vc.id, report);
+      }
 
       return report.result;
 
     } catch (error) {
       const processingTime = Date.now() - startTime;
       const report: VerificationReport = {
-        credentialId: vc.id,
+        credentialId: vc.id || '',
         verifiedAt: new Date(),
         verifierId,
         result: {
@@ -219,7 +207,9 @@ export class ProductionVCVerifier {
         processingTime
       };
 
-      this.verificationHistory.set(vc.id, report);
+      if (vc.id) {
+        this.verificationHistory.set(vc.id, report);
+      }
 
       return report.result;
     }
