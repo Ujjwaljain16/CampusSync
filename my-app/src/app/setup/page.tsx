@@ -1,15 +1,29 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, Users, Mail, Lock, ArrowRight, CheckCircle, AlertCircle, ExternalLink, Copy, Check } from 'lucide-react';
+import Link from 'next/link';
+import Image from 'next/image';
+import { Shield, Users, Mail, Lock, ArrowRight, CheckCircle, AlertCircle, ExternalLink, Copy, Check, ArrowLeft, Settings } from 'lucide-react';
 
 export default function SetupPage() {
   const router = useRouter();
   const [envConfigured, setEnvConfigured] = useState(false);
   const [copied, setCopied] = useState('');
-  const [diagnostics, setDiagnostics] = useState<any>(null);
+  const [diagnostics, setDiagnostics] = useState<{
+    environment?: { hasUrl: boolean; hasKey: boolean };
+    supabase?: { connection: boolean; auth: boolean; database: boolean; error?: string };
+  } | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Deterministic particles
+  const particles = useMemo(() => [
+    { top: '10%', left: '10%', delay: '0s', duration: '4s' },
+    { top: '20%', left: '80%', delay: '0.5s', duration: '3.5s' },
+    { top: '60%', left: '15%', delay: '1s', duration: '4.5s' },
+    { top: '75%', left: '75%', delay: '1.5s', duration: '3s' },
+    { top: '40%', left: '50%', delay: '2s', duration: '5s' },
+  ], []);
 
   useEffect(() => {
     // Check system diagnostics
@@ -23,8 +37,8 @@ export default function SetupPage() {
         const envData = await envResponse.json();
         const diagData = await diagResponse.json();
         
-        setEnvConfigured(envData.configured);
-        setDiagnostics(diagData);
+        setEnvConfigured(envData.data.configured);
+        setDiagnostics(diagData.data);
       } catch (error) {
         console.error('Error checking diagnostics:', error);
         setEnvConfigured(false);
@@ -72,13 +86,41 @@ SMTP_PASS=your_smtp_password`;
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-12 px-4">
-        <div className="max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl mb-6">
-            <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden">
+        {/* Animated Background */}
+        {particles.map((particle, i) => (
+          <div
+            key={i}
+            className="absolute w-2 h-2 bg-white/20 rounded-full"
+            style={{
+              top: particle.top,
+              left: particle.left,
+              animation: `float ${particle.duration} ease-in-out infinite`,
+              animationDelay: particle.delay
+            }}
+          />
+        ))}
+        
+        {/* Gradient Orbs */}
+        <div className="absolute top-20 left-10 w-96 h-96 bg-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '8s' }} />
+        <div className="absolute bottom-20 right-10 w-96 h-96 bg-emerald-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '10s' }} />
+        
+        {/* Grid Overlay */}
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_85%)] opacity-10" />
+
+        <div className="relative z-10 flex items-center justify-center min-h-screen px-4">
+          <div className="text-center">
+            <div className="relative inline-block mb-6">
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-3xl blur-2xl opacity-40" />
+              <div className="relative p-8 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl rounded-3xl border border-white/10">
+                <Settings className="w-16 h-16 text-white animate-spin" style={{ animationDuration: '3s' }} />
+              </div>
+            </div>
+            <h1 className="text-4xl font-extrabold mb-4 bg-gradient-to-r from-blue-300 via-emerald-300 to-cyan-300 bg-clip-text text-transparent animate-gradient">
+              Checking System Status...
+            </h1>
+            <p className="text-white/70 text-lg font-medium">Please wait while we diagnose your setup</p>
           </div>
-          <h1 className="text-4xl font-bold text-white mb-4">Checking System Status...</h1>
-          <p className="text-white/80">Please wait while we diagnose your setup</p>
         </div>
       </div>
     );
@@ -336,164 +378,235 @@ SMTP_PASS=your_smtp_password`;
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-12 px-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl mb-6">
-            <Shield className="w-10 h-10 text-white" />
-          </div>
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            CampusSync Setup
-          </h1>
-          <p className="text-white/80 text-lg md:text-xl max-w-2xl mx-auto">
-            Get started with CampusSync. Choose your role to begin the setup process.
-          </p>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden">
+      {/* Animated Background */}
+      {particles.map((particle, i) => (
+        <div
+          key={i}
+          className="absolute w-2 h-2 bg-white/20 rounded-full"
+          style={{
+            top: particle.top,
+            left: particle.left,
+            animation: `float ${particle.duration} ease-in-out infinite`,
+            animationDelay: particle.delay
+          }}
+        />
+      ))}
+      
+      {/* Gradient Orbs */}
+      <div className="absolute top-20 left-10 w-96 h-96 bg-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '8s' }} />
+      <div className="absolute bottom-20 right-10 w-96 h-96 bg-emerald-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '10s' }} />
+      
+      {/* Grid Overlay */}
+      <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_85%)] opacity-10" />
 
-        {/* Setup Options */}
-        <div className="grid md:grid-cols-2 gap-8 mb-12">
-          {/* Admin Setup */}
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8 hover:bg-white/10 transition-all duration-300 group">
-            <div className="flex items-center mb-6">
-              <div className="w-12 h-12 bg-gradient-to-r from-red-500 to-orange-600 rounded-xl flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <Shield className="w-6 h-6 text-white" />
+      {/* Navigation Header */}
+      <nav className="relative z-10 border-b border-white/10 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl">
+        <div className="max-w-7xl mx-auto px-6 md:px-8 py-5 md:py-6">
+          <div className="flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-xl blur-lg opacity-40" />
+                <Image 
+                  src="/logo.svg" 
+                  alt="CampusSync Logo" 
+                  width={40} 
+                  height={40}
+                  className="relative"
+                />
               </div>
-              <div>
-                <h2 className="text-2xl font-bold text-white">Admin Setup</h2>
-                <p className="text-white/70">Create the first admin account</p>
-              </div>
-            </div>
-
-            <div className="space-y-4 mb-6">
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-white/80">Create first admin user</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-white/80">Manage user roles</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-white/80">Configure system settings</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-white/80">Add educational domains</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleAdminSetup}
-              className="w-full bg-gradient-to-r from-red-500 to-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-red-600 hover:to-orange-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-red-500/25 transform hover:-translate-y-1 hover:scale-105 flex items-center justify-center gap-2"
+              <span className="text-2xl font-extrabold bg-gradient-to-r from-blue-300 via-emerald-300 to-cyan-300 bg-clip-text text-transparent">
+                CampusSync
+              </span>
+            </Link>
+            
+            <Link
+              href="/"
+              className="group flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-xl font-semibold transition-all shadow-lg hover:scale-105"
             >
-              <Shield className="w-5 h-5" />
-              Setup Admin Account
-              <ArrowRight className="w-4 h-4" />
-            </button>
-
-            <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-              <p className="text-blue-200 text-sm">
-                <strong>Note:</strong> Admin key is optional for the first admin. You can create additional admins later.
-              </p>
-            </div>
-          </div>
-
-          {/* Student Signup */}
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8 hover:bg-white/10 transition-all duration-300 group">
-            <div className="flex items-center mb-6">
-              <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <Users className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h2 className="text-2xl font-bold text-white">Student Signup</h2>
-                <p className="text-white/70">Create your student account</p>
-              </div>
-            </div>
-
-            <div className="space-y-4 mb-6">
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-white/80">Use educational email</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-white/80">Upload certificates</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-white/80">Build your portfolio</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-white/80">Share achievements</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleStudentSignup}
-              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-purple-500/25 transform hover:-translate-y-1 hover:scale-105 flex items-center justify-center gap-2"
-            >
-              <Users className="w-5 h-5" />
-              Create Student Account
-              <ArrowRight className="w-4 h-4" />
-            </button>
-
-            <div className="mt-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-              <p className="text-green-200 text-sm">
-                <strong>Note:</strong> You need an educational email address (e.g., student@university.edu)
-              </p>
-            </div>
+              <ArrowRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" />
+              <span>Back to Home</span>
+            </Link>
           </div>
         </div>
+      </nav>
 
-        {/* Quick Start Guide */}
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8">
-          <h3 className="text-2xl font-bold text-white mb-6 text-center">Quick Start Guide</h3>
-          
-          <div className="grid md:grid-cols-3 gap-6">
-            <div className="text-center">
-              <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-                <span className="text-white font-bold text-xl">1</span>
+      <div className="relative z-10 py-12 px-4">
+        <div className="max-w-4xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-12">
+            <div className="relative inline-block mb-6">
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-3xl blur-2xl opacity-40" />
+              <div className="relative p-6 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl rounded-3xl border border-white/10">
+                <Settings className="w-16 h-16 text-white drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
               </div>
-              <h4 className="text-lg font-semibold text-white mb-2">Admin Setup</h4>
-              <p className="text-white/70 text-sm">
-                Create the first admin account to manage the system
-              </p>
+            </div>
+            <h1 className="text-4xl md:text-5xl font-extrabold mb-4 bg-gradient-to-r from-blue-300 via-emerald-300 to-cyan-300 bg-clip-text text-transparent animate-gradient">
+              CampusSync Setup
+            </h1>
+            <p className="text-white/70 text-lg md:text-xl max-w-2xl mx-auto font-medium">
+              Get started with CampusSync. Choose your role to begin the setup process.
+            </p>
+          </div>
+
+          {/* Setup Options */}
+          <div className="grid md:grid-cols-2 gap-8 mb-12">
+            {/* Admin Setup */}
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-3xl blur-xl opacity-0 group-hover:opacity-30 transition-opacity" />
+              <div className="relative bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 hover:scale-105 transition-all duration-300">
+                <div className="flex items-center mb-6">
+                  <div className="relative mr-4">
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-2xl blur-lg opacity-40" />
+                    <div className="relative w-14 h-14 bg-gradient-to-r from-blue-600 to-emerald-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Shield className="w-7 h-7 text-white" />
+                    </div>
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Admin Setup</h2>
+                    <p className="text-white/60 font-medium">Create the first admin account</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 mb-6">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-white/80 font-medium">Create first admin user</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-white/80 font-medium">Manage user roles</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-white/80 font-medium">Configure system settings</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-white/80 font-medium">Add educational domains</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleAdminSetup}
+                  className="group/btn relative overflow-hidden w-full bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white px-6 py-3.5 rounded-xl font-bold transition-all shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 hover:scale-105 flex items-center justify-center gap-2"
+                >
+                  <Shield className="w-5 h-5 relative z-10" />
+                  <span className="relative z-10">Setup Admin Account</span>
+                  <ArrowRight className="w-4 h-4 relative z-10" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
+                </button>
+
+                <div className="mt-4 p-3.5 bg-blue-500/10 border border-blue-400/30 rounded-xl backdrop-blur-xl">
+                  <p className="text-blue-300 text-sm font-medium leading-relaxed">
+                    <strong className="font-bold">Note:</strong> Admin key is optional for the first admin. You can create additional admins later.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="text-center">
-              <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-                <span className="text-white font-bold text-xl">2</span>
-              </div>
-              <h4 className="text-lg font-semibold text-white mb-2">Configure Domains</h4>
-              <p className="text-white/70 text-sm">
-                Add educational domains for your institution
-              </p>
-            </div>
+            {/* Student Signup */}
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-3xl blur-xl opacity-0 group-hover:opacity-30 transition-opacity" />
+              <div className="relative bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 hover:scale-105 transition-all duration-300">
+                <div className="flex items-center mb-6">
+                  <div className="relative mr-4">
+                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-2xl blur-lg opacity-40" />
+                    <div className="relative w-14 h-14 bg-gradient-to-r from-emerald-600 to-cyan-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Users className="w-7 h-7 text-white" />
+                    </div>
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Student Signup</h2>
+                    <p className="text-white/60 font-medium">Create your student account</p>
+                  </div>
+                </div>
 
-            <div className="text-center">
-              <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-                <span className="text-white font-bold text-xl">3</span>
+                <div className="space-y-3 mb-6">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-white/80 font-medium">Use educational email</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-white/80 font-medium">Upload certificates</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-white/80 font-medium">Build your portfolio</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-white/80 font-medium">Share achievements</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleStudentSignup}
+                  className="group/btn relative overflow-hidden w-full bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 text-white px-6 py-3.5 rounded-xl font-bold transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-105 flex items-center justify-center gap-2"
+                >
+                  <Users className="w-5 h-5 relative z-10" />
+                  <span className="relative z-10">Create Student Account</span>
+                  <ArrowRight className="w-4 h-4 relative z-10" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
+                </button>
+
+                <div className="mt-4 p-3.5 bg-emerald-500/10 border border-emerald-400/30 rounded-xl backdrop-blur-xl">
+                  <p className="text-emerald-300 text-sm font-medium leading-relaxed">
+                    <strong className="font-bold">Note:</strong> You need an educational email address (e.g., student@university.edu)
+                  </p>
+                </div>
               </div>
-              <h4 className="text-lg font-semibold text-white mb-2">Student Access</h4>
-              <p className="text-white/70 text-sm">
-                Students can now sign up and start using CampusSync
-              </p>
             </div>
           </div>
-        </div>
 
-        {/* Back to Home */}
-        <div className="text-center mt-8">
-          <button
-            onClick={() => router.push('/')}
-            className="inline-flex items-center gap-2 text-white/80 hover:text-white transition-colors group"
-          >
-            <ArrowRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" />
-            <span>Back to Home</span>
-          </button>
+          {/* Quick Start Guide */}
+          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8">
+            <h3 className="text-2xl font-bold mb-8 text-center bg-gradient-to-r from-blue-300 to-emerald-300 bg-clip-text text-transparent">
+              Quick Start Guide
+            </h3>
+            
+            <div className="grid md:grid-cols-3 gap-6">
+              <div className="text-center">
+                <div className="relative inline-block mb-4">
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-2xl blur-lg opacity-40" />
+                  <div className="relative w-14 h-14 bg-gradient-to-r from-blue-600 to-emerald-600 rounded-2xl flex items-center justify-center mx-auto">
+                    <span className="text-white font-extrabold text-xl">1</span>
+                  </div>
+                </div>
+                <h4 className="text-lg font-bold text-white mb-2">Admin Setup</h4>
+                <p className="text-white/60 text-sm font-medium leading-relaxed">
+                  Create the first admin account to manage the system
+                </p>
+              </div>
+
+              <div className="text-center">
+                <div className="relative inline-block mb-4">
+                  <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-2xl blur-lg opacity-40" />
+                  <div className="relative w-14 h-14 bg-gradient-to-r from-emerald-600 to-cyan-600 rounded-2xl flex items-center justify-center mx-auto">
+                    <span className="text-white font-extrabold text-xl">2</span>
+                  </div>
+                </div>
+                <h4 className="text-lg font-bold text-white mb-2">Configure Domains</h4>
+                <p className="text-white/60 text-sm font-medium leading-relaxed">
+                  Add educational domains for your institution
+                </p>
+              </div>
+
+              <div className="text-center">
+                <div className="relative inline-block mb-4">
+                  <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-2xl blur-lg opacity-40" />
+                  <div className="relative w-14 h-14 bg-gradient-to-r from-cyan-600 to-blue-600 rounded-2xl flex items-center justify-center mx-auto">
+                    <span className="text-white font-extrabold text-xl">3</span>
+                  </div>
+                </div>
+                <h4 className="text-lg font-bold text-white mb-2">Student Access</h4>
+                <p className="text-white/60 text-sm font-medium leading-relaxed">
+                  Students can now sign up and start using CampusSync
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
