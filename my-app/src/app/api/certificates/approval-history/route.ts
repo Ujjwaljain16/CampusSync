@@ -58,6 +58,16 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
   // Create a map for quick certificate lookup
   const certMap = new Map(certificates.map(cert => [cert.id, cert]));
 
+  // Get revert actions for the certificates to check if any approvals were reverted
+  const { data: reverts } = await supabase
+    .from('audit_logs')
+    .select('target_id, created_at')
+    .eq('action', 'revert_approval')
+    .in('target_id', certificateIds);
+
+  // Create a map of certificate IDs to their latest revert timestamp
+  const revertMap = new Map(reverts?.map(r => [r.target_id, r.created_at]) || []);
+
   // Get total count for pagination
   const { count, error: countError } = await supabase
     .from('audit_logs')
@@ -78,23 +88,30 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
   const userMap = new Map(users?.map(u => [u.user_id, u.role]) || []);
 
   // Format the response
-  const formattedApprovals = approvals?.map(approval => ({
-    id: approval.id,
-    action: approval.action,
-    certificateId: approval.target_id,
-    certificate: certMap.get(approval.target_id) || {
-      id: approval.target_id,
-      title: 'Certificate not found',
-      institution: 'Unknown',
-      student_id: 'unknown',
-      verification_status: 'unknown',
-      created_at: approval.created_at
-    },
-    approverRole: userMap.get(approval.actor_id) || 'unknown',
-    details: approval.details,
-    createdAt: approval.created_at,
-    canRevert: approval.action === 'manual_approve' || approval.action === 'batch_approve'
-  })) || [];
+  const formattedApprovals = approvals?.map(approval => {
+    const revertTimestamp = revertMap.get(approval.target_id);
+    const wasReverted = revertTimestamp && new Date(revertTimestamp) > new Date(approval.created_at);
+    const isApproval = approval.action === 'manual_approve' || approval.action === 'batch_approve';
+    
+    return {
+      id: approval.id,
+      action: approval.action,
+      certificateId: approval.target_id,
+      certificate: certMap.get(approval.target_id) || {
+        id: approval.target_id,
+        title: 'Certificate not found',
+        institution: 'Unknown',
+        student_id: 'unknown',
+        verification_status: 'unknown',
+        created_at: approval.created_at
+      },
+      approverRole: userMap.get(approval.actor_id) || 'unknown',
+      details: approval.details,
+      createdAt: approval.created_at,
+      reverted: wasReverted,
+      canRevert: isApproval && !wasReverted
+    };
+  }) || [];
 
   return success({
     approvals: formattedApprovals,

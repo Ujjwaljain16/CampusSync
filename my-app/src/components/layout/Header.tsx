@@ -38,7 +38,7 @@ export function Header({ user, onLogout }: HeaderProps) {
     : [
         { name: 'Features', href: '#features' },
         { name: 'How It Works', href: '#how-it-works' },
-        { name: 'Pricing', href: '#pricing' },
+        { name: 'Setup', href: '/setup' },
       ];
 
   const handleNavClick = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {

@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
 	}
 
 	// Prepare response for cookie writes during session exchange
-	const response = new NextResponse(null, { headers: new Headers() });
+	const response = NextResponse.next();
 	const supabase = createServerClient(
 		process.env.NEXT_PUBLIC_SUPABASE_URL!,
 		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -23,8 +23,8 @@ export async function GET(request: NextRequest) {
 				getAll() {
 					return request.cookies.getAll();
 				},
-				setAll(cookies) {
-					cookies.forEach(({ name, value, options }) => {
+				setAll(cookiesToSet) {
+					cookiesToSet.forEach(({ name, value, options }) => {
 						response.cookies.set(name, value, options);
 					});
 				},
@@ -37,8 +37,7 @@ export async function GET(request: NextRequest) {
 	const base = `${url.protocol}//${url.host}`;
 	if (error) {
 		const errorUrl = `${base}/login?error=${encodeURIComponent(error.message)}`;
-		response.headers.set('Location', errorUrl);
-		return new NextResponse(null, { status: 302, headers: response.headers });
+		return NextResponse.redirect(errorUrl);
 	}
 
 	// Handle role assignment for invited users
@@ -167,6 +166,5 @@ export async function GET(request: NextRequest) {
 	}
 
 	const dest = redirectTo.startsWith('http') ? redirectTo : `${base}${redirectTo}`;
-	response.headers.set('Location', dest);
-	return new NextResponse(null, { status: 302, headers: response.headers });
+	return NextResponse.redirect(dest);
 }

@@ -6,11 +6,24 @@ export const GET = withRole(['recruiter', 'admin'], async (_req, { user }) => {
   const adminSupabase = createSupabaseAdminClient();
   const supabase = await createSupabaseServerClient();
 
-    // Get total students count (use admin client)
-    const { count: totalStudents } = await adminSupabase
-      .from('user_roles')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'student');
+  // Get all user_ids from user_roles (as in search-students logic)
+  const { data: userRoles, error: userRolesError } = await adminSupabase
+    .from('user_roles')
+    .select('user_id')
+    .eq('role', 'student');
+
+  const userIds = (userRoles || []).map(r => r.user_id);
+
+  // Get unique student_ids who have at least one verified certificate
+  const { data: verifiedCerts, error: verifiedCertsError } = await adminSupabase
+    .from('certificates')
+    .select('student_id')
+    .eq('verification_status', 'verified');
+
+  const verifiedStudentIds = new Set((verifiedCerts || []).map(c => c.student_id));
+
+  // Only count students who are in both lists (user_id in user_roles, student_id in certificates)
+  const totalStudents = userIds.filter(id => verifiedStudentIds.has(id)).length;
 
     // Get certification counts by status (use admin client)
     const { data: statusCounts } = await adminSupabase

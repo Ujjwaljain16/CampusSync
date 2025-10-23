@@ -37,10 +37,29 @@ export function withAuth(
         return apiError.unauthorized('Authentication required')
       }
       
-      return await handler(request, { user })
+      const result = await handler(request, { user })
+      
+      // If handler returns a Response, return it
+      if (result instanceof Response) {
+        return result
+      }
+      
+      // Otherwise, something went wrong
+      console.error('[withAuth] Handler did not return a Response:', result)
+      return apiError.internal('Invalid response from handler')
     } catch (err) {
       console.error('[withAuth] Error:', err)
-      return apiError.internal('Authentication error')
+      
+      // If the error is already a Response (from apiError), return it
+      if (err instanceof Response) {
+        return err
+      }
+      
+      // Log the actual error message
+      const errorMessage = err instanceof Error ? err.message : String(err)
+      console.error('[withAuth] Error message:', errorMessage)
+      
+      return apiError.internal('Authentication error: ' + errorMessage)
     }
   }
 }

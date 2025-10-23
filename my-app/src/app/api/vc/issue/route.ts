@@ -67,7 +67,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { us
     .from('verifiable_credentials')
     .insert({
       id: issuanceResult.credential!.id,
-      user_id: subjectId,
+      student_id: subjectId,
       issuer: issuanceResult.credential!.issuer,
       issuance_date: issuanceResult.credential!.issuanceDate,
       credential: issuanceResult.credential!,

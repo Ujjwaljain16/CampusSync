@@ -304,7 +304,7 @@ export default function StudentDetailPage() {
             <div className="bg-white shadow rounded-lg p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Skills</h3>
               <div className="flex flex-wrap gap-2">
-                {student.skills.map((skill, index) => (
+                {(student.skills ?? []).map((skill, index) => (
                   <span
                     key={index}
                     className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
@@ -331,7 +331,7 @@ export default function StudentDetailPage() {
               </div>
 
               <div className="divide-y divide-gray-200">
-                {student.certifications.map((cert) => (
+                {(student.certifications ?? []).map((cert) => (
                   <div key={cert.id} className="p-6">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">

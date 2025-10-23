@@ -115,10 +115,18 @@ export default function AdminSetupPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <Loader className="w-8 h-8 animate-spin text-white mx-auto mb-4" />
-          <p className="text-white/80">Checking setup status...</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden flex items-center justify-center">
+        <div className="absolute top-20 left-10 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '8s' }} />
+        <div className="absolute bottom-20 right-10 w-80 h-80 bg-emerald-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '10s' }} />
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_85%)] opacity-10" />
+        <div className="relative z-10 text-center">
+          <div className="inline-block mb-6">
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-3xl blur-2xl opacity-40" />
+            <div className="relative p-6 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl rounded-3xl border border-white/10">
+              <Loader className="w-12 h-12 animate-spin text-blue-300 mx-auto" />
+            </div>
+          </div>
+          <h1 className="text-3xl font-extrabold mb-4 bg-gradient-to-r from-blue-300 via-emerald-300 to-cyan-300 bg-clip-text text-transparent animate-gradient">Checking setup status...</h1>
         </div>
       </div>
     );
@@ -126,12 +134,15 @@ export default function AdminSetupPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <CheckCircle className="w-16 h-16 text-green-400 mx-auto mb-6" />
-          <h1 className="text-3xl font-bold text-white mb-4">Admin Setup Complete!</h1>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden flex items-center justify-center">
+        <div className="absolute top-20 left-10 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '8s' }} />
+        <div className="absolute bottom-20 right-10 w-80 h-80 bg-emerald-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '10s' }} />
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_85%)] opacity-10" />
+        <div className="relative z-10 text-center">
+          <CheckCircle className="w-16 h-16 text-emerald-400 mx-auto mb-6 drop-shadow-[0_0_15px_rgba(16,185,129,0.3)]" />
+          <h1 className="text-3xl font-extrabold mb-4 bg-gradient-to-r from-blue-300 via-emerald-300 to-cyan-300 bg-clip-text text-transparent animate-gradient">Admin Setup Complete!</h1>
           <p className="text-white/80 mb-6">Redirecting to admin dashboard...</p>
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-400 mx-auto"></div>
         </div>
       </div>
     );
@@ -139,35 +150,44 @@ export default function AdminSetupPage() {
 
   if (!needsSetup) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <Shield className="w-16 h-16 text-blue-400 mx-auto mb-6" />
-          <h1 className="text-3xl font-bold text-white mb-4">Admin Already Exists</h1>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden flex items-center justify-center">
+        <div className="absolute top-20 left-10 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '8s' }} />
+        <div className="absolute bottom-20 right-10 w-80 h-80 bg-emerald-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '10s' }} />
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_85%)] opacity-10" />
+        <div className="relative z-10 text-center">
+          <Shield className="w-16 h-16 text-blue-400 mx-auto mb-6 drop-shadow-[0_0_15px_rgba(59,130,246,0.3)]" />
+          <h1 className="text-3xl font-extrabold mb-4 bg-gradient-to-r from-blue-300 via-emerald-300 to-cyan-300 bg-clip-text text-transparent animate-gradient">Admin Already Exists</h1>
           <p className="text-white/80 mb-6">Redirecting to admin dashboard...</p>
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400 mx-auto"></div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-12 px-4">
-      <div className="max-w-2xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden py-12 px-4">
+      <div className="absolute top-20 left-10 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '8s' }} />
+      <div className="absolute bottom-20 right-10 w-80 h-80 bg-emerald-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '10s' }} />
+      <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_85%)] opacity-10" />
+      <div className="relative z-10 max-w-2xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl mb-6">
-            <Shield className="w-8 h-8 text-white" />
+          <div className="relative inline-block mb-6">
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-3xl blur-2xl opacity-40" />
+            <div className="relative p-6 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl rounded-3xl border border-white/10">
+              <Shield className="w-10 h-10 text-white drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
+            </div>
           </div>
-          <h1 className="text-4xl font-bold text-white mb-4">Admin Setup</h1>
-          <p className="text-white/80 text-lg">
+          <h1 className="text-4xl font-extrabold mb-4 bg-gradient-to-r from-blue-300 via-emerald-300 to-cyan-300 bg-clip-text text-transparent animate-gradient">Admin Setup</h1>
+          <p className="text-white/70 text-lg font-medium">
             Create the first admin user for CampusSync
           </p>
         </div>
 
         {/* Setup Form */}
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8">
+        <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8">
           {error && (
-            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 text-red-300 rounded-xl flex items-center gap-3">
+            <div className="mb-6 p-4 bg-red-500/10 border border-red-400/30 text-red-300 rounded-xl flex items-center gap-3">
               <AlertCircle className="w-5 h-5 flex-shrink-0" />
               <span className="text-sm font-medium">{error}</span>
             </div>
@@ -204,12 +224,13 @@ export default function AdminSetupPage() {
                 />
               </div>
               {showAdminKey && needsSetup && (
-                <div className="mt-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                <div className="mt-2 p-3 bg-blue-500/10 border border-blue-400/30 rounded-lg">
                   <p className="text-blue-200 text-sm">
                     <strong>For first admin:</strong> Admin key is optional. You can leave this blank to create the first admin user.
                   </p>
                   <p className="text-blue-200 text-sm mt-1">
                     <strong>For additional admins:</strong> You'll need the admin setup key from your system administrator.
+                      <strong>For additional admins:</strong> You&apos;ll need the admin setup key from your system administrator.
                   </p>
                 </div>
               )}
@@ -306,7 +327,7 @@ export default function AdminSetupPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-4 rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-purple-500/25 transform hover:-translate-y-1 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+              className="group/btn relative overflow-hidden w-full bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white px-6 py-4 rounded-xl font-bold transition-all shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 hover:scale-105 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {submitting ? (
                 <>
@@ -319,17 +340,19 @@ export default function AdminSetupPage() {
                   <span>Create Admin User</span>
                 </>
               )}
+              <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
             </button>
           </form>
 
           {/* Instructions */}
-          <div className="mt-8 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+          <div className="mt-8 p-4 bg-blue-500/10 border border-blue-400/30 rounded-xl backdrop-blur-xl">
             <h3 className="text-blue-300 font-semibold mb-2">Setup Instructions:</h3>
             <ul className="text-blue-200 text-sm space-y-1">
               <li>• Use a strong password (at least 8 characters)</li>
               <li>• Use an educational email address if possible</li>
               <li>• The admin setup key is required for security</li>
-              <li>• You'll be redirected to the admin dashboard after setup</li>
+              <li>• You&apos;ll be redirected to the admin dashboard after setup</li>
+                <li>• You&apos;ll be redirected to the admin dashboard after setup</li>
             </ul>
           </div>
         </div>
