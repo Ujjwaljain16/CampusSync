@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import LogoutButton from '@/components/LogoutButton';
+import React, { useCallback, useEffect, useState } from 'react';
 import { 
   Search, Filter, Users, CheckCircle, Clock, XCircle, 
-  Eye, Mail, Star,
-  TrendingUp, RefreshCw, Grid, List
+  Eye, Mail, Star, TrendingUp, RefreshCw, Grid, List,
+  MapPin, Award, Download, AlertCircle, 
+  FileCheck, UserCheck, MessageSquare, Briefcase,
+  Target, ChevronRight, UserCircle2
 } from 'lucide-react';
 
 interface StudentRow {
@@ -65,13 +66,6 @@ interface Analytics {
 
 type PipelineStage = 'none' | 'shortlisted' | 'contacted' | 'interviewed' | 'offered' | 'rejected';
 
-interface StudentPipelineData {
-  studentId: string;
-  stage: PipelineStage;
-  isFavorite: boolean;
-  contactedAt?: string;
-}
-
 export default function RecruiterDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [students, setStudents] = useState<StudentRow[]>([]);
@@ -83,13 +77,11 @@ export default function RecruiterDashboard() {
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
-  // Recruiter-specific states (now persisted in database)
   const [pipelineStages, setPipelineStages] = useState<Record<string, PipelineStage>>({});
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [contactedStudents, setContactedStudents] = useState<Set<string>>(new Set());
   const [loadingPersistence, setLoadingPersistence] = useState(true);
   
-  // Contact tracking modal
   const [showContactHistory, setShowContactHistory] = useState(false);
   const [selectedStudentForHistory, setSelectedStudentForHistory] = useState<StudentRow | null>(null);
   const [contactHistory, setContactHistory] = useState<ContactLog[]>([]);
@@ -99,21 +91,18 @@ export default function RecruiterDashboard() {
     try {
       setLoadingPersistence(true);
       
-      // Load favorites
       const favRes = await fetch('/api/recruiter/favorites');
       if (favRes.ok) {
         const favData = await favRes.json();
         setFavorites(new Set(favData.favorites || []));
       }
       
-      // Load pipeline stages
       const pipeRes = await fetch('/api/recruiter/pipeline');
       if (pipeRes.ok) {
         const pipeData = await pipeRes.json();
         setPipelineStages(pipeData.pipeline || {});
       }
       
-      // Load contact history
       const contactRes = await fetch('/api/recruiter/contacts');
       if (contactRes.ok) {
         const contactData = await contactRes.json();
@@ -133,7 +122,7 @@ export default function RecruiterDashboard() {
       const response = await fetch('/api/recruiter/analytics');
       const data = await response.json();
       if (response.ok) {
-        setAnalytics(data);
+        setAnalytics(data.data);
       }
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
@@ -164,7 +153,6 @@ export default function RecruiterDashboard() {
       const studentData = json.data?.students || [];
       console.log('[DASHBOARD] Extracted studentData:', studentData.length, 'students');
       
-      // Set the real student data - removed dummy data fallback
       setStudents(studentData);
       setPagination(json.data?.pagination || null);
       
@@ -183,10 +171,8 @@ export default function RecruiterDashboard() {
     const body = encodeURIComponent(`Hi ${student.name},\n\nI came across your profile and verified certifications on CampusSync. I'd like to discuss potential opportunities.\n\nBest regards`);
     window.open(`mailto:${student.email}?subject=${subject}&body=${body}`);
     
-    // Optimistically update UI
     setContactedStudents(prev => new Set(prev).add(student.id));
     
-    // Persist to database and log contact
     try {
       const response = await fetch('/api/recruiter/contacts', {
         method: 'POST',
@@ -202,7 +188,6 @@ export default function RecruiterDashboard() {
         console.log('✅ Contact logged successfully');
       }
       
-      // Refresh analytics to show updated contacted count
       fetchAnalytics();
     } catch (err) {
       console.error('Failed to log contact:', err);
@@ -234,12 +219,10 @@ export default function RecruiterDashboard() {
         body: JSON.stringify({ contactId, responseReceived })
       });
       
-      // Refresh history
       if (selectedStudentForHistory) {
         viewContactHistory(selectedStudentForHistory);
       }
       
-      // Refresh analytics
       fetchAnalytics();
     } catch (err) {
       console.error('Failed to update contact response:', err);
@@ -250,7 +233,6 @@ export default function RecruiterDashboard() {
   const toggleFavorite = useCallback(async (studentId: string) => {
     const isFavorite = favorites.has(studentId);
     
-    // Optimistically update UI
     setFavorites(prev => {
       const newFavorites = new Set(prev);
       if (isFavorite) {
@@ -261,15 +243,12 @@ export default function RecruiterDashboard() {
       return newFavorites;
     });
     
-    // Persist to database
     try {
       if (isFavorite) {
-        // Remove from favorites
         await fetch(`/api/recruiter/favorites?studentId=${studentId}`, {
           method: 'DELETE'
         });
       } else {
-        // Add to favorites
         await fetch('/api/recruiter/favorites', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -278,7 +257,6 @@ export default function RecruiterDashboard() {
       }
     } catch (err) {
       console.error('Failed to update favorite:', err);
-      // Revert on error
       setFavorites(prev => {
         const newFavorites = new Set(prev);
         if (isFavorite) {
@@ -293,13 +271,10 @@ export default function RecruiterDashboard() {
 
   // Update pipeline stage
   const updatePipelineStage = useCallback(async (studentId: string, stage: PipelineStage) => {
-    // Skip 'none' stage
     if (stage === 'none') return;
     
-    // Optimistically update UI
     setPipelineStages(prev => ({ ...prev, [studentId]: stage }));
     
-    // Persist to database
     try {
       await fetch('/api/recruiter/pipeline', {
         method: 'POST',
@@ -307,7 +282,6 @@ export default function RecruiterDashboard() {
         body: JSON.stringify({ studentId, stage })
       });
       
-      // Refresh analytics
       fetchAnalytics();
     } catch (err) {
       console.error('Failed to update pipeline:', err);
@@ -316,7 +290,7 @@ export default function RecruiterDashboard() {
 
   // Load data on mount
   useEffect(() => {
-    loadPersistedData(); // Load favorites, pipeline, contacts
+    loadPersistedData();
     fetchAnalytics();
     searchStudents();
   }, [loadPersistedData, fetchAnalytics, searchStudents]);
@@ -333,24 +307,20 @@ export default function RecruiterDashboard() {
   // Handle bulk actions
   const handleBulkAction = (action: 'export' | 'contact' | 'favorite') => {
     if (action === 'export') {
-      // Export selected students as PDF
       exportStudentsPDF(selectedStudents);
     } else if (action === 'contact') {
-      // Open email client for multiple students
       const selectedEmails = students
         .filter(s => selectedStudents.includes(s.id))
         .map(s => s.email)
         .join(',');
       window.open(`mailto:${selectedEmails}`);
       
-      // Mark all as contacted
       setContactedStudents(prev => {
         const newSet = new Set(prev);
         selectedStudents.forEach(id => newSet.add(id));
         return newSet;
       });
     } else if (action === 'favorite') {
-      // Add all to favorites
       setFavorites(prev => {
         const newSet = new Set(prev);
         selectedStudents.forEach(id => newSet.add(id));
@@ -362,7 +332,6 @@ export default function RecruiterDashboard() {
   // Export students to PDF
   const exportStudentsPDF = async (studentIds: string[]) => {
     try {
-      // Dynamically import jsPDF
       const jsPDF = (await import('jspdf')).default;
       const autoTable = (await import('jspdf-autotable')).default;
       
@@ -375,18 +344,15 @@ export default function RecruiterDashboard() {
 
       const doc = new jsPDF();
       
-      // Title
       doc.setFontSize(18);
-      doc.setTextColor(79, 70, 229); // Indigo
+      doc.setTextColor(79, 70, 229);
       doc.text('Student Talent Report', 14, 20);
       
-      // Metadata
       doc.setFontSize(10);
       doc.setTextColor(100);
       doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 28);
       doc.text(`Total Students: ${selectedStudentsList.length}`, 14, 33);
       
-      // Table data
       const tableData = selectedStudentsList.map(student => {
         const stage = pipelineStages[student.id] || 'none';
         const isFav = favorites.has(student.id);
@@ -402,13 +368,12 @@ export default function RecruiterDashboard() {
         ];
       });
       
-      // Add table
       autoTable(doc, {
         startY: 40,
         head: [['Name', 'University', 'Major', 'Grad Year', 'Verified Certs', 'Stage', 'Favorite']],
         body: tableData,
         theme: 'striped',
-        headStyles: { fillColor: [79, 70, 229] }, // Indigo
+        headStyles: { fillColor: [79, 70, 229] },
         styles: { fontSize: 9, cellPadding: 3 },
         columnStyles: {
           0: { cellWidth: 35 },
@@ -421,7 +386,6 @@ export default function RecruiterDashboard() {
         }
       });
       
-      // Save PDF
       const filename = `talent_report_${new Date().toISOString().split('T')[0]}.pdf`;
       doc.save(filename);
       
@@ -433,94 +397,150 @@ export default function RecruiterDashboard() {
     }
   };
 
-  // Get verification status icon
   const getVerificationStatusIcon = (status: string) => {
     switch (status) {
       case 'verified':
-        return <CheckCircle className="w-4 h-4 text-green-500" />;
+        return <CheckCircle className="w-4 h-4 text-emerald-400" />;
       case 'pending':
-        return <Clock className="w-4 h-4 text-yellow-500" />;
+        return <Clock className="w-4 h-4 text-yellow-400" />;
       case 'rejected':
-        return <XCircle className="w-4 h-4 text-red-500" />;
+        return <XCircle className="w-4 h-4 text-red-400" />;
       default:
         return <Clock className="w-4 h-4 text-gray-400" />;
     }
   };
 
-  // Get confidence color
-  const getConfidenceColor = (score: number) => {
-    if (score >= 0.9) return 'text-green-600 bg-green-100';
-    if (score >= 0.7) return 'text-yellow-600 bg-yellow-100';
-    return 'text-red-600 bg-red-100';
+  const getConfidenceBar = (score: number) => {
+    const percentage = Math.round(score * 100);
+    const color = score >= 0.9 ? 'bg-emerald-500' : score >= 0.7 ? 'bg-yellow-500' : 'bg-red-500';
+    return (
+      <div className="w-full bg-gray-700 rounded-full h-2">
+        <div 
+          className={`h-2 rounded-full ${color} transition-all duration-300`}
+          style={{ width: `${percentage}%` }}
+        />
+      </div>
+    );
+  };
+
+  const getPipelineIcon = (stage: PipelineStage) => {
+    switch (stage) {
+      case 'shortlisted':
+        return <FileCheck className="w-3 h-3" />;
+      case 'contacted':
+        return <Mail className="w-3 h-3" />;
+      case 'interviewed':
+        return <MessageSquare className="w-3 h-3" />;
+      case 'offered':
+        return <Target className="w-3 h-3" />;
+      case 'rejected':
+        return <XCircle className="w-3 h-3" />;
+      default:
+        return null;
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Recruiter Dashboard</h1>
-              <p className="mt-2 text-gray-600">Find and manage talented students</p>
+    <div className="min-h-screen relative overflow-hidden bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900">
+      {/* Animated background effects */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-20 left-[10%] w-2 h-2 bg-blue-400/40 rounded-full animate-float" style={{ animationDelay: '0s', animationDuration: '3s' }} />
+        <div className="absolute top-40 right-[15%] w-1.5 h-1.5 bg-emerald-400/40 rounded-full animate-float" style={{ animationDelay: '0.5s', animationDuration: '4s' }} />
+        <div className="absolute bottom-32 left-[20%] w-2.5 h-2.5 bg-purple-400/30 rounded-full animate-float" style={{ animationDelay: '1s', animationDuration: '5s' }} />
+        <div className="absolute top-[60%] right-[25%] w-1 h-1 bg-blue-300/50 rounded-full animate-float" style={{ animationDelay: '1.5s', animationDuration: '3.5s' }} />
+        <div className="absolute bottom-[20%] right-[10%] w-2 h-2 bg-emerald-300/40 rounded-full animate-float" style={{ animationDelay: '2s', animationDuration: '4.5s' }} />
+        
+        <div className="absolute top-1/4 -left-48 w-96 h-96 bg-gradient-to-br from-blue-500/30 to-purple-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '4s' }} />
+        <div className="absolute bottom-1/4 -right-48 w-96 h-96 bg-gradient-to-br from-emerald-500/30 to-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '5s', animationDelay: '1s' }} />
+        
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(59,130,246,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(59,130,246,0.05)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_80%)]" />
+      </div>
+
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
+        {/* Header */}
+        <div className="mb-8 md:mb-10">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-6">
+            <div className="flex items-start gap-4">
+              <div className="relative group flex-shrink-0">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-2xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity duration-500" />
+                <div className="relative p-3 md:p-4 bg-gradient-to-br from-blue-500/20 to-emerald-500/20 backdrop-blur-sm rounded-2xl border border-white/10 group-hover:scale-110 transition-transform duration-300">
+                  <Briefcase className="w-7 h-7 md:w-9 md:h-9 text-blue-300 drop-shadow-lg" />
+                </div>
+              </div>
+              <div className="min-w-0 flex-1 pt-1">
+                <h1 className="text-3xl md:text-5xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient mb-2 leading-[1.1]">
+                  Recruiter Dashboard
+                </h1>
+                <p className="text-white/80 text-sm md:text-lg font-medium">Find and manage talented students</p>
+              </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <LogoutButton variant="danger" />
+            
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={() => exportStudentsPDF(selectedStudents.length > 0 ? selectedStudents : students.map(s => s.id))}
+                className="relative overflow-hidden bg-gradient-to-r from-blue-400 via-cyan-500 to-emerald-400 hover:from-blue-500 hover:via-cyan-600 hover:to-emerald-500 text-white px-5 md:px-7 py-3 md:py-3.5 rounded-xl font-bold transition-all duration-300 flex items-center gap-2 text-sm md:text-base shadow-xl hover:shadow-2xl hover:shadow-cyan-500/50 transform hover:-translate-y-1 hover:scale-105 group"
+              >
+                <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/30 to-white/0 transform -skew-x-12 translate-x-[-100%] group-hover:translate-x-[200%] transition-transform duration-1000"></span>
+                <Download className="w-4 h-4 md:w-5 md:h-5 relative z-10" />
+                <span className="hidden sm:inline relative z-10">Export Report</span>
+              </button>
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Analytics Cards - Recruiter Metrics */}
+        {/* Analytics Cards */}
         {analytics && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-indigo-100 rounded-lg">
-                  <Users className="w-6 h-6 text-indigo-600" />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5 mb-8">
+            <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-blue-400/30 transition-all duration-300 group cursor-pointer">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
+                  <Users className="w-5 h-5 md:w-6 md:h-6 text-blue-300" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Talent Pool</p>
-                  <p className="text-2xl font-bold text-gray-900">{analytics.total_students || 0}</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-purple-100 rounded-lg">
-                  <Mail className="w-6 h-6 text-purple-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Contacted</p>
-                  <p className="text-2xl font-bold text-gray-900">{analytics.contacted_students || 0}</p>
+                <div className="min-w-0">
+                  <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Talent Pool</p>
+                  <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
+                    {analytics.total_students || 0}
+                  </p>
                 </div>
               </div>
             </div>
             
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <TrendingUp className="w-6 h-6 text-blue-600" />
+            <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-emerald-400/30 transition-all duration-300 group cursor-pointer">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
+                  <Mail className="w-5 h-5 md:w-6 md:h-6 text-emerald-300" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Engagement Rate</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                <div className="min-w-0">
+                  <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Contacted</p>
+                  <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-emerald-400 to-emerald-300 bg-clip-text text-transparent">
+                    {analytics.contacted_students || 0}
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-yellow-400/30 transition-all duration-300 group cursor-pointer">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-yellow-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
+                  <TrendingUp className="w-5 h-5 md:w-6 md:h-6 text-yellow-300" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Engagement</p>
+                  <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-yellow-400 to-yellow-300 bg-clip-text text-transparent">
                     {analytics.engagement_rate || 0}%
                   </p>
                 </div>
               </div>
             </div>
             
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <CheckCircle className="w-6 h-6 text-green-600" />
+            <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-purple-400/30 transition-all duration-300 group cursor-pointer">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-purple-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
+                  <CheckCircle className="w-5 h-5 md:w-6 md:h-6 text-purple-300" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Response Rate</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                <div className="min-w-0">
+                  <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Response Rate</p>
+                  <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
                     {analytics.response_rate || 0}%
                   </p>
                 </div>
@@ -529,105 +549,102 @@ export default function RecruiterDashboard() {
           </div>
         )}
 
-        {/* Search and Filters */}
-        <div className="bg-white rounded-lg shadow mb-6">
-          <div className="p-6">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+        {/* Search Bar */}
+        <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-6 mb-6 shadow-2xl">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white/50 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="Search students by name, skills, or university..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-12 pr-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-transparent transition-all"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className="flex items-center px-5 py-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-white transition-all hover:scale-105"
+              >
+                <Filter className="w-4 h-4 mr-2" />
+                Filters
+              </button>
+              <button
+                onClick={searchStudents}
+                disabled={loading}
+                className="flex items-center px-5 py-3 bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 text-white rounded-xl font-medium transition-all disabled:opacity-50 hover:scale-105 shadow-lg"
+              >
+                {loading ? (
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Search className="w-4 h-4 mr-2" />
+                )}
+                Search
+              </button>
+            </div>
+          </div>
+
+          {showFilters && (
+            <div className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-white/70 text-sm font-medium mb-2">University</label>
+                  <select className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-400/50">
+                    <option>All Universities</option>
+                    <option>Stanford University</option>
+                    <option>MIT</option>
+                    <option>Harvard University</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-white/70 text-sm font-medium mb-2">Graduation Year</label>
+                  <select className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-400/50">
+                    <option>All Years</option>
+                    <option>2024</option>
+                    <option>2025</option>
+                    <option>2026</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-white/70 text-sm font-medium mb-2">Skills</label>
                   <input
                     type="text"
-                    placeholder="Search students by name, skills, or university..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="e.g., Python, React"
+                    className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400/50"
                   />
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowFilters(!showFilters)}
-                  className="flex items-center px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                >
-                  <Filter className="w-4 h-4 mr-2" />
-                  Filters
-                </button>
-                <button
-                  onClick={searchStudents}
-                  disabled={loading}
-                  className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {loading ? (
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
-                    <Search className="w-4 h-4 mr-2" />
-                  )}
-                  Search
-                </button>
-              </div>
             </div>
-
-            {/* Advanced Filters */}
-            {showFilters && (
-              <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">University</label>
-                    <select className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                      <option>All Universities</option>
-                      <option>Stanford University</option>
-                      <option>MIT</option>
-                      <option>Harvard University</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Graduation Year</label>
-                    <select className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                      <option>All Years</option>
-                      <option>2024</option>
-                      <option>2025</option>
-                      <option>2026</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Skills</label>
-                    <input
-                      type="text"
-                      placeholder="e.g., Python, React"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
-        {/* Bulk Actions - Recruiter Specific */}
+        {/* Bulk Actions */}
         {selectedStudents.length > 0 && (
-          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
+          <div className="bg-gradient-to-r from-purple-500/20 to-blue-500/20 backdrop-blur-xl border border-purple-400/30 rounded-2xl p-4 mb-6">
             <div className="flex items-center justify-between">
-              <span className="text-indigo-800 font-medium">
+              <span className="text-white font-medium">
                 {selectedStudents.length} student{selectedStudents.length !== 1 ? 's' : ''} selected
               </span>
               <div className="flex gap-2">
-                <button
+                <button 
                   onClick={() => handleBulkAction('contact')}
-                  className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 flex items-center"
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm transition-colors flex items-center"
                 >
                   <Mail className="w-4 h-4 mr-1" />
                   Contact All
                 </button>
-                <button
+                <button 
                   onClick={() => handleBulkAction('favorite')}
-                  className="px-3 py-1 bg-yellow-600 text-white rounded text-sm hover:bg-yellow-700"
+                  className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm transition-colors"
                 >
                   Add to Favorites
                 </button>
-                <button
+                <button 
                   onClick={() => handleBulkAction('export')}
-                  className="px-3 py-1 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm transition-colors"
                 >
                   Export PDF
                 </button>
@@ -639,43 +656,44 @@ export default function RecruiterDashboard() {
         {/* View Controls */}
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center space-x-4">
-            <div className="flex bg-gray-100 rounded-lg p-1">
+            <div className="flex bg-white/10 backdrop-blur-xl rounded-xl p-1 border border-white/20">
               <button
                 onClick={() => setViewMode('grid')}
-                className={`p-2 rounded ${viewMode === 'grid' ? 'bg-white shadow' : ''}`}
+                className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white/20 shadow-lg' : 'hover:bg-white/10'}`}
               >
-                <Grid className="w-4 h-4" />
+                <Grid className="w-4 h-4 text-white" />
               </button>
               <button
                 onClick={() => setViewMode('list')}
-                className={`p-2 rounded ${viewMode === 'list' ? 'bg-white shadow' : ''}`}
+                className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white/20 shadow-lg' : 'hover:bg-white/10'}`}
               >
-                <List className="w-4 h-4" />
+                <List className="w-4 h-4 text-white" />
               </button>
             </div>
-            <span className="text-sm text-gray-600">
+            <span className="text-sm text-white/70 font-medium">
               {students.length} student{students.length !== 1 ? 's' : ''} found
             </span>
           </div>
         </div>
 
-        {/* Students Grid/List */}
+        {/* Students Grid */}
         {loading ? (
           <div className="flex justify-center py-12">
             <div className="text-center">
-              <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
-              <p className="text-gray-600">Loading students...</p>
+              <RefreshCw className="w-8 h-8 animate-spin text-blue-400 mx-auto mb-4" />
+              <p className="text-white/70">Loading students...</p>
             </div>
           </div>
         ) : error ? (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-            <p className="text-red-800">{error}</p>
+          <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-center">
+            <AlertCircle className="w-8 h-8 text-red-300 mx-auto mb-3" />
+            <p className="text-red-300 font-medium">{error}</p>
           </div>
         ) : students.length === 0 ? (
-          <div className="bg-gray-50 rounded-lg p-12 text-center">
-            <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No students found</h3>
-            <p className="text-gray-600">Try adjusting your search criteria or filters.</p>
+          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-12 text-center">
+            <Users className="w-16 h-16 text-white/30 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-white mb-2">No students found</h3>
+            <p className="text-white/60">Try adjusting your search criteria or filters.</p>
           </div>
         ) : (
           <div className={viewMode === 'grid' 
@@ -685,47 +703,45 @@ export default function RecruiterDashboard() {
             {students.map((student) => (
               <div
                 key={student.id}
-                className={`bg-white rounded-lg shadow hover:shadow-lg transition-shadow ${
-                  viewMode === 'list' ? 'p-6' : 'p-6'
-                }`}
+                className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-6 hover:bg-white/15 hover:border-blue-400/30 transition-all duration-300 hover:shadow-2xl hover:shadow-blue-500/20 group"
               >
                 <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
                     <input
                       type="checkbox"
                       checked={selectedStudents.includes(student.id)}
                       onChange={() => handleStudentSelect(student.id)}
-                      className="mr-3 h-4 w-4 text-blue-600 rounded"
+                      className="mr-3 h-4 w-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-400/50"
                     />
-                    <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
-                      <span className="text-lg font-medium text-blue-600">
+                    <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500/30 to-emerald-500/30 backdrop-blur-sm border border-white/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                      <span className="text-lg font-bold text-white">
                         {student.name ? student.name.split(' ').map(n => n[0]).join('') : 'U'}
                       </span>
                     </div>
-                    <div className="ml-4">
-                      <h3 className="text-lg font-semibold text-gray-900">{student.name || 'Unknown Student'}</h3>
-                      <p className="text-sm text-gray-600">{student.university || 'Unknown University'}</p>
-                      <p className="text-xs text-gray-500">{student.major || 'Unknown'} • Class of {student.graduation_year || 'Unknown'}</p>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-lg font-semibold text-white truncate">{student.name || 'Unknown Student'}</h3>
+                      <p className="text-sm text-white/70 truncate">{student.university || 'Unknown University'}</p>
+                      <p className="text-xs text-white/50">{student.major || 'Unknown'} • Class of {student.graduation_year || 'Unknown'}</p>
                     </div>
                   </div>
-                  <div className="flex space-x-2">
+                  <div className="flex items-center gap-2">
                     <button
                       onClick={() => toggleFavorite(student.id)}
-                      className={`p-2 ${favorites.has(student.id) ? 'text-yellow-500' : 'text-gray-400'} hover:text-yellow-500`}
+                      className={`p-2 rounded-lg transition-all ${favorites.has(student.id) ? 'text-yellow-400 bg-yellow-500/20' : 'text-white/50 hover:text-yellow-400 hover:bg-yellow-500/10'}`}
                       title={favorites.has(student.id) ? 'Remove from favorites' : 'Add to favorites'}
                     >
                       <Star className={`w-4 h-4 ${favorites.has(student.id) ? 'fill-current' : ''}`} />
                     </button>
                     <button
                       onClick={() => contactStudent(student)}
-                      className="p-2 text-gray-400 hover:text-purple-600"
+                      className="p-2 text-white/50 hover:text-purple-400 hover:bg-purple-500/20 rounded-lg transition-all"
                       title="Contact Student"
                     >
                       <Mail className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => window.open(`/recruiter/student/${student.id}`, '_blank')}
-                      className="p-2 text-gray-400 hover:text-indigo-600"
+                      className="p-2 text-white/50 hover:text-blue-400 hover:bg-blue-500/20 rounded-lg transition-all"
                       title="View Details"
                     >
                       <Eye className="w-4 h-4" />
@@ -733,16 +749,17 @@ export default function RecruiterDashboard() {
                   </div>
                 </div>
 
-                {/* Pipeline Stage Indicator */}
+                {/* Pipeline Stage Badge */}
                 {pipelineStages[student.id] && (
                   <div className="mb-3">
-                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                      pipelineStages[student.id] === 'shortlisted' ? 'bg-blue-100 text-blue-800' :
-                      pipelineStages[student.id] === 'contacted' ? 'bg-purple-100 text-purple-800' :
-                      pipelineStages[student.id] === 'interviewed' ? 'bg-yellow-100 text-yellow-800' :
-                      pipelineStages[student.id] === 'offered' ? 'bg-green-100 text-green-800' :
-                      'bg-red-100 text-red-800'
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${
+                      pipelineStages[student.id] === 'shortlisted' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
+                      pipelineStages[student.id] === 'contacted' ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' :
+                      pipelineStages[student.id] === 'interviewed' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' :
+                      pipelineStages[student.id] === 'offered' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                      'bg-red-500/20 text-red-300 border-red-500/30'
                     }`}>
+                      {getPipelineIcon(pipelineStages[student.id])}
                       {pipelineStages[student.id].charAt(0).toUpperCase() + pipelineStages[student.id].slice(1)}
                     </span>
                   </div>
@@ -750,18 +767,18 @@ export default function RecruiterDashboard() {
 
                 {/* Skills */}
                 <div className="mb-4">
-                  <p className="text-xs font-medium text-gray-500 mb-2">SKILLS</p>
-                  <div className="flex flex-wrap gap-1">
+                  <p className="text-xs font-semibold text-white/70 mb-2 uppercase tracking-wider">Skills</p>
+                  <div className="flex flex-wrap gap-2">
                     {student.skills.slice(0, 5).map((skill, index) => (
                       <span
                         key={index}
-                        className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
+                        className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-500/20 text-blue-300 border border-blue-400/30 hover:bg-blue-500/30 transition-colors"
                       >
                         {skill}
                       </span>
                     ))}
                     {student.skills.length > 5 && (
-                      <span className="text-xs text-gray-500">
+                      <span className="text-xs text-white/50 px-2 py-1">
                         +{student.skills.length - 5} more
                       </span>
                     )}
@@ -770,82 +787,91 @@ export default function RecruiterDashboard() {
 
                 {/* Student Info */}
                 <div className="mb-4 space-y-2">
-                  <div className="flex items-center text-sm text-gray-600">
-                    <span className="font-medium mr-2">GPA:</span>
-                    <span>{student.gpa || 'N/A'}</span>
+                  <div className="flex items-center gap-2 text-sm text-white/70">
+                    <Award className="w-4 h-4 text-emerald-400" />
+                    <span className="font-medium">GPA:</span>
+                    <span className="text-white">{student.gpa || 'N/A'}</span>
                   </div>
-                  <div className="flex items-center text-sm text-gray-600">
-                    <span className="font-medium mr-2">Location:</span>
-                    <span>{student.location || 'N/A'}</span>
+                  <div className="flex items-center gap-2 text-sm text-white/70">
+                    <MapPin className="w-4 h-4 text-red-400" />
+                    <span className="font-medium">Location:</span>
+                    <span className="text-white">{student.location || 'N/A'}</span>
                   </div>
                 </div>
 
                 {/* Certifications Summary */}
-                <div className="space-y-2">
+                <div className="space-y-2 mb-4">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600 font-medium">Verified Certifications</span>
-                    <span className="font-bold text-green-600">
+                    <span className="text-white/70 font-medium">Verified Certifications</span>
+                    <span className="font-bold text-emerald-400">
                       {student.verified_count}/{student.total_certifications}
                     </span>
                   </div>
                   {student.certifications.slice(0, 2).map((cert) => (
-                    <div key={cert.id} className="p-2 bg-gray-50 rounded border border-gray-200">
-                      <div className="flex items-start space-x-2">
+                    <div key={cert.id} className="p-3 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 transition-all">
+                      <div className="flex items-start gap-2">
                         {getVerificationStatusIcon(cert.verification_status)}
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">{cert.title}</p>
-                          <p className="text-xs text-gray-500">{cert.issuer}</p>
+                          <p className="text-sm font-medium text-white truncate">{cert.title}</p>
+                          <p className="text-xs text-white/60">{cert.issuer}</p>
                         </div>
-                        <span className={`text-xs px-2 py-1 rounded font-medium ${getConfidenceColor(cert.confidence_score)}`}>
+                        <span className={`text-xs px-2 py-1 rounded-lg font-semibold ${
+                          cert.confidence_score >= 0.9 ? 'bg-emerald-500/20 text-emerald-300' :
+                          cert.confidence_score >= 0.7 ? 'bg-yellow-500/20 text-yellow-300' :
+                          'bg-red-500/20 text-red-300'
+                        }`}>
                           {Math.round(cert.confidence_score * 100)}%
                         </span>
+                      </div>
+                      <div className="mt-2">
+                        {getConfidenceBar(cert.confidence_score)}
                       </div>
                     </div>
                   ))}
                   {student.certifications.length > 2 && (
-                    <p className="text-xs text-gray-500 text-center">
+                    <p className="text-xs text-white/50 text-center py-1">
                       +{student.certifications.length - 2} more certificates
                     </p>
                   )}
                 </div>
 
                 {/* Pipeline Management */}
-                <div className="mt-4 pt-4 border-t border-gray-200">
-                  <p className="text-xs font-medium text-gray-500 mb-2">PIPELINE STAGE</p>
+                <div className="pt-4 border-t border-white/10">
+                  <p className="text-xs font-semibold text-white/70 mb-2 uppercase tracking-wider">Pipeline Stage</p>
                   <select
                     value={pipelineStages[student.id] || 'none'}
                     onChange={(e) => updatePipelineStage(student.id, e.target.value as PipelineStage)}
-                    className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    className="w-full text-sm bg-white/10 border border-white/20 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-blue-400/50 hover:bg-white/15 transition-all"
                   >
                     <option value="none">No Stage</option>
-                    <option value="shortlisted">📋 Shortlisted</option>
-                    <option value="contacted">📧 Contacted</option>
-                    <option value="interviewed">🎤 Interviewed</option>
-                    <option value="offered">🎉 Offered</option>
-                    <option value="rejected">❌ Rejected</option>
+                    <option value="shortlisted">Shortlisted</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="interviewed">Interviewed</option>
+                    <option value="offered">Offered</option>
+                    <option value="rejected">Rejected</option>
                   </select>
                 </div>
 
                 {/* Actions */}
-                <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="mt-4 pt-4 border-t border-white/10">
                   <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={() => contactStudent(student)}
-                      className="flex items-center justify-center text-sm text-white bg-purple-600 hover:bg-purple-700 px-2 py-2 rounded-lg transition-colors"
+                      className="flex items-center justify-center text-sm text-white bg-purple-600 hover:bg-purple-700 px-3 py-2.5 rounded-xl transition-all font-medium shadow-lg hover:shadow-purple-500/50 hover:scale-105"
                       title="Send email"
                     >
                       <Mail className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => viewContactHistory(student)}
-                      className="flex items-center justify-center text-sm text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-2 py-2 rounded-lg transition-colors"
+                      className="flex items-center justify-center text-sm text-white bg-white/10 hover:bg-white/20 px-3 py-2.5 rounded-xl transition-all border border-white/20"
                       title="View contact history"
                     >
                       <Clock className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => window.open(`/recruiter/student/${student.id}`, '_blank')}
-                      className="flex items-center justify-center text-sm text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-2 rounded-lg transition-colors"
+                      className="flex items-center justify-center text-sm text-white bg-blue-600 hover:bg-blue-700 px-3 py-2.5 rounded-xl transition-all font-medium shadow-lg hover:shadow-blue-500/50 hover:scale-105"
                       title="View full profile"
                     >
                       <Eye className="w-4 h-4" />
@@ -860,19 +886,19 @@ export default function RecruiterDashboard() {
         {/* Pagination */}
         {pagination && pagination.total > pagination.limit && (
           <div className="flex justify-center mt-8">
-            <div className="flex space-x-2">
+            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-xl rounded-xl p-2 border border-white/20">
               <button
                 disabled={pagination.offset <= 0}
-                className="px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all font-medium"
               >
                 Previous
               </button>
-              <span className="px-4 py-2 text-gray-600">
+              <span className="px-4 py-2 text-white/80 font-medium">
                 Page {Math.floor(pagination.offset / pagination.limit) + 1} of {Math.ceil(pagination.total / pagination.limit)}
               </span>
               <button
                 disabled={!pagination.has_more}
-                className="px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all font-medium"
               >
                 Next
               </button>
@@ -883,18 +909,24 @@ export default function RecruiterDashboard() {
       
       {/* Contact History Modal */}
       {showContactHistory && selectedStudentForHistory && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xl flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-slate-900/95 to-blue-900/95 border border-white/20 rounded-3xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden backdrop-blur-2xl">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold">{selectedStudentForHistory.name}</h2>
-                  <p className="text-purple-100 text-sm">{selectedStudentForHistory.email}</p>
+            <div className="bg-gradient-to-r from-blue-600/80 to-emerald-600/80 backdrop-blur-xl text-white p-6 relative overflow-hidden border-b border-white/10">
+              <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 animate-pulse"></div>
+              <div className="relative flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
+                    <UserCircle2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">{selectedStudentForHistory.name}</h2>
+                    <p className="text-blue-100 text-sm">{selectedStudentForHistory.email}</p>
+                  </div>
                 </div>
                 <button
                   onClick={() => setShowContactHistory(false)}
-                  className="text-white hover:text-gray-200 transition-colors"
+                  className="text-white/80 hover:text-white transition-colors hover:scale-110 p-2 hover:bg-white/10 rounded-lg"
                 >
                   <XCircle className="w-6 h-6" />
                 </button>
@@ -902,52 +934,67 @@ export default function RecruiterDashboard() {
             </div>
             
             {/* Modal Body */}
-            <div className="p-6 overflow-y-auto max-h-[60vh]">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <Clock className="w-5 h-5 mr-2 text-purple-600" />
+            <div className="p-6 overflow-y-auto max-h-[60vh] bg-gradient-to-br from-slate-900/95 to-blue-900/95">
+              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                <Clock className="w-5 h-5 text-blue-400" />
                 Contact History
               </h3>
               
               {contactHistory.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <Mail className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                  <p>No contact history yet</p>
-                  <p className="text-sm mt-1">Click &quot;Contact&quot; to send your first email</p>
+                <div className="text-center py-8">
+                  <div className="relative inline-block mb-4">
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-2xl blur-xl opacity-30" />
+                    <div className="relative p-6 bg-gradient-to-br from-blue-500/20 to-emerald-500/20 backdrop-blur-sm rounded-2xl border border-white/10">
+                      <Mail className="w-12 h-12 text-blue-300" />
+                    </div>
+                  </div>
+                  <p className="text-white/70">No contact history yet</p>
+                  <p className="text-white/50 text-sm mt-1">Click &quot;Contact&quot; to send your first email</p>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {contactHistory.map((contact) => (
-                    <div key={contact.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                    <div key={contact.id} className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-4 hover:bg-white/10 transition-all">
                       <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center space-x-2">
-                          <Mail className="w-4 h-4 text-purple-600" />
-                          <span className="font-medium text-gray-900 capitalize">{contact.method}</span>
-                          <span className="text-xs text-gray-500">
-                            {new Date(contact.contacted_at).toLocaleString()}
-                          </span>
+                        <div className="flex items-center space-x-3">
+                          <div className="p-2 bg-blue-500/20 rounded-lg">
+                            <Mail className="w-4 h-4 text-blue-400" />
+                          </div>
+                          <div>
+                            <span className="font-medium text-white capitalize flex items-center gap-2">
+                              {contact.method}
+                              <ChevronRight className="w-3 h-3 text-white/50" />
+                            </span>
+                            <p className="text-xs text-white/50">
+                              {new Date(contact.contacted_at).toLocaleString()}
+                            </p>
+                          </div>
                         </div>
                         <div className="flex items-center space-x-2">
                           {contact.response_received ? (
-                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
-                              ✓ Responded
+                            <span className="text-xs bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full font-medium border border-emerald-400/30 flex items-center gap-1">
+                              <UserCheck className="w-3 h-3" />
+                              Responded
                             </span>
                           ) : (
                             <button
                               onClick={() => markContactResponse(contact.id, true)}
-                              className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-2 py-1 rounded-full font-medium transition-colors"
+                              className="text-xs bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 px-3 py-1 rounded-full font-medium border border-yellow-400/30 transition-colors flex items-center gap-1"
                             >
-                              Mark as Responded
+                              <Clock className="w-3 h-3" />
+                              Mark Responded
                             </button>
                           )}
                         </div>
                       </div>
                       
                       {contact.notes && (
-                        <p className="text-sm text-gray-600 ml-6">{contact.notes}</p>
+                        <p className="text-sm text-white/70 ml-11 mt-2 p-2 bg-white/5 rounded-lg border border-white/10">{contact.notes}</p>
                       )}
                       
                       {contact.response_received && contact.response_at && (
-                        <p className="text-xs text-green-600 ml-6 mt-1">
+                        <p className="text-xs text-emerald-400 ml-11 mt-2 flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3" />
                           Responded on {new Date(contact.response_at).toLocaleString()}
                         </p>
                       )}
@@ -958,12 +1005,12 @@ export default function RecruiterDashboard() {
             </div>
             
             {/* Modal Footer */}
-            <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
-              <p className="text-sm text-gray-600">
-                Total Contacts: <span className="font-semibold">{contactHistory.length}</span>
+            <div className="bg-white/5 backdrop-blur-xl px-6 py-4 flex justify-between items-center border-t border-white/10">
+              <p className="text-sm text-white/70">
+                Total Contacts: <span className="font-semibold text-white">{contactHistory.length}</span>
                 {contactHistory.length > 0 && (
                   <>
-                    {' '} | Responses: <span className="font-semibold text-green-600">
+                    {' '} | Responses: <span className="font-semibold text-emerald-400">
                       {contactHistory.filter(c => c.response_received).length}
                     </span>
                   </>
@@ -971,7 +1018,7 @@ export default function RecruiterDashboard() {
               </p>
               <button
                 onClick={() => contactStudent(selectedStudentForHistory)}
-                className="flex items-center text-sm text-white bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition-colors"
+                className="flex items-center text-sm text-white bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 px-4 py-2 rounded-xl transition-all font-medium shadow-lg hover:shadow-blue-500/50 hover:scale-105"
               >
                 <Mail className="w-4 h-4 mr-2" />
                 Send New Email
@@ -980,6 +1027,25 @@ export default function RecruiterDashboard() {
           </div>
         </div>
       )}
+
+      <style jsx>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-20px); }
+        }
+        .animate-float {
+          animation: float 3s ease-in-out infinite;
+        }
+        @keyframes gradient {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+        .animate-gradient {
+          background-size: 200% 200%;
+          animation: gradient 3s ease infinite;
+        }
+      `}</style>
     </div>
   );
 }
