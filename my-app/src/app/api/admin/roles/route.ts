@@ -24,7 +24,16 @@ export const GET = withRole(['admin'], async () => {
 
   if (error) return apiError.internal(error.message);
 
-  // Get user details separately since we can't join auth.users directly
+  // Get full_name from profiles table (primary source)
+  const userIds = users?.map(u => u.user_id) || [];
+  const { data: profiles } = await adminSupabase
+    .from('profiles')
+    .select('id, full_name')
+    .in('id', userIds);
+  
+  const profileMap = new Map((profiles || []).map(p => [p.id, p.full_name]));
+
+  // Get user details from auth
   const { data: authUsers, error: authError } = await adminSupabase.auth.admin.listUsers();
 
   if (authError) {
@@ -33,14 +42,19 @@ export const GET = withRole(['admin'], async () => {
     return success(users);
   }
 
-  // Merge user roles with auth user data
+  // Merge user roles with auth user data and profile data
   const usersWithAuth = users?.map(userRole => {
     const authUser = authUsers.users.find(au => au.id === userRole.user_id);
+    const profileFullName = profileMap.get(userRole.user_id);
+    const metadata = authUser?.user_metadata as { full_name?: string; name?: string } | undefined;
+    const full_name = profileFullName || metadata?.full_name || metadata?.name;
+    
     return {
       ...userRole,
       auth_users: authUser ? {
         email: authUser.email,
-        created_at: authUser.created_at
+        created_at: authUser.created_at,
+        full_name: full_name || null
       } : null
     };
   }) || [];
