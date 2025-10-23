@@ -400,36 +400,38 @@ SMTP_PASS=your_smtp_password`;
       {/* Grid Overlay */}
       <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_85%)] opacity-10" />
 
-      {/* Navigation Header */}
-      <nav className="relative z-10 border-b border-white/10 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl">
-        <div className="max-w-7xl mx-auto px-6 md:px-8 py-5 md:py-6">
-          <div className="flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-xl blur-lg opacity-40" />
-                <Image 
-                  src="/logo.svg" 
-                  alt="CampusSync Logo" 
-                  width={40} 
-                  height={40}
-                  className="relative"
-                />
-              </div>
-              <span className="text-2xl font-extrabold bg-gradient-to-r from-blue-300 via-emerald-300 to-cyan-300 bg-clip-text text-transparent">
-                CampusSync
-              </span>
-            </Link>
-            
-            <Link
-              href="/"
-              className="group flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-xl font-semibold transition-all shadow-lg hover:scale-105"
-            >
-              <ArrowRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform" />
-              <span>Back to Home</span>
-            </Link>
+      {/* Top Logo and Back to Home Button (floating, as in landing/header) */}
+  <div className="relative z-20 w-full flex items-center justify-between pt-6">
+        {/* Logo and text (left) - match header style */}
+  <Link href="/" className="flex items-center gap-3 group select-none ml-8 md:ml-16">
+          <div className="relative w-9 h-9 transition-all duration-300 group-hover:scale-110">
+            <Image
+              src="/logo-clean.svg"
+              alt="CampusSync"
+              width={36}
+              height={36}
+              className="w-full h-full object-contain transition-all duration-300 group-hover:brightness-110 group-hover:drop-shadow-[0_0_12px_rgba(59,130,246,0.5)]"
+              priority
+            />
           </div>
-        </div>
-      </nav>
+          <div className="flex flex-col -space-y-1">
+            <span className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors duration-300">
+              CampusSync
+            </span>
+            <span className="text-[10px] font-medium text-gray-400 tracking-wider uppercase">
+              Verified Credentials
+            </span>
+          </div>
+        </Link>
+        {/* Back to Home (right) */}
+        <button
+          onClick={() => window.location.href = '/'}
+          className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-xl font-semibold transition-all shadow-lg hover:scale-105 mr-8 md:mr-16"
+        >
+          <ArrowRight className="w-4 h-4 rotate-180" />
+          <span>Back to Home</span>
+        </button>
+      </div>
 
       <div className="relative z-10 py-12 px-4">
         <div className="max-w-4xl mx-auto">
