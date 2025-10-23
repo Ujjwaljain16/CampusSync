@@ -24,18 +24,19 @@ export const GET = withRole(['admin'], async (req: NextRequest) => {
 
   // join minimal profile info
   const userIds = Array.from(new Set((data || []).map(r => r.user_id)));
-  let profiles: Array<{ id: string; full_name: string }> = [];
+  let profiles: Array<{ id: string; full_name: string; email: string }> = [];
   if (userIds.length > 0) {
     const { data: profs } = await supabase
       .from('profiles')
-      .select('id, full_name')
+      .select('id, full_name, email')
       .in('id', userIds);
     profiles = profs || [];
   }
   const profileMap = new Map(profiles.map(p => [p.id, p]));
   const enriched = (data || []).map(r => ({
     ...r,
-    requester: profileMap.get(r.user_id) || null,
+    requester_name: profileMap.get(r.user_id)?.full_name || 'Unknown',
+    requester_email: profileMap.get(r.user_id)?.email || 'Unknown',
   }));
 
   return success({ data: enriched, pagination: { limit, offset } });
