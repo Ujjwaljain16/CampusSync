@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, UserPlus, Mail, BarChart3, Crown, Lock } from 'lucide-react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
+import Link from 'next/link';
+import Image from 'next/image';
+import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, UserPlus, Mail, BarChart3, Crown, Lock, LayoutDashboard } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 
 interface UserWithRole {
   user_id: string;
   role: string;
+  is_super_admin?: boolean;
   created_at: string;
   updated_at: string;
   assigned_by: string | null;
@@ -103,32 +106,32 @@ export default function AdminDashboardPage() {
     const warnings = [];
     
     if (isSuperAdmin && toRole !== 'admin') {
-      warnings.push('🚨 CRITICAL: This is the SUPER ADMIN (original/founder)');
-      warnings.push('❌ SUPER ADMIN CANNOT BE DEMOTED');
-      warnings.push('🛡️ This admin serves as the system recovery mechanism');
+      warnings.push('⚠ CRITICAL: This is the SUPER ADMIN (original/founder)');
+      warnings.push('✕ SUPER ADMIN CANNOT BE DEMOTED');
+      warnings.push('⚙ This admin serves as the system recovery mechanism');
       return warnings.join('\n');
     }
     
     if (fromRole === 'admin' && toRole !== 'admin') {
-      warnings.push('🚨 CRITICAL: This will remove admin privileges');
-      warnings.push('⚠️ You will be required to provide a detailed reason');
-      warnings.push('⚠️ This action will be logged and audited');
+      warnings.push('⚠ CRITICAL: This will remove admin privileges');
+      warnings.push('⚠ You will be required to provide a detailed reason');
+      warnings.push('⚠ This action will be logged and audited');
     }
     
     if (fromRole === 'recruiter' && toRole === 'student') {
-      warnings.push('⚠️ This user will lose access to student search and verification features');
+      warnings.push('⚠ This user will lose access to student search and verification features');
     }
     
     if (fromRole === 'faculty' && toRole === 'student') {
-      warnings.push('⚠️ This user will lose certificate approval capabilities');
+      warnings.push('⚠ This user will lose certificate approval capabilities');
     }
     
     if (toRole === 'admin') {
-      warnings.push('⚠️ This user will gain full system access');
+      warnings.push('⚠ This user will gain full system access');
     }
     
     if (warnings.length === 0) {
-      warnings.push('✅ This is a standard role change');
+      warnings.push('✓ This is a standard role change');
     }
     
     return warnings.join('\n');
@@ -209,95 +212,205 @@ export default function AdminDashboardPage() {
     return role.charAt(0).toUpperCase() + role.slice(1);
   };
 
+  // Deterministic particles to avoid hydration errors
+  const particles = useMemo(() => [
+    { top: '10%', left: '5%', duration: '4s', delay: '0s' },
+    { top: '20%', right: '10%', duration: '5s', delay: '0.5s' },
+    { top: '60%', left: '15%', duration: '3.5s', delay: '1s' },
+    { bottom: '15%', right: '20%', duration: '4.5s', delay: '0.3s' },
+    { bottom: '30%', left: '25%', duration: '5s', delay: '0.7s' },
+  ], []);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden">
+        {/* Animated Background */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {particles.map((particle, i) => (
+            <div
+              key={i}
+              className="absolute w-2 h-2 bg-blue-400/30 rounded-full blur-sm animate-float"
+              style={{
+                top: particle.top,
+                left: particle.left,
+                right: particle.right,
+                bottom: particle.bottom,
+                animationDuration: particle.duration,
+                animationDelay: particle.delay,
+              }}
+            />
+          ))}
+        </div>
+        
+        <div className="relative z-10 flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <div className="relative inline-block">
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full blur-xl opacity-50 animate-pulse" />
+              <RefreshCw className="relative w-12 h-12 animate-spin text-blue-300" />
+            </div>
+            <p className="mt-4 text-white/80 text-lg font-medium">Loading admin dashboard...</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-10">
-      <div className="max-w-6xl mx-auto px-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden">
+      {/* Animated Background - matching other pages */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {particles.map((particle, i) => (
+          <div
+            key={i}
+            className="absolute w-2 h-2 bg-blue-400/30 rounded-full blur-sm animate-float"
+            style={{
+              top: particle.top,
+              left: particle.left,
+              right: particle.right,
+              bottom: particle.bottom,
+              animationDuration: particle.duration,
+              animationDelay: particle.delay,
+            }}
+          />
+        ))}
+        
+        {/* Gradient orbs */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '8s' }}></div>
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-gradient-to-tr from-emerald-500/20 to-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDuration: '10s', animationDelay: '2s' }}></div>
+        
+        {/* Grid overlay */}
+        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:radial-gradient(white,transparent_85%)] opacity-10"></div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="relative z-10 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between max-w-7xl mx-auto">
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-3 group">
+            <div className="relative w-10 h-10 transition-transform duration-300 group-hover:scale-110">
+              <Image
+                src="/logo-clean.svg"
+                alt="CampusSync"
+                width={40}
+                height={40}
+                className="w-full h-full object-contain transition-all duration-300 group-hover:brightness-110 group-hover:drop-shadow-[0_0_12px_rgba(59,130,246,0.5)]"
+                priority
+              />
+            </div>
+            <div className="flex flex-col -space-y-1">
+              <span className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors duration-300">
+                CampusSync
+              </span>
+              <span className="text-[9px] font-medium text-gray-400 tracking-wider uppercase">
+                Verified Credentials
+              </span>
+            </div>
+          </Link>
+
+          {/* Logout Button */}
+          <LogoutButton variant="danger" />
+        </div>
+      </nav>
+
+      {/* Main Content */}
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+        {/* Header Section */}
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-gradient-to-r from-red-500/20 to-orange-500/20 rounded-2xl backdrop-blur-sm border border-white/10">
-                <Shield className="w-8 h-8 text-red-300" />
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6">
+            <div className="flex items-center gap-4">
+              <div className="relative group">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-2xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity duration-500" />
+                <div className="relative p-4 bg-gradient-to-br from-blue-500/20 to-emerald-500/20 backdrop-blur-sm rounded-2xl border border-white/10">
+                  <LayoutDashboard className="w-10 h-10 text-blue-300 drop-shadow-lg" />
+                </div>
               </div>
               <div>
-                <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-red-200 to-orange-200 bg-clip-text text-transparent">
+                <h1 className="text-4xl md:text-5xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient">
                   Admin Dashboard
                 </h1>
-                <p className="text-white/70 text-lg">Manage user roles and system analytics</p>
+                <p className="text-white/80 text-base md:text-lg mt-1 font-medium">
+                  Manage user roles and system analytics.
+                  <span className="text-emerald-300"> Full control.</span>
+                </p>
               </div>
             </div>
             
-            <div className="flex items-center gap-3">
-              <a
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
                 href="/admin/analytics"
-                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-colors flex items-center gap-2"
+                className="group relative overflow-hidden inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40"
               >
                 <BarChart3 className="w-5 h-5" />
-                View Analytics
-              </a>
-              <a
+                <span>View Analytics</span>
+                <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+              </Link>
+              
+              <Link
                 href="/admin/role-requests"
-                className="bg-white/10 hover:bg-white/20 text-white px-6 py-3 rounded-xl font-medium transition-colors flex items-center gap-2 relative"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-white/10 to-white/5 hover:from-white/15 hover:to-white/10 text-white rounded-xl font-semibold transition-all backdrop-blur-xl border border-white/10 hover:border-white/20 relative"
               >
-                Pending Requests
+                <span>Pending Requests</span>
                 {pendingCount > 0 && (
-                  <span className="ml-2 inline-flex items-center justify-center text-xs bg-red-600 text-white rounded-full px-2 py-0.5">
+                  <span className="inline-flex items-center justify-center text-xs bg-red-600 text-white rounded-full px-2 py-0.5 font-bold animate-pulse">
                     {pendingCount}
                   </span>
                 )}
-              </a>
-              <LogoutButton variant="danger" />
+              </Link>
             </div>
           </div>
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 text-red-300 rounded-2xl">
+          <div className="mb-6 p-5 rounded-2xl border bg-gradient-to-br from-red-500/10 to-red-500/5 border-red-500/30 backdrop-blur-xl">
             <div className="flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              <p className="font-medium">{error}</p>
+              <div className="w-10 h-10 bg-red-500/20 rounded-xl flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-red-300" />
+              </div>
+              <p className="text-red-300 font-semibold">{error}</p>
             </div>
           </div>
         )}
 
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden">
-          <div className="px-8 py-6 border-b border-white/10">
-            <div className="flex items-center justify-between">
-              <h2 className="text-white text-xl font-bold">User Management</h2>
+        <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden">
+          <div className="px-6 md:px-8 py-6 border-b border-white/10">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-r from-blue-500/20 to-emerald-500/20 rounded-xl flex items-center justify-center">
+                  <Users className="w-5 h-5 text-blue-300" />
+                </div>
+                <h2 className="text-white text-2xl font-bold">User Management</h2>
+              </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowInviteForm(!showInviteForm)}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all"
+                  className="group relative overflow-hidden flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-emerald-500/25"
                 >
                   <UserPlus className="w-4 h-4" />
-                  Invite User
+                  <span>Invite User</span>
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
                 </button>
                 <button
                   onClick={fetchUsers}
                   disabled={loading}
-                  className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all disabled:opacity-50"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/15 text-white rounded-xl font-semibold transition-all disabled:opacity-50 border border-white/10 hover:border-white/20 backdrop-blur-xl"
                 >
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                  Refresh
+                  <span>Refresh</span>
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Invite User Form */}
+          {/* Invite User Form - Enhanced */}
           {showInviteForm && (
-            <div className="px-8 py-6 border-b border-white/10 bg-white/5">
-              <h3 className="text-white text-lg font-semibold mb-4">Invite New User</h3>
+            <div className="px-6 md:px-8 py-6 border-b border-white/10 bg-gradient-to-br from-white/5 to-white/5 backdrop-blur-xl">
+              <h3 className="text-white text-lg font-bold mb-5 flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-emerald-300" />
+                Invite New User
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-white/80 text-sm font-medium mb-2">Email Address</label>
+                  <label className="block text-white font-semibold text-sm mb-2">Email Address</label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-white/60" />
                     <input
@@ -305,16 +418,16 @@ export default function AdminDashboardPage() {
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
                       placeholder="user@example.com"
-                      className="w-full pl-10 pr-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                      className="w-full pl-10 pr-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-transparent transition-all backdrop-blur-sm hover:bg-white/15"
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-white/80 text-sm font-medium mb-2">Role</label>
+                  <label className="block text-white font-semibold text-sm mb-2">Role</label>
                   <select
                     value={inviteRole}
                     onChange={(e) => setInviteRole(e.target.value)}
-                    className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-400/50"
+                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-transparent transition-all backdrop-blur-sm hover:bg-white/15"
                   >
                     <option value="student" className="bg-gray-800">Student</option>
                     <option value="faculty" className="bg-gray-800">Faculty</option>
@@ -325,9 +438,12 @@ export default function AdminDashboardPage() {
                   <button
                     onClick={sendInvitation}
                     disabled={!inviteEmail.trim() || inviting}
-                    className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="group relative overflow-hidden w-full px-4 py-3 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 disabled:from-gray-600 disabled:to-gray-600 text-white rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/25"
                   >
                     {inviting ? 'Sending...' : 'Send Invitation'}
+                    {!inviting && (
+                      <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+                    )}
                   </button>
                 </div>
               </div>
@@ -337,46 +453,51 @@ export default function AdminDashboardPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
-                <tr className="bg-white/10 text-white/80">
-                  <th className="p-4">User</th>
-                  <th className="p-4">Current Role</th>
-                  <th className="p-4">Actions</th>
-                  <th className="p-4">Last Updated</th>
+                <tr className="bg-white/5 border-b border-white/10">
+                  <th className="px-6 py-4 text-xs font-bold text-white/80 uppercase tracking-wider">User</th>
+                  <th className="px-6 py-4 text-xs font-bold text-white/80 uppercase tracking-wider">Current Role</th>
+                  <th className="px-6 py-4 text-xs font-bold text-white/80 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-4 text-xs font-bold text-white/80 uppercase tracking-wider">Last Updated</th>
                 </tr>
               </thead>
               <tbody>
                 {users.map((user) => (
-                  <tr key={user.user_id} className="border-t border-white/10 hover:bg-white/5">
-                    <td className="p-4">
-                      <div>
-                        <div className="text-white font-medium">
-                          {user.auth_users?.email || `User ${user.user_id.slice(0, 8)}`}
+                  <tr key={user.user_id} className="border-t border-white/5 hover:bg-white/5 transition-colors">
+                    <td className="px-6 py-5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-r from-blue-500/20 to-emerald-500/20 rounded-xl flex items-center justify-center">
+                          <Users className="w-5 h-5 text-blue-300" />
                         </div>
-                        <div className="text-white/60 text-sm">
-                          ID: {user.user_id.slice(0, 8)}...
-                        </div>
-                        {user.auth_users?.email && (
-                          <div className="text-white/40 text-xs mt-1">
-                            Joined: {new Date(user.auth_users.created_at).toLocaleDateString()}
+                        <div>
+                          <div className="text-white font-semibold">
+                            {user.auth_users?.email || `User ${user.user_id.slice(0, 8)}`}
                           </div>
-                        )}
+                          <div className="text-white/60 text-sm">
+                            ID: {user.user_id.slice(0, 8)}...
+                          </div>
+                          {user.auth_users?.email && (
+                            <div className="text-white/40 text-xs mt-0.5">
+                              Joined: {new Date(user.auth_users.created_at).toLocaleDateString()}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </td>
-                    <td className="p-4">
+                    <td className="px-6 py-5">
                       <div className="flex items-center gap-2">
-                        <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium border ${getRoleColor(user.role, user.is_super_admin)}`}>
+                        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border backdrop-blur-sm ${getRoleColor(user.role, user.is_super_admin)}`}>
                           {getRoleIcon(user.role, user.is_super_admin)}
                           {getRoleDisplayName(user.role, user.is_super_admin)}
                         </div>
                       </div>
                     </td>
-                    <td className="p-4">
-                      <div className="flex gap-2">
+                    <td className="px-6 py-5">
+                      <div className="flex flex-wrap gap-2">
                         {user.role !== 'admin' && (
                           <button
                             onClick={() => updateUserRole(user.user_id, 'admin', user.role)}
                             disabled={actioning === user.user_id}
-                            className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                            className="px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-500/25 hover:scale-105 disabled:hover:scale-100"
                           >
                             Make Admin
                           </button>
@@ -385,7 +506,7 @@ export default function AdminDashboardPage() {
                           <button
                             onClick={() => updateUserRole(user.user_id, 'faculty', user.role)}
                             disabled={actioning === user.user_id}
-                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-500/25 hover:scale-105 disabled:hover:scale-100"
                           >
                             Make Faculty
                           </button>
@@ -394,7 +515,7 @@ export default function AdminDashboardPage() {
                           <button
                             onClick={() => updateUserRole(user.user_id, 'recruiter', user.role)}
                             disabled={actioning === user.user_id}
-                            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                            className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-purple-500/25 hover:scale-105 disabled:hover:scale-100"
                           >
                             Make Recruiter
                           </button>
@@ -403,29 +524,29 @@ export default function AdminDashboardPage() {
                           <button
                             onClick={() => updateUserRole(user.user_id, 'student', user.role)}
                             disabled={actioning === user.user_id}
-                            className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                            className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/25 hover:scale-105 disabled:hover:scale-100"
                           >
                             Make Student
                           </button>
                         )}
                         {user.is_super_admin && (
-                          <div className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/30 text-yellow-300 rounded-lg text-sm font-medium opacity-75 cursor-not-allowed">
+                          <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/30 text-yellow-300 rounded-xl text-sm font-semibold opacity-75 cursor-not-allowed backdrop-blur-sm">
                             <Lock className="w-4 h-4" />
                             Protected
                           </div>
                         )}
-                        {user.role !== 'student' && (
+                        {user.role !== 'student' && !user.is_super_admin && (
                           <button
                             onClick={() => removeUserRole(user.user_id)}
                             disabled={actioning === user.user_id}
-                            className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                            className="px-4 py-2 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 disabled:hover:scale-100"
                           >
                             <UserX className="w-4 h-4" />
                           </button>
                         )}
                       </div>
                     </td>
-                    <td className="p-4 text-white/60 text-sm">
+                    <td className="px-6 py-5 text-white/70 text-sm font-medium">
                       {new Date(user.updated_at).toLocaleDateString()}
                     </td>
                   </tr>
