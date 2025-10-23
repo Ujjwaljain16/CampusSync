@@ -16,6 +16,7 @@ interface UserWithRole {
   auth_users: {
     email: string;
     created_at: string;
+    full_name?: string | null;
   } | null;
 }
 
@@ -470,12 +471,12 @@ export default function AdminDashboardPage() {
                         </div>
                         <div>
                           <div className="text-white font-semibold">
-                            {user.auth_users?.email || `User ${user.user_id.slice(0, 8)}`}
+                            {user.auth_users?.full_name || user.auth_users?.email?.split('@')[0] || 'Unknown User'}
                           </div>
                           <div className="text-white/60 text-sm">
-                            ID: {user.user_id.slice(0, 8)}...
+                            {user.auth_users?.email || 'No email'}
                           </div>
-                          {user.auth_users?.email && (
+                          {user.auth_users?.created_at && (
                             <div className="text-white/40 text-xs mt-0.5">
                               Joined: {new Date(user.auth_users.created_at).toLocaleDateString()}
                             </div>

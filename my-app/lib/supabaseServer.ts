@@ -23,9 +23,14 @@ export async function createSupabaseServerClient() {
 					return cookieStore.getAll();
 				},
 				setAll(cookiesToSet) {
-					cookiesToSet.forEach(({ name, value, options }) => {
-						cookieStore.set(name, value, options);
-					});
+					try {
+						cookiesToSet.forEach(({ name, value, options }) => {
+							cookieStore.set(name, value, options);
+						});
+					} catch {
+						// Handle cookies in read-only contexts
+						console.warn('Unable to set cookies in read-only context');
+					}
 				},
 			},
 		}

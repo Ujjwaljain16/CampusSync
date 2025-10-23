@@ -1,8 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
+import { updateSession } from '@/lib/supabase/middleware';
 
 export async function middleware(req: NextRequest) {
-	const res = NextResponse.next();
 	const isDev = process.env.NODE_ENV !== 'production';
 
 	// Check if environment variables are set
@@ -12,7 +11,7 @@ export async function middleware(req: NextRequest) {
 		if (!req.nextUrl.pathname.startsWith('/setup')) {
 			return NextResponse.redirect(new URL('/setup', req.url));
 		}
-		return res;
+		return NextResponse.next();
 	}
 
 	// Determine route type early and short-circuit public routes BEFORE creating Supabase client
@@ -22,52 +21,31 @@ export async function middleware(req: NextRequest) {
 	const isHome = req.nextUrl.pathname === '/';
 	const isPublic = isAuthRoute || isHome || req.nextUrl.pathname.startsWith('/public') || isSetupRoute || isDebugRoute;
 
-	if (isPublic) {
-		return res;
-	}
-
-	const supabase = createServerClient(
-		process.env.NEXT_PUBLIC_SUPABASE_URL,
-		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-		{
-			cookies: {
-				getAll() {
-					return req.cookies.getAll();
-				},
-				setAll(cookies) {
-					cookies.forEach(({ name, value, options }) => {
-						res.cookies.set({ name, value, ...options });
-					});
-				},
-			},
-		}
-	);
-
-	// Single auth call (faster/safer in middleware)
-	const { data: { user: finalUser }, error: getUserError } = await supabase.auth.getUser();
+	// Update session and get user
+	const { supabaseResponse, user } = await updateSession(req);
+	
 	if (isDev) {
 		console.log('Middleware - getUser:', {
-			hasUser: !!finalUser,
-			userEmail: finalUser?.email,
-			userError: getUserError?.message,
+			hasUser: !!user,
+			userEmail: user?.email,
 			path: req.nextUrl.pathname
 		});
 	}
 
 	// If user is authenticated and trying to access login, redirect to dashboard
-	if (finalUser && isAuthRoute) {
+	if (user && isAuthRoute) {
 		if (isDev) console.log('Authenticated user accessing login, redirecting to dashboard');
 		return NextResponse.redirect(new URL('/dashboard', req.url));
 	}
 
-	if (!isPublic && !finalUser) {
+	if (!isPublic && !user) {
 		if (isDev) console.log('Unauthenticated user accessing protected route, redirecting to login');
 		const loginUrl = new URL('/login', req.url);
 		loginUrl.searchParams.set('redirectedFrom', req.nextUrl.pathname);
 		return NextResponse.redirect(loginUrl);
 	}
 
-	return res;
+	return supabaseResponse;
 }
 
 export const config = {

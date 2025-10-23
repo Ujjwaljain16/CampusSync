@@ -39,12 +39,6 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 		const body = await req.json().catch(() => null) as IssueBody | null;
 		if (!body) throw apiError.badRequest('Invalid JSON');
 
-		console.log('[VC Issue] Request body:', {
-			hasCertificateId: !!body.certificateId,
-			hasCredentialSubject: !!body.credentialSubject,
-			certificateId: body.certificateId,
-		});
-
 		let subject: CredentialSubject | undefined = body.credentialSubject;
 
 		// If called from auto-verify with certificateId, map it to credentialSubject
@@ -54,19 +48,9 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 				.select('*')
 				.eq('id', body.certificateId)
 				.single();
-			
-			console.log('[VC Issue] Certificate lookup result:', {
-				found: !!cert,
-				hasStudentId: cert?.student_id !== undefined,
-				studentId: cert?.student_id,
-				certificateId: cert?.id,
-			});
-			
 			if (certErr || !cert) {
-				console.error('[VC Issue] Certificate lookup error:', certErr);
 				throw apiError.notFound('Certificate not found');
 			}
-			
 			// Only allow issuing for own certificate unless faculty/admin
 			const isOwner = cert.student_id === user.id;
 			const canIssueOnBehalf = role === 'admin' || role === 'faculty';
@@ -81,11 +65,6 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 			dateIssued: cert.date_issued,
 			description: cert.description ?? undefined,
 		};
-		
-		console.log('[VC Issue] Created subject from certificate:', {
-			hasId: subject.id !== undefined,
-			id: subject.id,
-		});
 	} else if (subject) {
 		const isSelfIssue = subject.id === user.id;
 		const canIssueOnBehalf = role === 'admin' || role === 'faculty';
@@ -111,33 +90,15 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 
 	// Store VC in Supabase table `verifiable_credentials`
 	const now = new Date().toISOString();
-	
-	// Debug: Log subject to see what we're trying to insert
-	console.log('[VC Issue] Subject:', JSON.stringify(subject, null, 2));
-	console.log('[VC Issue] Subject.id:', subject.id);
-	
-	// Ensure subject.id is not null/undefined
-	if (!subject.id) {
-		console.error('[VC Issue] ERROR: subject.id is null/undefined!', { subject, user });
-		throw apiError.internal('Invalid subject ID for credential');
-	}
-	
-	const insertData = {
+	const { error } = await supabase.from('verifiable_credentials').insert({
 		id: vc.id,
-		student_id: subject.id, // Store with certificate owner's student_id
+		student_id: subject.id, // Store with certificate owner's student_id, not issuer's
 		issuer: vc.issuer,
 		issuance_date: vc.issuanceDate,
 		credential: vc,
 		status: 'active',
 		created_at: now,
-	};
-	
-	console.log('[VC Issue] Inserting data:', JSON.stringify({
-		...insertData,
-		credential: '(credential object - omitted for brevity)'
-	}, null, 2));
-	
-	const { error } = await supabase.from('verifiable_credentials').insert(insertData);
+	});
 	if (error) {
 		console.error('Database insert error:', error);
 		throw apiError.internal(`Failed to store credential: ${error.message}`);
