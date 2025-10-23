@@ -1,6 +1,6 @@
 import { SignJWT, importJWK, JWK, jwtVerify } from 'jose';
 import { randomUUID } from 'crypto';
-import type { VerifiableCredential } from '../src/types';
+import type { VerifiableCredential } from '../src/types/index';
 
 export interface CreateVcParams {
 	issuerDid: string;

@@ -1,5 +1,5 @@
 import { jwtVerify, importJWK } from 'jose';
-import type { VerifiableCredential } from '../../src/types';
+import type { VerifiableCredential } from '../../types/index';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -82,7 +82,13 @@ export class VCValidator {
         isValid: false,
         errors: [`Validation error: ${error instanceof Error ? error.message : 'Unknown error'}`],
         warnings: [],
-        metadata: {}
+        metadata: {
+          issuer: '',
+          subject: '',
+          issuedAt: new Date(0),
+          credentialType: [],
+          keyId: ''
+        }
       };
     }
   }
@@ -276,31 +282,29 @@ export class VCValidator {
     metadata: any
   ): Promise<void> {
     const proof = vc.proof;
-
+    if (!proof) {
+      errors.push('Missing proof object');
+      return;
+    }
     if (!proof.type) {
       errors.push('Proof missing type');
       return;
     }
-
     if (!proof.verificationMethod) {
       errors.push('Proof missing verificationMethod');
       return;
     }
-
     if (!proof.jws) {
       errors.push('Proof missing jws');
       return;
     }
-
     // Extract key ID from verification method
     const keyId = proof.verificationMethod.split('#')[1];
     metadata.keyId = keyId;
-
     // Validate JWS signature
     try {
       const key = await importJWK(issuerJWK, issuerJWK.alg);
       const { payload } = await jwtVerify(proof.jws, key);
-      
       // Verify the payload matches the VC
       if (JSON.stringify(payload.vc) !== JSON.stringify(vc)) {
         errors.push('JWS payload does not match Verifiable Credential');
@@ -347,7 +351,13 @@ export class VCValidator {
       isValid: errors.length === 0,
       errors,
       warnings,
-      metadata: {}
+      metadata: {
+        issuer: '',
+        subject: '',
+        issuedAt: new Date(0),
+        credentialType: [],
+        keyId: ''
+      }
     };
   }
 }

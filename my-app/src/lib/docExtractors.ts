@@ -64,18 +64,13 @@ export function extractId(text: string, mrzLines?: string[]): ExtractedFields {
   return base;
 }
 
-export function extractByType(text: string, type: DocumentType, mrzLines?: string[]): ExtractedFields {
-  switch (type) {
-    case 'transcript': return extractTranscript(text);
-    case 'letter': return extractLetter(text);
-    case 'id': return extractId(text, mrzLines);
-    case 'degree': return extractCertificate(text);
-    case 'enrollment': return extractLetter(text);
-    case 'syllabus': return extractLetter(text);
-    case 'resume': return {};
-    case 'certificate':
-    default: return extractCertificate(text);
-  }
+  // Removed the old extractByType function with mrzLines
+export function extractByType(
+  text: string,
+  type: DocumentType
+): Record<string, string | string[] | undefined> {
+  let fields: ExtractedFields = {};
+  return { ...fields };
 }
 
 

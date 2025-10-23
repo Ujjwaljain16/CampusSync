@@ -15,7 +15,8 @@ const supabase = createClient(
 // OCR processor
 async function processOCR(payload: Record<string, unknown>) {
   try {
-    const { documentId, fileUrl, documentType } = payload;
+  const { documentId, documentType } = payload;
+  // fileUrl is currently unused
     
     // This would typically call the OCR API
     // For now, return a placeholder result
@@ -39,17 +40,32 @@ async function processOCR(payload: Record<string, unknown>) {
 // Verification processor
 async function processVerification(payload: Record<string, unknown>) {
   try {
+
     const { documentId, extractedText, documentType } = payload;
-    
+    // Validate documentType to be a valid DocumentType
+    const allowedTypes = ['certificate','transcript','degree','letter','id','enrollment','syllabus','resume'] as const;
+    function isDocumentType(val: unknown): val is typeof allowedTypes[number] {
+      return typeof val === 'string' && (allowedTypes as readonly string[]).includes(val);
+    }
+    const safeDocumentType = isDocumentType(documentType)
+      ? documentType
+      : 'certificate';
+
     // Extract fields using the enhanced extractors
-    const extractedFields = extractByType(extractedText, documentType || 'certificate');
-    
+    const extractedFields = extractByType(
+      typeof extractedText === 'string' ? extractedText : '',
+      safeDocumentType
+    ) as Record<string, string | string[] | undefined>;
+
     // Normalize fields using LLM normalizer
-    const normalizedFields = await defaultNormalizer.normalize(extractedFields);
-    
+  const normalizedFields = await defaultNormalizer.normalize(extractedFields as Record<string, any>);
+
     // Simulate logo matching (would use actual image in production)
-    const logoMatch = await matchInstitutionLogo(Buffer.from(''), extractedFields.institution);
-    
+    const logoMatch = await matchInstitutionLogo(
+      Buffer.from(''),
+      typeof extractedFields.issuer === 'string' ? extractedFields.issuer : undefined
+    );
+
     // Calculate policy score
     const policyScore = Math.min(1, 
       (normalizedFields.confidence * 0.4) + 
@@ -85,7 +101,7 @@ async function processNormalization(payload: Record<string, unknown>) {
   try {
     const { documentId, extractedFields } = payload;
     
-    const normalizedFields = await defaultNormalizer.normalize(extractedFields);
+  const normalizedFields = await defaultNormalizer.normalize(extractedFields as Record<string, any>);
     
     return {
       success: true,

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { withRole, success, parseAndValidateBody } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { ProductionVCVerifier, type VerificationOptions } from '@/lib/vc/vcVerifier';
+import { isVerifiableCredential } from '@/lib/vc/vcTypeGuards';
 import { ProductionKeyManager } from '@/lib/vc/productionKeyManager';
 
 interface VerifyVCBody {
@@ -35,7 +36,15 @@ export const POST = withRole(['student', 'faculty', 'admin', 'recruiter'], async
     ...body.options
   };
 
-  // Verify the credential
+
+  // Type guard: ensure the credential matches VerifiableCredential
+  if (!isVerifiableCredential(body.credential)) {
+    return new Response(
+      JSON.stringify({ error: 'Invalid credential: missing required fields or incorrect structure.' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
   const verificationResult = await vcVerifier.verifyCredential(
     body.credential,
     verificationOptions,
