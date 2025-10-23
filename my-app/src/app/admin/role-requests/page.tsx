@@ -42,9 +42,13 @@ export default function AdminRoleRequestsPage() {
       const res = await fetch(url.toString());
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to load role requests');
-      setRequests(json.data as RoleRequest[]);
+      
+      // Ensure we always set an array, even if the API returns unexpected data
+      const requestsData = Array.isArray(json.data) ? json.data : [];
+      setRequests(requestsData as RoleRequest[]);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unexpected error');
+      setRequests([]); // Set empty array on error
     } finally {
       setLoading(false);
     }
@@ -175,7 +179,7 @@ export default function AdminRoleRequestsPage() {
               <div className="flex gap-3">
                 <select
                   value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value as any)}
+                  onChange={(e) => setFilterStatus(e.target.value as 'pending' | 'approved' | 'rejected' | 'all')}
                   className="px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-400/50"
                 >
                   <option value="all" className="bg-gray-800">All Statuses</option>
@@ -185,7 +189,7 @@ export default function AdminRoleRequestsPage() {
                 </select>
                 <select
                   value={filterRole}
-                  onChange={(e) => setFilterRole(e.target.value as any)}
+                  onChange={(e) => setFilterRole(e.target.value as 'all' | 'recruiter' | 'faculty' | 'admin')}
                   className="px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-400/50"
                 >
                   <option value="all" className="bg-gray-800">All Roles</option>
