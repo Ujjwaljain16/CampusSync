@@ -40,6 +40,31 @@ It automates the entire lifecycle of certificates — from upload and AI verific
 - **End-to-end audit logging** for every user action.
 - **Cryptographically signed** and tamper-proof credentials.
 
+# Demo
+<img width="1920" height="1080" alt="Screenshot 2025-10-24 180014" src="https://github.com/user-attachments/assets/77b52e6b-2c62-47fd-bf19-cc9baca67ea0" />
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/a9e6fe97-da13-4374-adab-a983c3f6a82e" />
+
+
+<img width="1920" height="1080" alt="Screenshot 2025-10-24 181752" src="https://github.com/user-attachments/assets/c9469196-c04c-4b5d-b8ef-dc60ddc580ee" />
+
+<img width="1920" height="1080" alt="Screenshot 2025-10-24 181808" src="https://github.com/user-attachments/assets/9d747858-5c6b-474b-bdce-f1fecbee6b44" />
+
+<img width="1920" height="1080" alt="Screenshot 2025-10-24 181849" src="https://github.com/user-attachments/assets/eec3522a-3283-4808-80c3-f4df46784b56" />
+
+<img width="1920" height="1080" alt="Screenshot 2025-10-24 181955" src="https://github.com/user-attachments/assets/0771d64b-5207-4a35-afd9-7679ad4944f6" />
+
+<img width="1920" height="1080" alt="Screenshot 2025-10-24 182004" src="https://github.com/user-attachments/assets/fb5cb55f-a3ca-4406-8bf6-5cca79afb3bb" />
+
+<img width="1920" height="1080" alt="Screenshot 2025-10-24 182045" src="https://github.com/user-attachments/assets/2c3b9ff4-39a6-446c-b10e-1d0224574476" />
+
+
+
+
+
+
+
+
 ### ⚡ Performance
 - 70+ **indexed database queries** for speed.
 - **Serverless architecture** with Next.js API routes.
