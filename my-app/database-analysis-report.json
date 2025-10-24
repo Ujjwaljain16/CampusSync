@@ -1,0 +1,266 @@
+{
+  "timestamp": "2025-10-15T22:10:52.234Z",
+  "totalTables": 18,
+  "tablesWithData": 7,
+  "emptyTables": 11,
+  "totalRows": 33,
+  "issues": [
+    {
+      "table": "certificates",
+      "issue": "Duplicate columns: student_id and user_id (both reference same user)",
+      "severity": "HIGH",
+      "recommendation": "Remove user_id, keep only student_id for clarity"
+    },
+    {
+      "table": "audit_logs",
+      "issue": "Two user references: actor_id and user_id",
+      "severity": "MEDIUM",
+      "recommendation": "Keep actor_id (who did it), remove user_id or clarify its purpose"
+    }
+  ],
+  "recommendations": [
+    {
+      "table": "certificate_metadata",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"certificate_metadata\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "table": "documents",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"documents\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "table": "verification_rules",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"verification_rules\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "table": "vc_status_list",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"vc_status_list\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "table": "vc_revocations",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"vc_revocations\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "table": "recruiter_favorites",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"recruiter_favorites\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "table": "recruiter_pipeline",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"recruiter_pipeline\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "table": "recruiter_contacts",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"recruiter_contacts\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "table": "recruiter_saved_searches",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"recruiter_saved_searches\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      
+      "table": "recruiter_pipeline_stages",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"recruiter_pipeline_stages\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "table": "recruiter_pipeline_candidates",
+      "type": "EMPTY_TABLE",
+      "message": "Table \"recruiter_pipeline_candidates\" has no data - may be unused or ready for implementation",
+      "action": "Review if needed, consider removing if not in use"
+    },
+    {
+      "type": "MISSING_INDEXES",
+      "message": "Critical indexes should be added (see performance-indexes.sql)",
+      "tables": "certificates(student_id), certificates(status), user_roles(user_id), audit_logs(user_id), recruiter_favorites(recruiter_id)"
+    }
+  ],
+  "tables": {
+    "profiles": {
+      "rowCount": 4,
+      "columns": [
+        "id",
+        "role",
+        "full_name",
+        "created_at",
+        "avatar_url",
+        "university",
+        "graduation_year",
+        "major",
+        "location",
+        "gpa",
+        "email",
+        "department",
+        "company"
+      ],
+      "columnCount": 13
+    },
+    "user_roles": {
+      "rowCount": 4,
+      "columns": [
+        "id",
+        "user_id",
+        "role",
+        "assigned_by",
+        "created_at",
+        "updated_at",
+        "is_super_admin"
+      ],
+      "columnCount": 7
+    },
+    "certificates": {
+      "rowCount": 1,
+      "columns": [
+        "id",
+        "student_id",
+        "file_url",
+        "ocr_text",
+        "fields",
+        "status",
+        "faculty_id",
+        "created_at",
+        "updated_at",
+        "confidence_score",
+        "verification_method",
+        "auto_approved",
+        "qr_code_data",
+        "digital_signature",
+        "issuer_verified",
+        "user_id",
+        "title",
+        "institution",
+        "date_issued",
+        "description",
+        "verification_status"
+      ],
+      "columnCount": 21
+    },
+    "certificate_metadata": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "documents": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "audit_logs": {
+      "rowCount": 5,
+      "columns": [
+        "id",
+        "actor_id",
+        "action",
+        "target_id",
+        "details",
+        "created_at",
+        "user_id"
+      ],
+      "columnCount": 7
+    },
+    "role_requests": {
+      "rowCount": 2,
+      "columns": [
+        "id",
+        "user_id",
+        "requested_role",
+        "metadata",
+        "status",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at"
+      ],
+      "columnCount": 8
+    },
+    "trusted_issuers": {
+      "rowCount": 8,
+      "columns": [
+        "id",
+        "name",
+        "domain",
+        "logo_hash",
+        "template_patterns",
+        "confidence_threshold",
+        "qr_verification_url",
+        "is_active",
+        "created_at",
+        "updated_at"
+      ],
+      "columnCount": 10
+    },
+    "allowed_domains": {
+      "rowCount": 9,
+      "columns": [
+        "id",
+        "domain",
+        "description",
+        "is_active",
+        "created_at",
+        "updated_at"
+      ],
+      "columnCount": 6
+    },
+    "verification_rules": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "vc_status_list": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "vc_revocations": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "recruiter_favorites": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "recruiter_pipeline": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "recruiter_contacts": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "recruiter_saved_searches": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "recruiter_pipeline_stages": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    },
+    "recruiter_pipeline_candidates": {
+      "rowCount": 0,
+      "columns": [],
+      "columnCount": 0
+    }
+  }
+}
