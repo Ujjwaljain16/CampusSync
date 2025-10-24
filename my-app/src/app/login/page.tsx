@@ -88,6 +88,13 @@ export default function LoginPage() {
           return;
         }
 
+          // Password constraint: min 8 chars, 1 number, 1 uppercase
+          const passwordConstraint = /^(?=.*[A-Z])(?=.*\d).{8,}$/;
+          if (!passwordConstraint.test(password)) {
+            setError('Password must be at least 8 characters, include 1 uppercase letter and 1 number');
+            setLoading(false);
+            return;
+          }
         // Basic required field check
         if (!fullName.trim()) {
           setError('Please provide your full name');
