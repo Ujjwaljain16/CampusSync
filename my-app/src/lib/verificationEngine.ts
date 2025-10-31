@@ -247,11 +247,10 @@ export class VerificationEngine {
     const text = ocrResult.raw_text || '';
     const patternsMatched: string[] = [];
     let bestScore = 0;
-    let bestIssuer: TrustedIssuer | null = null;
 
     for (const issuer of this.trustedIssuers) {
       let issuerScore = 0;
-      let matchedPatterns: string[] = [];
+      const matchedPatterns: string[] = [];
 
       for (const pattern of issuer.template_patterns ?? []) {
         try {
@@ -260,7 +259,7 @@ export class VerificationEngine {
             issuerScore += 1;
             matchedPatterns.push(pattern);
           }
-        } catch (error) {
+        } catch {
           console.log('Invalid regex pattern:', pattern);
         }
       }
@@ -272,7 +271,6 @@ export class VerificationEngine {
 
       if (normalizedScore > bestScore) {
         bestScore = normalizedScore;
-        bestIssuer = issuer;
         patternsMatched.push(...matchedPatterns);
       }
     }
@@ -439,7 +437,6 @@ export class VerificationEngine {
    * Calculate perceptual hash for image
    */
   private calculatePerceptualHash(image: Awaited<ReturnType<typeof Jimp.read>>): string {
-    const hash = createHash('md5');
     const pixels = image.bitmap.data;
     
     // Simple hash based on average brightness of 8x8 grid

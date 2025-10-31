@@ -5,7 +5,7 @@ export const GET = withRole(['faculty', 'admin'], async () => {
   const supabase = await createSupabaseServerClient();
 
     // Get all certificates with their confidence scores and metadata
-    const { data: allCertificates, error: certsError } = await supabase
+    const { data: allCertificates } = await supabase
       .from('certificates')
       .select('id, verification_status, created_at, student_id, confidence_score, auto_approved, verification_method, fields');
 

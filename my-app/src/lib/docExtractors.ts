@@ -68,12 +68,9 @@ export function extractId(text: string, mrzLines?: string[]): ExtractedFields {
   return base;
 }
 
-  // Removed the old extractByType function with mrzLines
-export function extractByType(
-  text: string,
-  type: DocumentType
-): Record<string, string | string[] | undefined> {
-  let fields: ExtractedFields = {};
+  // Stub function - parameters are required for API compatibility but not used
+export function extractByType(): Record<string, string | string[] | undefined> {
+  const fields: ExtractedFields = {};
   return { ...fields };
 }
 

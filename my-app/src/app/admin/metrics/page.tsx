@@ -30,11 +30,7 @@ export default function MetricsPage() {
   const [error, setError] = useState<string | null>(null);
   const [daysBack, setDaysBack] = useState(30);
 
-  useEffect(() => {
-    loadMetrics();
-  }, [daysBack]);
-
-  const loadMetrics = async () => {
+  const loadMetrics = React.useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -58,7 +54,11 @@ export default function MetricsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [daysBack]);
+
+  useEffect(() => {
+    loadMetrics();
+  }, [loadMetrics]);
 
   const getMetricColor = (metricType: string) => {
     switch (metricType) {

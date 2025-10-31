@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { supabase } from "../../../lib/supabaseClient";
@@ -18,7 +17,6 @@ import {
 } from "@/components/ui";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,11 +26,11 @@ export default function LoginPage() {
   const [emailError, setEmailError] = useState<string | null>(null);
   // Signup-only fields
   const [fullName, setFullName] = useState("");
-  const [university, setUniversity] = useState("");
-  const [graduationYear, setGraduationYear] = useState<string>("");
-  const [major, setMajor] = useState("");
-  const [location, setLocation] = useState("");
-  const [gpa, setGpa] = useState<string>("");
+  const [university] = useState("");
+  const [graduationYear] = useState<string>("");
+  const [major] = useState("");
+  const [location] = useState("");
+  const [gpa] = useState<string>("");
   // Desired access (required) - only one can be selected
   const [requestedRole, setRequestedRole] = useState<'student' | 'recruiter' | 'faculty' | 'admin'>('student');
 
@@ -303,7 +301,7 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  }, [mode, email, password, router, validateEmail, requestedRole, fullName, university, graduationYear, major, location, gpa]);
+  }, [mode, email, password, validateEmail, requestedRole, fullName, university, graduationYear, major, location, gpa]);
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900">
