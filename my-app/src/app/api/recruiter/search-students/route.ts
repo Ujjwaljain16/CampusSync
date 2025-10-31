@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       if (institution) docsQuery = docsQuery.ilike('institution', `%${institution}%`);
 
       const { data: d, error: dErr } = await docsQuery;
-      if (!dErr && d) docs = d as Certificate[];
+      if (!dErr && d) docs = d as unknown as Certificate[];
     } catch {}
 
     let certificates: Certificate[] = [];
@@ -87,33 +87,37 @@ export async function GET(req: NextRequest) {
         console.log('[SEARCH-STUDENTS] Certificate query error:', certError);
         return NextResponse.json({ error: 'Failed to search certificates' }, { status: 500 });
       }
-      certificates = certs || [];
+      certificates = (certs as unknown as Certificate[]) || [];
       console.log('[SEARCH-STUDENTS] Certificates found:', certificates.length);
       if (certificates.length > 0) {
+        const firstCert = certs?.[0] as { id: string; student_id?: string };
         console.log('[SEARCH-STUDENTS] First cert:', {
-          id: certificates[0].id,
-          student_id: certificates[0].student_id
+          id: firstCert.id,
+          student_id: firstCert.student_id
         });
       }
     }
 
     // Get user IDs and filter for students only
     type BaseCert = { id: string; title: string; institution: string; date_issued: string; verification_status: string; student_id: string; document_type: string };
-    const base: BaseCert[] = (docs && docs.length > 0) ? docs.map((d: Certificate): BaseCert => ({
+    type DocRecord = { id: string; title: string; institution: string; issue_date?: string; date_issued?: string; verification_status: string; user_id: string; document_type: string };
+    type CertRecord = { id: string; title: string; institution: string; date_issued: string; verification_status: string; student_id?: string; user_id?: string };
+    
+    const base: BaseCert[] = (docs && docs.length > 0) ? (docs as unknown as DocRecord[]).map((d): BaseCert => ({
       id: d.id,
       title: d.title,
       institution: d.institution,
-      date_issued: d.date_issued,
+      date_issued: d.issue_date || d.date_issued || '',
       verification_status: d.verification_status,
       student_id: d.user_id, // documents table uses user_id field
       document_type: 'document',
-    })) : (certificates as Certificate[]).map((cert: Certificate): BaseCert => ({
+    })) : (certificates as unknown as CertRecord[]).map((cert): BaseCert => ({
       id: cert.id,
       title: cert.title,
       institution: cert.institution,
       date_issued: cert.date_issued,
       verification_status: cert.verification_status,
-      student_id: cert.user_id,
+      student_id: cert.student_id || cert.user_id || '',
       document_type: 'certificate'
     }));
 
@@ -412,7 +416,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Get user IDs and filter for students only
-    const userIds = [...new Set(certificates.map(cert => cert.student_id))];
+    type CertRecord = { id: string; title: string; institution: string; date_issued: string; verification_status: string; student_id: string };
+    const userIds = [...new Set((certificates as unknown as CertRecord[]).map(cert => cert.student_id))];
     const adminSupabase = createSupabaseAdminClient();
     const { data: userRoles, error: roleError } = await adminSupabase
       .from('user_roles')
@@ -425,7 +430,7 @@ export async function POST(req: NextRequest) {
     }
 
     const studentUserIds = new Set(userRoles?.map(ur => ur.user_id) || []);
-    const studentCertificates = certificates.filter(cert => studentUserIds.has(cert.student_id));
+    const studentCertificates = (certificates as unknown as CertRecord[]).filter(cert => studentUserIds.has(cert.student_id));
 
     // Group certificates by user and apply minimum certificate filter
     const userMap = new Map();

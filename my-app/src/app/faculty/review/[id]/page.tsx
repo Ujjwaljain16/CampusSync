@@ -7,7 +7,7 @@ type Evidence = {
   mrz?: { found?: boolean; valid?: boolean; lines?: string[] } | null;
   logo?: { score?: number; method?: string } | null;
   policy?: { score?: number; outcome?: string } | null;
-  extracted?: Record<string, any> | null;
+  extracted?: Record<string, unknown> | null;
 };
 
 type StatusResponse = {
@@ -55,7 +55,7 @@ export default function ReviewPage() {
             mrz: details.mrz || null,
             logo: details.logo || null,
             policy: details.policy || null,
-            extracted: details.extracted || null,
+            extracted: (details.extracted as Record<string, unknown>) || null,
           };
           if (!cancelled) setEvidence(fallback);
         }

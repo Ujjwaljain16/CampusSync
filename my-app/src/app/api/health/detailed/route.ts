@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export async function GET(_req: NextRequest) {
+export async function GET() {
   const startTime = Date.now();
   const health = {
     status: 'healthy',
@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest) {
     const dbStart = Date.now();
     
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('profiles')
         .select('count')
         .limit(1)
