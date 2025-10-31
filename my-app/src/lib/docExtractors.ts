@@ -13,11 +13,15 @@ export interface ExtractedFields {
   mrz?: string[];
 }
 
-function extractByRegex(text: string, patterns: Array<[keyof ExtractedFields, RegExp]>): ExtractedFields {
+type ExtractableField = Exclude<keyof ExtractedFields, 'mrz'>;
+
+function extractByRegex(text: string, patterns: Array<[ExtractableField, RegExp]>): ExtractedFields {
   const out: ExtractedFields = {};
   for (const [k, rx] of patterns) {
     const m = text.match(rx);
-    if (m && m[1]) (out as any)[k] = m[1].trim();
+    if (m && m[1]) {
+      out[k] = m[1].trim();
+    }
   }
   return out;
 }

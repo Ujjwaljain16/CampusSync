@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient, createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { Certificate } from '@/types/index';
 
 // Fixed: Now properly handles student_id field from certificates table
 export async function GET(req: NextRequest) {
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
     const adminSupabase = createSupabaseAdminClient(); // For user_roles queries that need to bypass RLS
 
     // Build the search query (documents first, fallback to certificates)
-    let docs: any[] = [];
+    let docs: Certificate[] = [];
     try {
       let docsQuery = supabase
         .from('documents')
@@ -45,10 +46,10 @@ export async function GET(req: NextRequest) {
       if (institution) docsQuery = docsQuery.ilike('institution', `%${institution}%`);
 
       const { data: d, error: dErr } = await docsQuery;
-      if (!dErr && d) docs = d;
+      if (!dErr && d) docs = d as Certificate[];
     } catch {}
 
-    let certificates: any[] = [];
+    let certificates: Certificate[] = [];
     if (!docs || docs.length === 0) {
       let queryBuilder = supabase
         .from('certificates')
@@ -98,21 +99,21 @@ export async function GET(req: NextRequest) {
 
     // Get user IDs and filter for students only
     type BaseCert = { id: string; title: string; institution: string; date_issued: string; verification_status: string; student_id: string; document_type: string };
-    const base: BaseCert[] = (docs && docs.length > 0) ? docs.map((d: any): BaseCert => ({
+    const base: BaseCert[] = (docs && docs.length > 0) ? docs.map((d: Certificate): BaseCert => ({
       id: d.id,
       title: d.title,
       institution: d.institution,
-      date_issued: d.issue_date,
+      date_issued: d.date_issued,
       verification_status: d.verification_status,
       student_id: d.user_id, // documents table uses user_id field
-      document_type: d.document_type,
-    })) : (certificates as any[]).map((cert: any): BaseCert => ({
+      document_type: 'document',
+    })) : (certificates as Certificate[]).map((cert: Certificate): BaseCert => ({
       id: cert.id,
       title: cert.title,
       institution: cert.institution,
       date_issued: cert.date_issued,
       verification_status: cert.verification_status,
-      student_id: cert.student_id,
+      student_id: cert.user_id,
       document_type: 'certificate'
     }));
 
@@ -263,7 +264,7 @@ export async function GET(req: NextRequest) {
         gpa: profile.gpa || 0,
         location: profile.location || 'Unknown',
         skills: Array.from(user.skills),
-        certifications: user.certificates.map((cert: any) => ({
+        certifications: user.certificates.map((cert: Certificate) => ({
           id: cert.id,
           title: cert.title,
           issuer: cert.institution,
@@ -520,7 +521,7 @@ export async function POST(req: NextRequest) {
           gpa: profile.gpa || 0,
           location: profile.location || 'Unknown',
           skills: Array.from(user.skills),
-          certifications: user.certificates.map((cert: any) => ({
+          certifications: user.certificates.map((cert: Certificate) => ({
             id: cert.id,
             title: cert.title,
             issuer: cert.institution,

@@ -17,7 +17,7 @@ interface PendingCert {
   confidence_score?: number;
   auto_approved?: boolean;
   verification_method?: string;
-  verification_details?: any;
+  verification_details?: Record<string, unknown>;
 }
 
 interface Analytics {
@@ -84,7 +84,7 @@ export default function FacultyDashboardPage() {
         const dres = await fetch('/api/documents/pending');
         if (dres.ok) {
           const dj = await dres.json();
-          pending = (dj.data || []).map((d: any) => ({
+          pending = (dj.data || []).map((d: Record<string, unknown>) => ({
             id: d.id,
             title: d.title,
             institution: d.institution || '',
@@ -108,15 +108,16 @@ export default function FacultyDashboardPage() {
         (pending as PendingCert[]).map(async (cert) => {
           try {
             // Prefer document metadata
-            let md: any = null;
+            let md: Record<string, unknown> | null = null;
             const dmd = await fetch(`/api/documents/${encodeURIComponent(cert.id)}/metadata`);
             if (dmd.ok) {
               md = await dmd.json();
               if (md?.data) {
+                const data = md.data as Record<string, unknown>;
                 return {
                   ...cert,
-                  confidence_score: md?.data?.ai_confidence_score || 0,
-                  verification_details: md?.data?.verification_details || {}
+                  confidence_score: (data?.ai_confidence_score as number) || 0,
+                  verification_details: (data?.verification_details as Record<string, unknown>) || {}
                 };
               }
             }
@@ -331,14 +332,18 @@ export default function FacultyDashboardPage() {
     );
   };
 
-  const getVerificationMethod = (details: any) => {
-    if (details?.qr_verification?.verified) {
+  const getVerificationMethod = (details: Record<string, unknown>) => {
+    const qrVerification = details?.qr_verification as Record<string, unknown> | undefined;
+    const logoMatch = details?.logo_match as Record<string, unknown> | undefined;
+    const templateMatch = details?.template_match as Record<string, unknown> | undefined;
+    
+    if (qrVerification?.verified) {
       return { icon: <Shield className="w-3 h-3" />, text: 'QR Verified', color: 'text-emerald-400' };
     }
-    if (details?.logo_match?.score > 0.8) {
+    if (typeof logoMatch?.score === 'number' && logoMatch.score > 0.8) {
       return { icon: <Brain className="w-3 h-3" />, text: 'Logo Match', color: 'text-blue-400' };
     }
-    if (details?.template_match?.score > 0.6) {
+    if (typeof templateMatch?.score === 'number' && templateMatch.score > 0.6) {
       return { icon: <Star className="w-3 h-3" />, text: 'Template Match', color: 'text-purple-400' };
     }
     return { icon: <AlertCircle className="w-3 h-3" />, text: 'Manual Review', color: 'text-gray-400' };
@@ -438,7 +443,7 @@ export default function FacultyDashboardPage() {
         <div className="grid gap-4">
           {filteredRows.map(cert => {
             const confScore = cert.confidence_score || 0;
-            const verificationMethod = getVerificationMethod(cert.verification_details);
+            const verificationMethod = getVerificationMethod(cert.verification_details || {});
             const isSelected = selectedCerts.has(cert.id);
             
             return (
@@ -607,7 +612,7 @@ export default function FacultyDashboardPage() {
                 <div className="flex items-center gap-2 animate-in slide-in-from-left duration-300">
                   <select
                     value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value as any)}
+                    onChange={(e) => setFilterStatus(e.target.value as 'all' | 'low_confidence' | 'manual_review')}
                     className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 text-white px-4 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/30 font-medium transition-all"
                   >
                     <option value="low_confidence" className="bg-slate-900">Low Confidence (&lt; 90%)</option>

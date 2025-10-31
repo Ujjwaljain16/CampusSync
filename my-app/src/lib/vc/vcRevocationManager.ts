@@ -13,7 +13,7 @@ export interface RevocationRecord {
   revokedBy: string;
   reason: RevocationReason;
   status: 'revoked' | 'suspended' | 'expired';
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export interface RevocationList {
@@ -97,7 +97,7 @@ export class VCRevocationManager {
     credentialId: string,
     revokedBy: string,
     reasonCode: string,
-    metadata: Record<string, any> = {}
+    metadata: Record<string, unknown> = {}
   ): Promise<RevocationRecord> {
     const reason = this.revocationReasons.get(reasonCode);
     if (!reason) {
@@ -115,7 +115,7 @@ export class VCRevocationManager {
     };
 
     // Add to appropriate revocation list
-    const issuer = metadata.issuer || 'default';
+    const issuer = (typeof metadata.issuer === 'string' ? metadata.issuer : undefined) || 'default';
     await this.addToRevocationList(issuer, revocationRecord);
 
     return revocationRecord;
@@ -128,7 +128,7 @@ export class VCRevocationManager {
     credentialId: string,
     suspendedBy: string,
     reasonCode: string,
-    metadata: Record<string, any> = {}
+    metadata: Record<string, unknown> = {}
   ): Promise<RevocationRecord> {
     const reason = this.revocationReasons.get(reasonCode);
     if (!reason) {
@@ -145,7 +145,7 @@ export class VCRevocationManager {
       metadata
     };
 
-    const issuer = metadata.issuer || 'default';
+    const issuer = (typeof metadata.issuer === 'string' ? metadata.issuer : undefined) || 'default';
     await this.addToRevocationList(issuer, revocationRecord);
 
     return revocationRecord;
@@ -314,7 +314,7 @@ export class VCRevocationManager {
   /**
    * Export revocation list as JSON-LD
    */
-  exportRevocationList(issuer: string): any {
+  exportRevocationList(issuer: string): Record<string, unknown> | null {
     const revocationList = this.revocationLists.get(issuer);
     if (!revocationList) {
       return null;

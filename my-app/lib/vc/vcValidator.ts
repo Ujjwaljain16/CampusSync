@@ -1,4 +1,4 @@
-import { jwtVerify, importJWK } from 'jose';
+import { jwtVerify, importJWK, JWK } from 'jose';
 import type { VerifiableCredential } from '../../src/types/index';
 
 export interface ValidationResult {
@@ -34,7 +34,7 @@ export class VCValidator {
    */
   static async validateVC(
     vc: VerifiableCredential,
-    issuerJWK: any,
+    issuerJWK: JWK,
     options: ValidationOptions = {}
   ): Promise<ValidationResult> {
     const errors: string[] = [];
@@ -201,7 +201,7 @@ export class VCValidator {
   /**
    * Validate subject
    */
-  private static validateSubject(vc: VerifiableCredential, errors: string[], metadata: any): void {
+  private static validateSubject(vc: VerifiableCredential, errors: string[], metadata: ValidationResult['metadata']): void {
     const subject = vc.credentialSubject;
 
     if (typeof subject !== 'object' || subject === null) {
@@ -232,7 +232,7 @@ export class VCValidator {
     errors: string[], 
     warnings: string[], 
     options: ValidationOptions,
-    metadata: any
+    metadata: ValidationResult['metadata']
   ): void {
     const now = new Date();
     
@@ -278,9 +278,9 @@ export class VCValidator {
    */
   private static async validateProof(
     vc: VerifiableCredential, 
-    issuerJWK: any, 
+    issuerJWK: JWK, 
     errors: string[], 
-    metadata: any
+    metadata: ValidationResult['metadata']
   ): Promise<void> {
 
     const proof = vc.proof;
@@ -345,7 +345,7 @@ export class VCValidator {
   /**
    * Validate VC against a specific schema
    */
-  static validateAgainstSchema(vc: VerifiableCredential, schema: any): ValidationResult {
+  static validateAgainstSchema(vc: VerifiableCredential, schema: Record<string, unknown>): ValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];
 

@@ -1,24 +1,24 @@
 // Job queue client for background processing
 import { createClient } from '@supabase/supabase-js';
+import { getServerEnv } from '@/lib/envServer';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Job queue is a server-side module and must not be imported into client bundles.
+const env = getServerEnv();
+const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY);
 
 export interface JobPayload {
   documentId: string;
   fileUrl?: string;
   documentType?: string;
   userId?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface JobResult {
   success: boolean;
-  data?: any;
+  data?: Record<string, unknown>;
   error?: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
 }
 
 export class JobQueue {
@@ -91,7 +91,7 @@ export class JobQueue {
   static async getJobStatus(jobId: string): Promise<{
     id: string;
     status: string;
-    result?: any;
+    result?: Record<string, unknown>;
     error?: string;
     createdAt: string;
     startedAt?: string;
@@ -122,7 +122,7 @@ export class JobQueue {
   static async getJobHistory(jobId: string): Promise<Array<{
     status: string;
     message?: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
     createdAt: string;
   }>> {
     const { data, error } = await supabase
@@ -210,7 +210,7 @@ export class JobWorker {
         const result = await processor(job.payload);
         await JobQueue.completeJob(job.id, result);
         console.log(`Completed job ${job.id}`);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error(`Job ${job.id} failed:`, error);
         
         // Check if we should retry
@@ -223,7 +223,7 @@ export class JobWorker {
         } else {
           await JobQueue.completeJob(job.id, {
             success: false,
-            error: error.message || 'Unknown error'
+            error: (error as Error).message || 'Unknown error'
           });
         }
       }

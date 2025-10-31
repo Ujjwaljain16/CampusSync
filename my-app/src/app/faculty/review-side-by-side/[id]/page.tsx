@@ -10,7 +10,7 @@ type Document = {
   file_url: string;
   verification_status: string;
   created_at: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
 };
 
 type Evidence = {
@@ -18,7 +18,7 @@ type Evidence = {
   mrz?: { found?: boolean; valid?: boolean; lines?: string[] } | null;
   logo?: { score?: number; method?: string } | null;
   policy?: { score?: number; outcome?: string } | null;
-  extracted?: Record<string, any> | null;
+  extracted?: Record<string, unknown> | null;
 };
 
 export default function SideBySideReviewPage() {
@@ -56,8 +56,8 @@ export default function SideBySideReviewPage() {
         setEvidence(evData);
       }
 
-    } catch (e: any) {
-      setError(e?.message || "Failed to load document");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load document");
     } finally {
       setLoading(false);
     }
@@ -192,7 +192,7 @@ export default function SideBySideReviewPage() {
                 ].map(tab => (
                   <button
                     key={tab.id}
-                    onClick={() => setSelectedTab(tab.id as any)}
+                    onClick={() => setSelectedTab(tab.id as 'preview' | 'fields' | 'evidence')}
                     className={`px-4 py-3 text-sm font-medium ${
                       selectedTab === tab.id
                         ? 'border-b-2 border-blue-500 text-blue-600'

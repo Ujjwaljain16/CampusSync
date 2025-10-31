@@ -41,7 +41,7 @@ export const GET = withRole(['faculty', 'admin'], async () => {
     // Build a map of certificate IDs to metadata for easy lookup
     const metadataMap = new Map<string, {
       score: number | null;
-      details: any;
+      details: Record<string, unknown>;
       created_at: string;
     }>();
 
@@ -71,7 +71,7 @@ export const GET = withRole(['faculty', 'admin'], async () => {
     const allMetadata: Array<{
       id: string;
       score: number | null;
-      details: any;
+      details: Record<string, unknown>;
       created_at: string;
       auto_approved?: boolean;
       verification_method?: string;
@@ -126,11 +126,11 @@ export const GET = withRole(['faculty', 'admin'], async () => {
         verificationMethods.logo_match++;
       } else if (method === 'template_match') {
         verificationMethods.template_match++;
-      } else if (details.qr_verification?.verified) {
+      } else if ((details.qr_verification as Record<string, unknown>)?.verified) {
         verificationMethods.qr_verified++;
-      } else if (details.logo_match?.score > 0.8) {
+      } else if (((details.logo_match as Record<string, unknown>)?.score as number) > 0.8) {
         verificationMethods.logo_match++;
-      } else if (details.template_match?.score > 0.6) {
+      } else if (((details.template_match as Record<string, unknown>)?.score as number) > 0.6) {
         verificationMethods.template_match++;
       } else if ((m.score || 0) >= 0.7) {
         verificationMethods.ai_confidence++;

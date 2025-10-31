@@ -77,8 +77,8 @@ export default function VCManagementPage() {
         setRevocationStats(revocationData.data);
       }
 
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch stats');
     } finally {
       setLoading(false);
     }
@@ -137,7 +137,7 @@ export default function VCManagementPage() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
+                  onClick={() => setActiveTab(tab.id as 'overview' | 'issuance' | 'verification' | 'revocation' | 'keys')}
                   className={`flex items-center space-x-2 py-2 px-1 border-b-2 font-medium text-sm ${
                     activeTab === tab.id
                       ? 'border-blue-500 text-blue-400'

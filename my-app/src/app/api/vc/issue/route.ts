@@ -5,15 +5,18 @@ import { ProductionVCIssuer, type IssuanceRequest } from '@/lib/vc/vcIssuer';
 
 import type { CredentialSubject } from '@/types/index';
 
-function isCredentialSubject(obj: any): obj is CredentialSubject {
+function isCredentialSubject(obj: unknown): obj is CredentialSubject {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+  
+  const record = obj as Record<string, unknown>;
   return (
-    obj &&
-    typeof obj === 'object' &&
-    typeof obj.id === 'string' &&
-    typeof obj.certificateId === 'string' &&
-    typeof obj.title === 'string' &&
-    typeof obj.institution === 'string' &&
-    typeof obj.dateIssued === 'string'
+    typeof record.id === 'string' &&
+    typeof record.certificateId === 'string' &&
+    typeof record.title === 'string' &&
+    typeof record.institution === 'string' &&
+    typeof record.dateIssued === 'string'
   );
 }
 import { ProductionKeyManager } from '@/lib/vc/productionKeyManager';

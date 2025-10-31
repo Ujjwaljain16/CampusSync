@@ -15,11 +15,11 @@ interface FlaggedCert {
   verification_results?: {
     confidence_score?: number;
     auto_approved?: boolean;
-    details?: any;
+    details?: Record<string, unknown>;
   }[] | {
     confidence_score?: number;
     auto_approved?: boolean;
-    details?: any;
+    details?: Record<string, unknown>;
   } | null;
 }
 
@@ -151,7 +151,7 @@ export default function FacultyFlaggedPage() {
             </thead>
             <tbody>
               {rows.map(r => {
-                const vr = Array.isArray(r.verification_results) ? r.verification_results[0] : r.verification_results as any;
+                const vr = Array.isArray(r.verification_results) ? r.verification_results[0] : r.verification_results;
                 const conf = vr?.confidence_score ?? null;
                 return (
                   <tr key={r.id} className="border-t border-white/10">
@@ -163,22 +163,22 @@ export default function FacultyFlaggedPage() {
                     </td>
                     <td className="p-3 text-white/80">{conf !== null ? `${(Number(conf) * 100).toFixed(1)}%` : '-'}</td>
                     <td className="p-3">
-                      {vr?.details ? (
-                        <div className="text-white/80 text-sm space-y-1">
-                          {'qr_verification' in vr.details && (
-                            <div>QR: {vr.details.qr_verification.verified ? 'verified' : 'not verified'}</div>
-                          )}
-                          {'logo_match' in vr.details && (
-                            <div>Logo match: {vr.details.logo_match.score?.toFixed ? vr.details.logo_match.score.toFixed(2) : vr.details.logo_match.score}</div>
-                          )}
-                          {'template_match' in vr.details && (
-                            <div>Template: {vr.details.template_match.score?.toFixed ? vr.details.template_match.score.toFixed(2) : vr.details.template_match.score}</div>
-                          )}
-                          {'ai_confidence' in vr.details && (
-                            <div>AI: {vr.details.ai_confidence.score?.toFixed ? vr.details.ai_confidence.score.toFixed(2) : vr.details.ai_confidence.score}</div>
-                          )}
-                        </div>
-                      ) : <span className="text-white/50">-</span>}
+                      {vr?.details ? (() => {
+                        const details = vr.details as Record<string, unknown>;
+                        const qrVerif = details?.qr_verification as Record<string, unknown> | undefined;
+                        const logoMatch = details?.logo_match as Record<string, unknown> | undefined;
+                        const templateMatch = details?.template_match as Record<string, unknown> | undefined;
+                        const aiConf = details?.ai_confidence as Record<string, unknown> | undefined;
+                        
+                        return (
+                          <div className="text-white/80 text-sm space-y-1">
+                            {qrVerif && <div>QR: {qrVerif.verified ? 'verified' : 'not verified'}</div>}
+                            {logoMatch?.score !== undefined && <div>Logo match: {typeof logoMatch.score === 'number' ? logoMatch.score.toFixed(2) : String(logoMatch.score)}</div>}
+                            {templateMatch?.score !== undefined && <div>Template: {typeof templateMatch.score === 'number' ? templateMatch.score.toFixed(2) : String(templateMatch.score)}</div>}
+                            {aiConf?.score !== undefined && <div>AI: {typeof aiConf.score === 'number' ? aiConf.score.toFixed(2) : String(aiConf.score)}</div>}
+                          </div>
+                        );
+                      })() : <span className="text-white/50">-</span>}
                     </td>
                     <td className="p-3">{r.file_url ? <a className="text-blue-300 underline" href={r.file_url} target="_blank" rel="noreferrer">View</a> : <span className="text-white/50">-</span>}</td>
                     <td className="p-3">

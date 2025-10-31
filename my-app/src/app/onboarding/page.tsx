@@ -32,12 +32,12 @@ export default function OnboardingPage() {
 				})
 			});
 			if (!resp.ok) {
-				const js = await resp.json().catch(() => ({} as any));
+				const js = await resp.json().catch(() => ({ error: undefined })) as { error?: string };
 				throw new Error(js?.error || 'Failed to save profile');
 			}
 			router.replace('/dashboard');
-		} catch (e: any) {
-			setError(e?.message || 'Failed');
+		} catch (e: unknown) {
+			setError(e instanceof Error ? e.message : 'Failed');
 		} finally {
 			setLoading(false);
 		}

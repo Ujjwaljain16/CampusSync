@@ -17,10 +17,10 @@ type StatusResponse = {
   institution?: string;
   status?: string;
   confidence?: number;
-  details?: any;
+  details?: Record<string, unknown>;
   createdAt?: string;
   updatedAt?: string;
-  auditTrail?: Array<{ action: string; details: any; created_at: string }>; 
+  auditTrail?: Array<{ action: string; details: Record<string, unknown>; created_at: string }>; 
 };
 
 export default function ReviewPage() {
@@ -49,7 +49,7 @@ export default function ReviewPage() {
           if (!cancelled) setEvidence(ev);
         } else {
           // Fallback: try to use status.details shape
-          const details = (data as any)?.details || {};
+          const details = (data as Record<string, unknown>)?.details as Record<string, unknown> || {};
           const fallback: Evidence = {
             qr: details.qr || null,
             mrz: details.mrz || null,
@@ -59,8 +59,8 @@ export default function ReviewPage() {
           };
           if (!cancelled) setEvidence(fallback);
         }
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Failed to load");
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
       } finally {
         if (!cancelled) setLoading(false);
       }

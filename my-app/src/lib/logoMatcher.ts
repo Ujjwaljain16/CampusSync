@@ -1,5 +1,6 @@
 // Logo/template matcher with SSIM/ORB and CLIP similarity
 import { createClient } from '@supabase/supabase-js';
+import { getServerEnv } from '@/lib/envServer';
 
 export interface LogoMatchResult {
   score: number;
@@ -18,16 +19,16 @@ interface InstitutionTemplate {
   domain?: string;
   logo_url?: string;
   header_mask_url?: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
 }
 
 export async function matchInstitutionLogo(imageBytes: Buffer, institution?: string): Promise<LogoMatchResult> {
   try {
     // Query institution templates
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    // This function must run server-side. Use server-only env accessor to obtain the
+    // SUPABASE_SERVICE_ROLE_KEY safely.
+    const env = getServerEnv();
+    const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY);
 
     let query = supabase.from('institution_templates').select('*');
     if (institution) {

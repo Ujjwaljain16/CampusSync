@@ -79,7 +79,7 @@ export default function StudentDashboard() {
         const docsRes = await fetch('/api/documents');
         if (docsRes.ok) {
           const docsJson = await docsRes.json();
-          const docs = (docsJson.data || []) as any[];
+          const docs = (docsJson.data || []) as Array<Record<string, unknown>>;
           list = docs.map(d => ({
             id: d.id,
             title: d.title,
@@ -307,14 +307,18 @@ export default function StudentDashboard() {
     );
   };
 
-  const getVerificationMethod = (details: any) => {
-    if (details?.qr_verification?.verified) {
+  const getVerificationMethod = (details: Record<string, unknown>) => {
+    const qrVerification = details?.qr_verification as Record<string, unknown> | undefined;
+    const logoMatch = details?.logo_match as Record<string, unknown> | undefined;
+    const templateMatch = details?.template_match as Record<string, unknown> | undefined;
+    
+    if (qrVerification?.verified) {
       return { icon: <Shield className="w-3 h-3" />, text: 'QR Verified', color: 'text-emerald-400' };
     }
-    if (details?.logo_match?.score > 0.8) {
+    if (typeof logoMatch?.score === 'number' && logoMatch.score > 0.8) {
       return { icon: <Brain className="w-3 h-3" />, text: 'Logo Match', color: 'text-blue-400' };
     }
-    if (details?.template_match?.score > 0.6) {
+    if (typeof templateMatch?.score === 'number' && templateMatch.score > 0.6) {
       return { icon: <Star className="w-3 h-3" />, text: 'Template Match', color: 'text-purple-400' };
     }
     return { icon: <AlertCircle className="w-3 h-3" />, text: 'Manual Review', color: 'text-gray-400' };
@@ -1145,8 +1149,8 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
       }
 
       onSave();
-    } catch (e: any) {
-      setError(e?.message || 'Failed to save profile');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to save profile');
     } finally {
       setLoading(false);
     }
