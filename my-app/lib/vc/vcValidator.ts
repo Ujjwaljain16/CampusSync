@@ -34,12 +34,19 @@ export class VCValidator {
    */
   static async validateVC(
     vc: VerifiableCredential,
-    issuerJWK: JWK,
+    issuerJWK?: JWK | null,
     options: ValidationOptions = {}
   ): Promise<ValidationResult> {
     const errors: string[] = [];
     const warnings: string[] = [];
-    const metadata: any = {};
+    const metadata: ValidationResult['metadata'] = {
+      issuer: '',
+      subject: '',
+      issuedAt: new Date(0),
+      expiresAt: undefined,
+      credentialType: [],
+      keyId: ''
+    };
 
     try {
       // 1. Basic structure validation
@@ -62,7 +69,19 @@ export class VCValidator {
 
       // 7. Proof validation
       if (vc.proof) {
-        await this.validateProof(vc, issuerJWK, errors, metadata);
+        if (issuerJWK && issuerJWK !== null) {
+          await this.validateProof(vc, issuerJWK, errors, metadata);
+        } else {
+          // Skip cryptographic verification if no key provided
+          // Basic proof structure check only
+          const keyId = vc.proof.verificationMethod?.split('#')[1];
+          if (keyId) {
+            metadata.keyId = keyId;
+          }
+          if (!vc.proof.jws) {
+            errors.push('Proof missing JWS');
+          }
+        }
       } else {
         errors.push('Missing proof in Verifiable Credential');
       }
@@ -249,7 +268,7 @@ export class VCValidator {
           errors.push('issuanceDate cannot be in the future');
         }
       }
-    } catch (error) {
+    } catch {
       errors.push('Invalid issuanceDate format');
     }
 
@@ -267,7 +286,7 @@ export class VCValidator {
             errors.push('Credential has expired');
           }
         }
-      } catch (error) {
+      } catch {
         errors.push('Invalid expirationDate format');
       }
     }
@@ -345,7 +364,8 @@ export class VCValidator {
   /**
    * Validate VC against a specific schema
    */
-  static validateAgainstSchema(vc: VerifiableCredential, schema: Record<string, unknown>): ValidationResult {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  static validateAgainstSchema(_vc: VerifiableCredential, _schema: Record<string, unknown>): ValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];
 

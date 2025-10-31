@@ -115,7 +115,7 @@ export class VCRevocationManager {
     };
 
     // Add to appropriate revocation list
-    const issuer = metadata.issuer || 'default';
+    const issuer = (metadata.issuer as string) || 'default';
     await this.addToRevocationList(issuer, revocationRecord);
 
     return revocationRecord;
@@ -145,7 +145,7 @@ export class VCRevocationManager {
       metadata
     };
 
-    const issuer = metadata.issuer || 'default';
+    const issuer = (metadata.issuer as string) || 'default';
     await this.addToRevocationList(issuer, revocationRecord);
 
     return revocationRecord;

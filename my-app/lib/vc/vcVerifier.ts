@@ -1,4 +1,4 @@
-import { jwtVerify, importJWK } from 'jose';
+import { jwtVerify, importJWK, type JWK } from 'jose';
 import { VCValidator, type ValidationResult } from './vcValidator';
 import { VCRevocationManager, type RevocationCheckResult } from './vcRevocationManager';
 import type { VerifiableCredential } from '../../src/types/index';
@@ -9,7 +9,7 @@ export interface VerificationOptions {
   checkRevocation?: boolean;
   requiredTypes?: string[];
   allowedIssuers?: string[];
-  trustedKeys?: Map<string, any>;
+  trustedKeys?: Map<string, JWK>;
 }
 
 export interface VerificationResult {
@@ -43,7 +43,7 @@ export class ProductionVCVerifier {
   private static instance: ProductionVCVerifier;
   private revocationManager: VCRevocationManager;
   private verificationHistory: Map<string, VerificationReport> = new Map();
-  private trustedKeys: Map<string, any> = new Map();
+  private trustedKeys: Map<string, JWK> = new Map();
 
   constructor() {
     this.revocationManager = VCRevocationManager.getInstance();
@@ -67,7 +67,14 @@ export class ProductionVCVerifier {
     const startTime = Date.now();
     const errors: string[] = [];
     const warnings: string[] = [];
-    const metadata: any = {};
+    const metadata: VerificationResult['metadata'] = {
+      issuer: '',
+      subject: '',
+      issuedAt: new Date(),
+      credentialType: [],
+      keyId: '',
+      verificationMethod: ''
+    };
 
     try {
       // 1. Basic structure validation
@@ -232,7 +239,10 @@ export class ProductionVCVerifier {
       
       if (!signingKey) {
         // Try to fetch key from issuer's key registry
-        signingKey = await this.fetchIssuerKey(vc.issuer, keyId);
+        const fetchedKey = await this.fetchIssuerKey(vc.issuer, keyId);
+        if (fetchedKey) {
+          signingKey = fetchedKey;
+        }
       }
 
       if (!signingKey) {
@@ -262,7 +272,8 @@ export class ProductionVCVerifier {
   /**
    * Fetch issuer key from key registry
    */
-  private async fetchIssuerKey(issuer: string, keyId: string): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async fetchIssuerKey(_issuer: string, _keyId: string): Promise<JWK | null> {
     // In a production system, this would fetch from the issuer's key registry
     // For now, we'll return null and rely on trusted keys being provided
     return null;
@@ -389,7 +400,7 @@ export class ProductionVCVerifier {
   /**
    * Add trusted key
    */
-  addTrustedKey(keyId: string, key: any): void {
+  addTrustedKey(keyId: string, key: JWK): void {
     this.trustedKeys.set(keyId, key);
   }
 
@@ -403,7 +414,7 @@ export class ProductionVCVerifier {
   /**
    * Get all trusted keys
    */
-  getTrustedKeys(): Map<string, any> {
+  getTrustedKeys(): Map<string, JWK> {
     return new Map(this.trustedKeys);
   }
 

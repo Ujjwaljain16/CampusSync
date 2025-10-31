@@ -86,7 +86,7 @@ export class ProductionVCVerifier {
 
     try {
       // 1. Basic structure validation
-      const validationResult = await VCValidator.validateVC(vc, null, {
+      const validationResult = await VCValidator.validateVC(vc, undefined, {
         allowExpired: options.allowExpired,
         strictMode: options.strictMode,
         requiredTypes: options.requiredTypes,
