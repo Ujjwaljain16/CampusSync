@@ -1,14 +1,17 @@
 import type { VerifiableCredential } from '@/types/index';
 
-export function isVerifiableCredential(obj: any): obj is VerifiableCredential {
+export function isVerifiableCredential(obj: unknown): obj is VerifiableCredential {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+  
+  const record = obj as Record<string, unknown>;
   return (
-    obj &&
-    typeof obj === 'object' &&
-    Array.isArray(obj['@context']) &&
-    Array.isArray(obj.type) &&
-    typeof obj.issuer === 'string' &&
-    typeof obj.issuanceDate === 'string' &&
-    typeof obj.credentialSubject === 'object' &&
-    obj.credentialSubject !== null
+    Array.isArray(record['@context']) &&
+    Array.isArray(record.type) &&
+    typeof record.issuer === 'string' &&
+    typeof record.issuanceDate === 'string' &&
+    typeof record.credentialSubject === 'object' &&
+    record.credentialSubject !== null
   );
 }

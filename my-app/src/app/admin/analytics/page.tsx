@@ -299,7 +299,7 @@ export default function AnalyticsDashboard() {
             <div className="flex items-center gap-3">
               <select
                 value={timeRange}
-                onChange={(e) => setTimeRange(e.target.value as any)}
+                onChange={(e) => setTimeRange(e.target.value as '7d' | '30d' | '90d')}
                 className="bg-white/10 border border-white/20 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 <option value="7d">Last 7 days</option>

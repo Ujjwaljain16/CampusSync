@@ -37,8 +37,8 @@ export async function GET(request: NextRequest) {
 		}
 
 		return NextResponse.json({ data: profile });
-	} catch (error: any) {
-		return NextResponse.json({ error: error?.message || 'Unexpected error' }, { status: 500 });
+	} catch (error: unknown) {
+		return NextResponse.json({ error: error instanceof Error ? error.message : 'Unexpected error' }, { status: 500 });
 	}
 }
 
@@ -83,14 +83,14 @@ export async function POST(request: NextRequest) {
 		}
 
 		// Build payload using best-effort columns
-		const payload: Record<string, any> = { id: user.id, full_name: full_name.trim(), role: 'student' };
+		const payload: Record<string, unknown> = { id: user.id, full_name: full_name.trim(), role: 'student' };
 		if (university) payload.university = String(university);
 		if (graduation_year) payload.graduation_year = Number(graduation_year);
 		if (major) payload.major = String(major);
 		if (location) payload.location = String(location);
 		if (gpa !== undefined && gpa !== null && gpa !== '') payload.gpa = Number(gpa);
 
-		let upsertErr: any = null;
+		let upsertErr: unknown = null;
 		try {
 			const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
 			upsertErr = error;
@@ -106,8 +106,8 @@ export async function POST(request: NextRequest) {
 		}
 
 		return response;
-	} catch (error: any) {
-		return NextResponse.json({ error: error?.message || 'Unexpected error' }, { status: 500 });
+	} catch (error: unknown) {
+		return NextResponse.json({ error: error instanceof Error ? error.message : 'Unexpected error' }, { status: 500 });
 	}
 }
 

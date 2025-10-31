@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest } from 'next/server';
+import { getServerEnv } from './envServer';
 
 export async function createSupabaseServerClient() {
 	const cookieStore = await cookies();
@@ -160,13 +161,17 @@ export async function requireRole(allowedRoles: string[]) {
 
 // Admin client with service role key for admin operations
 export function createSupabaseAdminClient() {
-	if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+	const env = getServerEnv();
+	const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+	const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL;
+
+	if (!serviceKey) {
 		throw new Error('SUPABASE_SERVICE_ROLE_KEY is required for admin operations');
 	}
 
 	return createClient(
-		process.env.NEXT_PUBLIC_SUPABASE_URL!,
-		process.env.SUPABASE_SERVICE_ROLE_KEY,
+		supabaseUrl!,
+		serviceKey,
 		{
 			auth: {
 				autoRefreshToken: false,

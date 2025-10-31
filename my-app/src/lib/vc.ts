@@ -1,7 +1,7 @@
 import { SignJWT, importJWK, JWK, jwtVerify } from 'jose';
 import { randomUUID } from 'crypto';
 import type { VerifiableCredential } from '../types/index';
-
+import { getIssuerJwkJson } from '@/lib/envServer';
 export interface CreateVcParams {
 	issuerDid: string;
 	verificationMethod: string;
@@ -11,14 +11,7 @@ export interface CreateVcParams {
 }
 
 export async function getIssuerJwk(): Promise<JWK> {
-	const jwkJson = process.env.VC_ISSUER_JWK;
-	if (!jwkJson) {
-		throw new Error(
-			'VC_ISSUER_JWK is not set. Please add it to your .env.local file.\n' +
-			'Run: node scripts/generate-vc-jwk-simple.js to generate a development JWK.'
-		);
-	}
-	
+	const jwkJson = getIssuerJwkJson();
 	try {
 		const jwk = JSON.parse(jwkJson);
 		return jwk as JWK;

@@ -18,7 +18,7 @@ interface ApprovalHistory {
     created_at: string;
   };
   approverRole: string;
-  details: any;
+  details: Record<string, unknown>;
   createdAt: string;
   reverted: boolean;
   canRevert: boolean;
@@ -53,8 +53,8 @@ export default function FacultyHistoryPage() {
       
       setApprovals(data.data.approvals);
       setPagination(data.data.pagination);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch history');
     } finally {
       setLoading(false);
     }
@@ -92,8 +92,8 @@ export default function FacultyHistoryPage() {
       setShowRevertModal(null);
       setRevertReason('');
       alert('Approval reverted successfully');
-    } catch (err: any) {
-      alert(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Error: ${err instanceof Error ? err.message : 'Failed to revert'}`);
     } finally {
       setReverting(null);
     }

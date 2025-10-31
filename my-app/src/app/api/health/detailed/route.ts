@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest) {
     environment: process.env.NODE_ENV || 'development',
     uptime: process.uptime(),
     memory: process.memoryUsage(),
-    checks: {} as any
+    checks: {} as Record<string, unknown>
   };
 
   try {
@@ -30,11 +30,11 @@ export async function GET(_req: NextRequest) {
         responseTime: Date.now() - dbStart,
         error: error?.message || null
       };
-    } catch (dbError: any) {
+    } catch (dbError: unknown) {
       health.checks.database = {
         status: 'unhealthy',
         responseTime: Date.now() - dbStart,
-        error: dbError.message
+        error: dbError instanceof Error ? dbError.message : 'Database error'
       };
     }
 
@@ -48,10 +48,10 @@ export async function GET(_req: NextRequest) {
           status: 'healthy',
           responseTime: Date.now() - tableStart
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         health.checks[`table_${table}`] = {
           status: 'unhealthy',
-          error: error.message
+          error: error instanceof Error ? error.message : 'Table check failed'
         };
       }
     }
@@ -87,14 +87,14 @@ export async function GET(_req: NextRequest) {
 
     // Overall health determination
     const unhealthyChecks = Object.values(health.checks).filter(
-      (check: any) => check.status === 'unhealthy'
+      (check: unknown) => (check as Record<string, unknown>).status === 'unhealthy'
     );
     
     if (unhealthyChecks.length > 0) {
       health.status = 'unhealthy';
     } else {
       const warningChecks = Object.values(health.checks).filter(
-        (check: any) => check.status === 'warning'
+        (check: unknown) => (check as Record<string, unknown>).status === 'warning'
       );
       if (warningChecks.length > 0) {
         health.status = 'warning';
@@ -112,11 +112,11 @@ export async function GET(_req: NextRequest) {
 
     return NextResponse.json(health, { status: statusCode });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json({
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
-      error: error.message,
+      error: error instanceof Error ? error.message : 'Health check failed',
       checks: {
         overall: {
           status: 'unhealthy',

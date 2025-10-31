@@ -130,7 +130,7 @@ export default function LoginPage() {
               refresh_token: data.session.refresh_token,
             })
           });
-          const completeJson = await completeResp.json().catch(() => ({} as any));
+          const completeJson = await completeResp.json().catch(() => ({ redirectTo: undefined })) as { redirectTo?: string };
           if (!completeResp.ok || !completeJson?.redirectTo) {
             console.error('Complete-login failed, falling back to /dashboard', completeJson);
             window.location.href = '/dashboard';
@@ -151,18 +151,17 @@ export default function LoginPage() {
             if (precheck.data?.user) {
               setError('Email already registered. Please sign in.');
               setLoading(false);
-              return;
-            }
-          } catch (precheckError: any) {
-            // Expected error if account doesn't exist - proceed with signup
-            if (precheckError?.status === 400) {
-              console.log('Account does not exist, proceeding with signup');
-            } else {
-              console.warn('Unexpected error during precheck:', precheckError);
-            }
+            return;
           }
-
-          // Bypass Supabase signUp entirely in development by creating the user directly
+        } catch (precheckError: unknown) {
+          // Expected error if account doesn't exist - proceed with signup
+          const error = precheckError as { status?: number };
+          if (error?.status === 400) {
+            console.log('Account does not exist, proceeding with signup');
+          } else {
+            console.warn('Unexpected error during precheck:', precheckError);
+          }
+        }          // Bypass Supabase signUp entirely in development by creating the user directly
           try {
             const resp = await fetch('/api/auth/dev-upsert-user', {
               method: 'POST',
@@ -220,7 +219,7 @@ export default function LoginPage() {
                   refresh_token: signInData.session.refresh_token
                 })
               });
-              const completeJson = await completeResp.json().catch(() => ({} as any));
+              const completeJson = await completeResp.json().catch(() => ({ redirectTo: undefined })) as { redirectTo?: string };
               if (requestedRole && requestedRole !== 'student') {
                 window.location.href = '/waiting';
               } else {
@@ -230,8 +229,8 @@ export default function LoginPage() {
               window.location.href = '/dashboard';
             }
             return;
-          } catch (e: any) {
-            setError(e?.message || 'Signup failed');
+          } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : 'Signup failed');
             return;
           }
         } else {
@@ -286,7 +285,7 @@ export default function LoginPage() {
                   refresh_token: data.session.refresh_token
                 })
               });
-              const payload = await go.json().catch(() => ({} as any));
+              const payload = await go.json().catch(() => ({ redirectTo: undefined })) as { redirectTo?: string };
               if (requestedRole && requestedRole !== 'student') {
                 window.location.href = '/waiting';
               } else {

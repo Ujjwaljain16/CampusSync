@@ -53,8 +53,8 @@ export default function MetricsPage() {
       if (correctionError) throw correctionError;
       setCorrectionStats(correctionData || []);
 
-    } catch (err: any) {
-      setError(err.message || 'Failed to load metrics');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load metrics');
     } finally {
       setLoading(false);
     }

@@ -10,8 +10,10 @@ import type {
 } from '@/types';
 import type { VerificationResult } from '@/types/index';
 
+type SupabaseClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
 export class VerificationEngine {
-  private supabase: any;
+  private supabase: SupabaseClient | null;
   private qrReader: QRCodeReader;
   private trustedIssuers: TrustedIssuer[] = [];
   private verificationRules: VerificationRule[] = [];
@@ -205,10 +207,10 @@ export class VerificationEngine {
       const image = await Jimp.read(fileBuffer);
       
       // Resize to standard size for consistent hashing
-      (image as any).resize(32, 32);
+      image.resize({ w: 32, h: 32 });
       
       // Convert to grayscale
-      (image as any).greyscale();
+      image.greyscale();
       
       // Calculate perceptual hash
       const logoHash = this.calculatePerceptualHash(image);
@@ -302,6 +304,9 @@ export class VerificationEngine {
    * Dedupe via file hash and text similarity against recent certificates
    */
   private async checkDuplicates(fileBuffer: Buffer, ocrResult: OcrExtractionResult): Promise<NonNullable<VerificationResult['details']['dedupe']>> {
+    if (!this.supabase) {
+      throw new Error('Supabase client not initialized. Call initialize() first.');
+    }
     try {
       const fileHash = createHash('sha256').update(fileBuffer).digest('hex');
 
@@ -433,7 +438,7 @@ export class VerificationEngine {
   /**
    * Calculate perceptual hash for image
    */
-  private calculatePerceptualHash(image: any): string {
+  private calculatePerceptualHash(image: Awaited<ReturnType<typeof Jimp.read>>): string {
     const hash = createHash('md5');
     const pixels = image.bitmap.data;
     
@@ -496,6 +501,9 @@ export class VerificationEngine {
     confidenceScore: number,
     verificationMethod: string
   ): Promise<void> {
+    if (!this.supabase) {
+      throw new Error('Supabase client not initialized. Call initialize() first.');
+    }
     try {
       const metadata: Partial<CertificateMetadata> = {
         certificate_id: certificateId,
@@ -519,6 +527,9 @@ export class VerificationEngine {
    * Load trusted issuers from database
    */
   private async loadTrustedIssuers(): Promise<void> {
+    if (!this.supabase) {
+      throw new Error('Supabase client not initialized. Call initialize() first.');
+    }
     try {
       const { data, error } = await this.supabase
         .from('trusted_issuers')
@@ -528,7 +539,7 @@ export class VerificationEngine {
       if (error) throw error;
       
       // Parse template_patterns from JSONB to string array
-      this.trustedIssuers = (data || []).map((issuer: any) => ({
+      this.trustedIssuers = (data || []).map((issuer: TrustedIssuer) => ({
         ...issuer,
         template_patterns: Array.isArray(issuer.template_patterns) 
           ? issuer.template_patterns 
@@ -544,6 +555,9 @@ export class VerificationEngine {
    * Load verification rules from database
    */
   private async loadVerificationRules(): Promise<void> {
+    if (!this.supabase) {
+      throw new Error('Supabase client not initialized. Call initialize() first.');
+    }
     try {
       const { data, error } = await this.supabase
         .from('verification_rules')
