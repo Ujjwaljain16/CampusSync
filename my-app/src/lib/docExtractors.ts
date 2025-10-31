@@ -68,9 +68,51 @@ export function extractId(text: string, mrzLines?: string[]): ExtractedFields {
   return base;
 }
 
-  // Stub function - parameters are required for API compatibility but not used
-export function extractByType(): Record<string, string | string[] | undefined> {
-  const fields: ExtractedFields = {};
+export function extractByType(text: string, documentType: DocumentType): Record<string, string | string[] | undefined> {
+  let fields: ExtractedFields = {};
+  
+  switch (documentType) {
+    case 'certificate':
+      fields = extractCertificate(text);
+      break;
+    case 'transcript':
+      fields = extractTranscript(text);
+      break;
+    case 'letter':
+      fields = extractLetter(text);
+      break;
+    case 'id':
+      fields = extractId(text);
+      break;
+    case 'degree':
+      // Degrees are similar to certificates
+      fields = extractCertificate(text);
+      break;
+    case 'enrollment':
+      // Enrollment letters are similar to letters
+      fields = extractLetter(text);
+      break;
+    case 'syllabus':
+      // Syllabus extraction - extract basic information
+      fields = extractByRegex(text, [
+        ['name', /(course|subject|module)\s*(?:name|title)?\s*[:\-]?\s*([A-Za-z0-9 ,.']{3,})/i],
+        ['issuer', /(department|university|college|institute|instructor)\s*[:\-]?\s*([A-Za-z &,.]{3,})/i],
+        ['date_issued', /(semester|term|academic year|session)\s*[:\-]?\s*([A-Za-z0-9,\/\- ]{3,})/i],
+      ]);
+      break;
+    case 'resume':
+      // Resume extraction - extract basic information
+      fields = extractByRegex(text, [
+        ['name', /(name|candidate)\s*[:\-]?\s*([A-Za-z ,.']{3,})/i],
+        ['degree', /(bachelor|master|doctor|phd|associate|diploma)\s+(?:of|in)\s+(.+)/i],
+        ['program', /(major|specialization|field)\s*[:\-]?\s*([A-Za-z &,.]{3,})/i],
+      ]);
+      break;
+    default:
+      // Default to certificate extraction
+      fields = extractCertificate(text);
+  }
+  
   return { ...fields };
 }
 
