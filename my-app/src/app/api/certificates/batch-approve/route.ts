@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
+import { withRole, success, apiError, parseAndValidateBody, getOrganizationContext } from '@/lib/api';
 
 interface BatchApproveBody {
   certificateIds: string[];
@@ -8,7 +8,7 @@ interface BatchApproveBody {
   reason?: string;
 }
 
-export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { user }) => {
+export const POST = withRole(['faculty', 'admin', 'org_admin'], async (req: NextRequest, { user }) => {
   const result = await parseAndValidateBody<BatchApproveBody>(
     req,
     ['certificateIds', 'status']
@@ -17,6 +17,23 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { us
 
   const body = result.data;
   const supabase = await createSupabaseServerClient();
+  const orgContext = await getOrganizationContext(user);
+  
+  // Validate all certificates belong to faculty's organization
+  const { data: certsToValidate, error: validationError } = await supabase
+    .from('certificates')
+    .select('id, organization_id')
+    .in('id', body.certificateIds);
+
+  if (validationError) throw apiError.internal(validationError.message);
+
+  const invalidCerts = certsToValidate?.filter(cert => 
+    !orgContext.isSuperAdmin && cert.organization_id !== ('organizationId' in orgContext ? orgContext.organizationId : null)
+  );
+
+  if (invalidCerts && invalidCerts.length > 0) {
+    throw apiError.forbidden(`Cannot approve certificates from other organizations: ${invalidCerts.map(c => c.id).join(', ')}`);
+  }
   
   // Update all certificates
   const { data, error } = await supabase
@@ -37,6 +54,7 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { us
   try {
     await supabase.from('audit_logs').insert({
       actor_id: user.id,
+      organization_id: 'organizationId' in orgContext ? orgContext.organizationId : null,
       action: 'batch_certificate_review',
       target_id: body.certificateIds.join(','),
       details: {

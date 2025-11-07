@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { withAuth, success, apiError } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { logger } from '@/lib/logger';
 
 export const POST = withAuth(async (request: NextRequest, { user }) => {
 	const formData = await request.formData();
@@ -12,8 +13,11 @@ export const POST = withAuth(async (request: NextRequest, { user }) => {
 		throw apiError.badRequest('No file uploaded');
 	}
 
-	console.log('🤖 Using Gemini Vision API for certificate extraction');
-	console.log(`📄 File: ${file.name}, Size: ${file.size} bytes, Type: ${file.type}`);
+	logger.debug('Using Gemini Vision API for certificate extraction', { 
+		fileName: file.name, 
+		fileSize: file.size, 
+		fileType: file.type 
+	});
 	
 	// 2. Upload file to Supabase Storage
 	const bytes = await file.arrayBuffer();
@@ -23,8 +27,7 @@ export const POST = withAuth(async (request: NextRequest, { user }) => {
 	const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
 	const filePath = `${user.id}/${timestamp}_${sanitizedFileName}`;
 	
-	console.log('📤 Uploading to Supabase Storage:', filePath);
-	console.log('📏 Original file size:', buffer.length, 'bytes');
+	logger.debug('Uploading to Supabase Storage', { filePath, bufferSize: buffer.length });
 	
 	const supabase = await createSupabaseServerClient();
 	const { data: uploadData, error: uploadError } = await supabase.storage
@@ -35,7 +38,7 @@ export const POST = withAuth(async (request: NextRequest, { user }) => {
 		});
 	
 	if (uploadError) {
-		console.error('❌ Storage upload failed:', uploadError);
+		logger.error('Storage upload failed', uploadError);
 		throw apiError.internal(`Failed to upload file: ${uploadError.message}`);
 	}
 	
@@ -44,7 +47,7 @@ export const POST = withAuth(async (request: NextRequest, { user }) => {
 		.from('certificates')
 		.getPublicUrl(filePath);
 	
-	console.log('✅ File uploaded successfully:', publicUrl);
+	logger.debug('File uploaded successfully', { publicUrl });
 
 		// 4. Initialize Gemini for text extraction (use buffer we already have)
 		const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -65,7 +68,7 @@ export const POST = withAuth(async (request: NextRequest, { user }) => {
 			}
 		};
 		
-		console.log('🤖 Sending to Gemini Vision API...');
+		logger.debug('Sending to Gemini Vision API');
 
 		// Prompt for extraction (optimized for speed and accuracy)
 		const prompt = `Extract certificate information as JSON:
@@ -87,8 +90,7 @@ Extract all text accurately. Return only valid JSON, no markdown.`;
 		const response = await result.response;
 		const text = response.text();
 
-		console.log('📝 Gemini response received');
-		console.log(text.substring(0, 500));
+		logger.debug('Gemini response received', { responsePreview: text.substring(0, 500) });
 
 		// Parse JSON from response
 		const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -97,12 +99,13 @@ Extract all text accurately. Return only valid JSON, no markdown.`;
 		}
 
 		const extracted = JSON.parse(jsonMatch[0]);
-	console.log('✅ Extraction successful!');
-	console.log('Title:', extracted.title);
-	console.log('Institution:', extracted.institution);
-	console.log('Recipient:', extracted.recipient);
-	console.log('Date:', extracted.date_issued);
-	console.log('Description:', extracted.description);
+	logger.debug('Extraction successful', {
+		title: extracted.title,
+		institution: extracted.institution,
+		recipient: extracted.recipient,
+		dateIssued: extracted.date_issued,
+		description: extracted.description
+	});
 
 	return success({
 		success: true,

@@ -1,13 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer';
+import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '@/lib/supabaseServer';
+import { getOrganizationContext } from '@/lib/api'; import { getTargetOrganizationIds } from '@/lib/api';
 
 export async function GET(req: NextRequest) {
-  const auth = await requireRole(['admin']);
+  const auth = await requireRole(['admin', 'org_admin', 'super_admin']);
   if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message }, { status: auth.status });
+    return NextResponse.json({ error: auth.message || 'Unauthorized' }, { status: 403 });
   }
 
+  const userWithRole = await getServerUserWithRole();
+  if (!userWithRole) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  
+  const { user } = userWithRole;
+
   const supabase = await createSupabaseServerClient();
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
   const { searchParams } = new URL(req.url);
   const range = searchParams.get('range') || '30d';
 
@@ -17,31 +27,44 @@ export async function GET(req: NextRequest) {
     const days = range === '7d' ? 7 : range === '30d' ? 30 : 90;
     const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-    // Get total certificates
-    const { data: totalCerts, error: totalError } = await supabase
+    // Get total certificates with org filter
+    let certQuery = supabase
       .from('certificates')
       .select('id, verification_status, created_at')
       .gte('created_at', startDate.toISOString());
+
+    if (!orgContext.isSuperAdmin) {
+      certQuery = certQuery.in('organization_id', targetOrgIds);
+    }
+
+    const { data: totalCerts, error: totalError } = await certQuery;
 
     if (totalError) {
       throw new Error('Failed to fetch total certificates');
     }
 
-    // Get verification results
-    const { data: verificationResults, error: verError } = await supabase
-      .from('verification_results')
-      .select('certificate_id, is_verified, auto_approved, confidence_score, verification_method, created_at')
-      .gte('created_at', startDate.toISOString());
+    // Get verification results (only for certificates in org)
+    const certificateIds = totalCerts?.map(c => c.id) || [];
+    const { data: verificationResults, error: verError } = certificateIds.length > 0
+      ? await supabase
+          .from('verification_results')
+          .select('certificate_id, is_verified, auto_approved, confidence_score, verification_method, created_at')
+          .in('certificate_id', certificateIds)
+          .gte('created_at', startDate.toISOString())
+      : { data: [], error: null };
 
     if (verError) {
       throw new Error('Failed to fetch verification results');
     }
 
     // Get certificate metadata for verification methods
-    const { data: metadata, error: metaError } = await supabase
-      .from('certificate_metadata')
-      .select('certificate_id, verification_details')
-      .gte('created_at', startDate.toISOString());
+    const { data: metadata, error: metaError } = certificateIds.length > 0
+      ? await supabase
+          .from('certificate_metadata')
+          .select('certificate_id, verification_details')
+          .in('certificate_id', certificateIds)
+          .gte('created_at', startDate.toISOString())
+      : { data: [], error: null };
 
     if (metaError) {
       throw new Error('Failed to fetch certificate metadata');
@@ -115,11 +138,17 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Get top institutions
-    const { data: institutionData, error: instError } = await supabase
+    // Get top institutions with org filter
+    let instQuery = supabase
       .from('certificates')
       .select('institution, verification_status')
       .gte('created_at', startDate.toISOString());
+
+    if (!orgContext.isSuperAdmin) {
+      instQuery = instQuery.in('organization_id', targetOrgIds);
+    }
+
+    const { data: institutionData, error: instError } = await instQuery;
 
     if (instError) {
       throw new Error('Failed to fetch institution data');
@@ -176,4 +205,6 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
+
 

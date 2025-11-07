@@ -31,10 +31,22 @@ export const POST = withAuth(async (req: NextRequest, { user: authUser }) => {
     return success({ status: 'created' }, 'Certificate created (test bypass mode)');
   }
 
+  // Get user's organization_id from their profile
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', user.id)
+    .single();
+
+  if (profileError || !profile?.organization_id) {
+    throw apiError.badRequest('User profile not found or organization not set. Please complete your profile first.');
+  }
+
   const now = new Date().toISOString();
   
   const certificateData = {
     student_id: user.id,
+    organization_id: profile.organization_id,
     title: body.ocr?.title ?? 'Untitled Certificate',
     institution: body.ocr?.institution ?? '',
     date_issued: body.ocr?.date_issued ?? now,

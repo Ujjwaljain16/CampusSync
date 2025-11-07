@@ -1,11 +1,35 @@
 import { NextRequest } from 'next/server';
 import { success, apiError } from '@/lib/api';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
 
 // GET /api/documents/[id]/metadata
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const userWithRole = await getServerUserWithRole();
+  if (!userWithRole) throw apiError.unauthorized();
+  
+  const { user } = userWithRole;
+
   const supabase = await createSupabaseServerClient();
   const { id } = await params;
+
+  // Verify document belongs to user's organization
+  const { data: document, error: docError } = await supabase
+    .from('documents')
+    .select('organization_id')
+    .eq('id', id)
+    .single();
+
+  if (docError) throw apiError.notFound('Document not found');
+
+  const { data: userOrg } = await supabase
+    .from('user_roles')
+    .select('organization_id')
+    .eq('user_id', user.id)
+    .single();
+
+  if (userOrg && document.organization_id !== userOrg.organization_id) {
+    throw apiError.forbidden('Cannot access document from other organization');
+  }
   
   const { data, error } = await supabase
     .from('document_metadata')
@@ -22,9 +46,33 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 // POST /api/documents/[id]/metadata
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const userWithRole = await getServerUserWithRole();
+  if (!userWithRole) throw apiError.unauthorized();
+  
+  const { user } = userWithRole;
+
   const supabase = await createSupabaseServerClient();
   const body = await req.json();
   const { id } = await params;
+
+  // Verify document belongs to user's organization
+  const { data: document, error: docError } = await supabase
+    .from('documents')
+    .select('organization_id')
+    .eq('id', id)
+    .single();
+
+  if (docError) throw apiError.notFound('Document not found');
+
+  const { data: userOrg } = await supabase
+    .from('user_roles')
+    .select('organization_id')
+    .eq('user_id', user.id)
+    .single();
+
+  if (userOrg && document.organization_id !== userOrg.organization_id) {
+    throw apiError.forbidden('Cannot update metadata for document from other organization');
+  }
   
   const { data, error } = await supabase
     .from('document_metadata')

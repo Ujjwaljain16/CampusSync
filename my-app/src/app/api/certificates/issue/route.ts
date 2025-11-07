@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { withAuth, success, apiError } from '@/lib/api';
-import { signCredential } from '../../../../../lib/vc';
+import { signCredential } from '@/lib/vc';
 interface CredentialSubject {
 	id: string;
 	certificateId: string;

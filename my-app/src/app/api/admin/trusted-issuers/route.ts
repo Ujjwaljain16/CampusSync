@@ -11,11 +11,15 @@ interface TrustedIssuerInput {
   is_active?: boolean;
 }
 
-export const GET = withRole(['admin'], async () => {
+export const GET = withRole(['admin', 'org_admin', 'super_admin'], async () => {
   const supabase = await createSupabaseServerClient();
+  
+  // NOTE: Trusted issuers are global resources (organization_id = NULL)
+  // All admins can view trusted issuers regardless of organization
   const { data, error } = await supabase
     .from('trusted_issuers')
     .select('*')
+    .is('organization_id', null) // Only global trusted issuers
     .order('name');
 
   if (error) {
@@ -26,13 +30,16 @@ export const GET = withRole(['admin'], async () => {
   return success(data);
 });
 
-export const POST = withRole(['admin'], async (req: NextRequest) => {
+export const POST = withRole(['admin', 'super_admin'], async (req: NextRequest) => {
   const result = await parseAndValidateBody<TrustedIssuerInput>(req, ['name']);
   if (result.error) return result.error;
 
   const body = result.data;
 
   const supabase = await createSupabaseServerClient();
+  
+  // NOTE: Trusted issuers are global resources (organization_id = NULL)
+  // Only super_admin should create trusted issuers (global resources)
   const { data, error } = await supabase
     .from('trusted_issuers')
     .insert({
@@ -42,6 +49,7 @@ export const POST = withRole(['admin'], async (req: NextRequest) => {
       confidence_threshold: body.confidence_threshold || 0.9,
       qr_verification_url: body.qr_verification_url,
       is_active: body.is_active !== undefined ? body.is_active : true,
+      organization_id: null, // Global resource
     })
     .select()
     .single();
@@ -54,13 +62,15 @@ export const POST = withRole(['admin'], async (req: NextRequest) => {
   return success(data, 'Trusted issuer created successfully', 201);
 });
 
-export const PUT = withRole(['admin'], async (req: NextRequest) => {
+export const PUT = withRole(['admin', 'super_admin'], async (req: NextRequest) => {
   const result = await parseAndValidateBody<{ id: string } & TrustedIssuerInput>(req, ['id']);
   if (result.error) return result.error;
 
   const body = result.data;
 
   const supabase = await createSupabaseServerClient();
+  
+  // NOTE: Only update global trusted issuers (organization_id = NULL)
   const { data, error } = await supabase
     .from('trusted_issuers')
     .update({
@@ -73,6 +83,7 @@ export const PUT = withRole(['admin'], async (req: NextRequest) => {
       updated_at: new Date().toISOString(),
     })
     .eq('id', body.id)
+    .is('organization_id', null) // Only update global resources
     .select()
     .single();
 
@@ -84,7 +95,7 @@ export const PUT = withRole(['admin'], async (req: NextRequest) => {
   return success(data, 'Trusted issuer updated successfully');
 });
 
-export const DELETE = withRole(['admin'], async (req: NextRequest) => {
+export const DELETE = withRole(['admin', 'super_admin'], async (req: NextRequest) => {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get('id');
   
@@ -93,10 +104,13 @@ export const DELETE = withRole(['admin'], async (req: NextRequest) => {
   }
 
   const supabase = await createSupabaseServerClient();
+  
+  // NOTE: Only delete global trusted issuers (organization_id = NULL)
   const { error } = await supabase
     .from('trusted_issuers')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .is('organization_id', null); // Only delete global resources
 
   if (error) {
     console.error('Error deleting trusted issuer:', error);

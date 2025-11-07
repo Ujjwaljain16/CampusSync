@@ -1,70 +1,89 @@
 import { NextRequest } from 'next/server';
-import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
+import { withRole, success, apiError, parseAndValidateBody, getRequestedOrgId, getOrganizationContext, isRecruiterContext } from '@/lib/api';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 interface RoleChangeRequest {
   user_id: string;
-  new_role: 'student' | 'faculty' | 'recruiter' | 'admin';
+  new_role: 'student' | 'faculty' | 'recruiter' | 'admin' | 'org_admin';
+  organization_id?: string | null;
   reason?: string;
   transfer_data?: boolean; // Whether to transfer any role-specific data
 }
 
-export const POST = withRole(['admin'], async (req: NextRequest, { user }) => {
+export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (req: NextRequest, { user, role: callerRole }) => {
   const result = await parseAndValidateBody<RoleChangeRequest>(req, ['user_id', 'new_role']);
   if (result.error) return result.error;
 
   const body = result.data;
 
-  if (!['student', 'faculty', 'recruiter', 'admin'].includes(body.new_role)) {
+  if (!['student', 'faculty', 'recruiter', 'admin', 'org_admin'].includes(body.new_role)) {
     throw apiError.badRequest('Invalid role');
   }
 
-  // 🛡️ SAFETY CHECK: Prevent admin self-demotion
-  if (body.user_id === user.id && body.new_role !== 'admin') {
+  // Prevent caller self-demotion for admins
+  if (body.user_id === user.id && body.new_role !== 'admin' && callerRole === 'admin') {
     throw apiError.forbidden('Security violation: Admins cannot demote themselves');
   }
 
-  const adminSupabase = createSupabaseAdminClient();
+  const adminSupabase = await createSupabaseAdminClient();
 
-  // 🛡️ SAFETY CHECK: Prevent demoting the last admin
-  const { count: adminCountValue } = await adminSupabase
-    .from('user_roles')
-    .select('*', { count: 'exact', head: true })
-    .eq('role', 'admin');
+  // Determine organization scope for this change
+  const requestedOrgId = body.organization_id ?? (await getRequestedOrgId(req));
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
 
-  const adminCount = adminCountValue || 0;
-
-  if (adminCount <= 1) {
-    throw apiError.forbidden('Cannot demote the last admin in the system');
+  // If caller is org_admin/admin they can only modify roles inside their organization
+  if ((callerRole === 'org_admin' || callerRole === 'admin') && !isRecruiterContext(orgContext) && !orgContext.isSuperAdmin) {
+    if (!requestedOrgId || requestedOrgId !== orgContext.organizationId) {
+      return apiError.forbidden('Insufficient permissions to change roles outside your organization');
+    }
   }
 
   // 🛡️ SAFETY CHECK: Check if target user is an admin
   const { data: targetUser, error: targetError } = await adminSupabase
     .from('user_roles')
-    .select('role')
+    .select('role, organization_id')
     .eq('user_id', body.user_id)
-    .single();
+    .maybeSingle();
 
-  if (targetError && targetError.code !== 'PGRST116') {
+  if (targetError && (targetError as { code?: string }).code !== 'PGRST116') {
     throw apiError.internal('Failed to check target user role');
   }
 
   const targetRole = targetUser?.role || 'student';
+  const targetOrg = requestedOrgId ?? targetUser?.organization_id ?? null;
 
-  // If demoting an admin, ensure there will be at least one admin left
-  if (targetRole === 'admin' && body.new_role !== 'admin') {
+  // If demoting an admin/org_admin, ensure there will be at least one admin-like role left in that org
+  if (['admin', 'org_admin'].includes(targetRole) && body.new_role !== 'admin' && body.new_role !== 'org_admin') {
+    // Count admin-like roles in the target organization (or system-wide if no org)
+    const countQuery = adminSupabase
+      .from('user_roles')
+      .select('user_id', { count: 'exact', head: true })
+      .in('role', ['org_admin', 'admin', 'super_admin']);
+
+    if (targetOrg) countQuery.eq('organization_id', targetOrg);
+
+    const countResult = await countQuery;
+    const adminCount = countResult.count || 0;
+
+    if (countResult.error) {
+      throw apiError.internal('Failed to check admin count');
+    }
+
     if (adminCount <= 1) {
-      throw apiError.forbidden('Cannot demote the last admin in the system');
+      throw apiError.forbidden('Cannot demote the last admin in the organization');
     }
   }
 
   // 🛡️ CRITICAL SAFETY: Prevent super admin demotion
-  const { data: isSuperAdmin } = await adminSupabase.rpc('is_super_admin', {
-    p_user_id: body.user_id
-  });
-
-  if (isSuperAdmin && body.new_role !== 'admin') {
-    throw apiError.forbidden('CRITICAL: Cannot demote the super admin (original/founder admin). This admin serves as the system recovery mechanism and cannot be demoted under any circumstances.');
+  try {
+    const rpcRes = await adminSupabase.rpc('is_super_admin', { p_user_id: body.user_id });
+    const isSuperAdmin = rpcRes?.data ?? false;
+    if (isSuperAdmin && body.new_role !== 'admin' && body.new_role !== 'org_admin') {
+      throw apiError.forbidden('CRITICAL: Cannot demote the super admin (founder).');
+    }
+  } catch (err) {
+    console.warn('[roles/change] is_super_admin rpc failed, continuing safety checks:', err);
   }
 
   // 🛡️ ADDITIONAL SAFETY: Require reason for admin demotion
@@ -75,26 +94,29 @@ export const POST = withRole(['admin'], async (req: NextRequest, { user }) => {
   }
   const now = new Date().toISOString();
 
-  // 1. Get current role
-  const { data: currentRole, error: roleError } = await adminSupabase
-    .from('user_roles')
-    .select('role, created_at')
-    .eq('user_id', body.user_id)
-    .single();
+  // 1. Get current role for the target user scoped to organization (if provided)
+  const roleQuery = adminSupabase.from('user_roles').select('role, created_at, organization_id').eq('user_id', body.user_id);
+  if (requestedOrgId) {
+    roleQuery.eq('organization_id', requestedOrgId);
+  } else {
+    // If no specific org requested, get the primary role (first one created)
+    roleQuery.order('created_at', { ascending: true }).limit(1);
+  }
+  const { data: currentRole, error: roleError } = await roleQuery.maybeSingle();
 
-  if (roleError && roleError.code !== 'PGRST116') {
+  if (roleError && (roleError as { code?: string }).code !== 'PGRST116') {
     throw apiError.internal('Failed to fetch current role');
   }
 
   const oldRole = currentRole?.role || 'student';
 
   // 2. Handle role-specific data before change
-  await handleRoleSpecificData(adminSupabase, body.user_id, oldRole, body.new_role);
+  await handleRoleSpecificData(adminSupabase as unknown as SupabaseClient, body.user_id, oldRole, body.new_role);
 
   // 3. Update the role
   if (currentRole) {
     // Update existing role
-    const { error: updateError } = await adminSupabase
+    const updateQuery = adminSupabase
       .from('user_roles')
       .update({
         role: body.new_role,
@@ -102,6 +124,16 @@ export const POST = withRole(['admin'], async (req: NextRequest, { user }) => {
         updated_at: now
       })
       .eq('user_id', body.user_id);
+
+    // Add organization filter if provided
+    const orgIdToUse = requestedOrgId ?? currentRole.organization_id ?? null;
+    if (orgIdToUse !== null) {
+      updateQuery.eq('organization_id', orgIdToUse);
+    } else {
+      updateQuery.is('organization_id', null);
+    }
+
+    const { error: updateError } = await updateQuery;
 
     if (updateError) {
       throw apiError.internal(updateError.message);
@@ -113,6 +145,7 @@ export const POST = withRole(['admin'], async (req: NextRequest, { user }) => {
       .insert({
         user_id: body.user_id,
         role: body.new_role,
+        organization_id: requestedOrgId ?? null,
         assigned_by: user.id,
         created_at: now,
         updated_at: now
@@ -140,7 +173,7 @@ export const POST = withRole(['admin'], async (req: NextRequest, { user }) => {
   });
 
   // 5. Handle post-change actions
-  await handlePostRoleChange(adminSupabase, body.user_id, oldRole, body.new_role);
+  await handlePostRoleChange(adminSupabase as unknown as SupabaseClient, body.user_id, oldRole, body.new_role);
 
   return success({ 
     user_id: body.user_id,
@@ -152,7 +185,7 @@ export const POST = withRole(['admin'], async (req: NextRequest, { user }) => {
 });
 
 async function handleRoleSpecificData(
-  supabase: ReturnType<typeof createSupabaseAdminClient>, 
+  supabase: SupabaseClient, 
   userId: string, 
   oldRole: string, 
   newRole: string
@@ -193,7 +226,7 @@ async function handleRoleSpecificData(
 }
 
 async function handlePostRoleChange(
-  supabase: ReturnType<typeof createSupabaseAdminClient>, 
+  supabase: SupabaseClient, 
   userId: string, 
   oldRole: string, 
   newRole: string

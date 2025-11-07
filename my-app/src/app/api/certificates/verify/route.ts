@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getIssuerJwk, verifyCredentialJws } from '../../../../../lib/vc';
+import { getIssuerJwk, verifyCredentialJws } from '@/lib/vc';
 import { success, apiError } from '@/lib/api';
 
 interface VerifyBody {

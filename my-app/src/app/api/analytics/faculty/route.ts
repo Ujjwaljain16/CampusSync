@@ -1,13 +1,21 @@
-import { withRole, success } from '@/lib/api';
+import { withRole, success, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export const GET = withRole(['faculty', 'admin'], async () => {
+export const GET = withRole(['faculty', 'admin', 'org_admin'], async (_req, { user }) => {
   const supabase = await createSupabaseServerClient();
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
 
-    // Get all certificates with their confidence scores and metadata
-    const { data: allCertificates } = await supabase
+    // Get all certificates with their confidence scores and metadata (org-filtered)
+    let certQuery = supabase
       .from('certificates')
       .select('id, verification_status, created_at, student_id, confidence_score, auto_approved, verification_method, fields');
+
+    if (!orgContext.isSuperAdmin) {
+      certQuery = certQuery.in('organization_id', targetOrgIds);
+    }
+
+    const { data: allCertificates } = await certQuery;
 
     console.log('[Analytics] Total certificates found:', allCertificates?.length);
     console.log('[Analytics] Certificates with confidence_score:', 
@@ -29,14 +37,21 @@ export const GET = withRole(['faculty', 'admin'], async () => {
     const rejectedCerts = allCertificates?.filter(c => c.verification_status === 'rejected').length || 0;
 
     // Get document metadata for OCR confidence scores (primary source for new system)
-    const { data: documentMetadata } = await supabase
-      .from('document_metadata')
-      .select('document_id, ai_confidence_score, verification_details, created_at');
+    const certificateIds = allCertificates?.map(c => c.id) || [];
+    const { data: documentMetadata } = certificateIds.length > 0
+      ? await supabase
+          .from('document_metadata')
+          .select('document_id, ai_confidence_score, verification_details, created_at')
+          .in('document_id', certificateIds)
+      : { data: [] };
 
     // Also get certificate metadata (primary source for older certificates)
-    const { data: certMetadata } = await supabase
-      .from('certificate_metadata')
-      .select('certificate_id, ai_confidence_score, verification_details, created_at');
+    const { data: certMetadata } = certificateIds.length > 0
+      ? await supabase
+          .from('certificate_metadata')
+          .select('certificate_id, ai_confidence_score, verification_details, created_at')
+          .in('certificate_id', certificateIds)
+      : { data: [] };
 
     // Build a map of certificate IDs to metadata for easy lookup
     const metadataMap = new Map<string, {
@@ -171,11 +186,17 @@ export const GET = withRole(['faculty', 'admin'], async () => {
       ? allMetadata.reduce((sum: number, m) => sum + (m.score || 0), 0) / allMetadata.length
       : 0;
 
-    // Get top institutions
-    const { data: institutionData } = await supabase
+    // Get top institutions (org-filtered)
+    let instQuery = supabase
       .from('certificates')
       .select('institution')
       .not('institution', 'is', null);
+
+    if (!orgContext.isSuperAdmin) {
+      instQuery = instQuery.in('organization_id', targetOrgIds);
+    }
+
+    const { data: institutionData } = await instQuery;
 
     const institutionCounts = institutionData?.reduce((acc, cert) => {
       const inst = cert.institution;
@@ -252,4 +273,6 @@ export const GET = withRole(['faculty', 'admin'], async () => {
       confidenceTrend,
     });
   });
+
+
 

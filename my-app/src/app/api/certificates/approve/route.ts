@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
-import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
-import { emailService } from '../../../../../lib/emailService';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { withRole, success, apiError, parseAndValidateBody, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { emailService } from '@/lib/emailService';
+import { getBaseUrl } from '@/lib/envValidator';
 
 interface ApproveBody {
 	certificateId: string;
@@ -11,7 +12,7 @@ interface ApproveBody {
 	rejectReason?: string;
 }
 
-export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
+export const POST = withRole(['faculty', 'admin'], async (req: NextRequest, { user }) => {
 	const result = await parseAndValidateBody<ApproveBody>(req, ['certificateId', 'status']);
 	if (result.error) return result.error;
 	
@@ -22,24 +23,44 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
 	}
 
 	const supabase = await createSupabaseServerClient();
+	const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+
+	console.log('[Approve] User:', user.email, 'OrgContext:', orgContext, 'TargetOrgIds:', targetOrgIds);
 
 	// Map API status to database verification_status
 	const verificationStatus = body.status === 'approved' ? 'verified' : 'rejected';
 
-	// Get certificate details for email notification
+	// Get certificate details (must be in faculty's organization)
 	const { data: certificate, error: certError } = await supabase
 		.from('certificates')
-		.select('title, institution, student_id, description')
+		.select('title, institution, student_id, description, organization_id')
 		.eq('id', body.certificateId)
+		.in('organization_id', targetOrgIds) // Multi-org filter
 		.single();
 
 	if (certError) {
-		throw apiError.notFound('Certificate not found');
+		throw apiError.notFound('Certificate not found or not in your organization');
 	}
 
-	// Get user email for notification
-	const { data: user } = await supabase.auth.admin.getUserById(certificate.student_id);
-	const userEmail = user?.user?.email;
+	// Get user email for notification using admin client
+	let userEmail: string | undefined;
+	let studentName = 'Student';
+	
+	try {
+		const adminClient = await createSupabaseAdminClient();
+		const { data: studentData, error: authError } = await adminClient.auth.admin.getUserById(certificate.student_id);
+		
+		if (authError) {
+			console.error('[Approve] Error fetching student auth data:', authError);
+		} else if (studentData?.user) {
+			userEmail = studentData.user.email;
+			studentName = studentData.user.user_metadata?.full_name || studentData.user.email?.split('@')[0] || 'Student';
+			console.log('[Approve] Found student email:', userEmail, 'name:', studentName);
+		}
+	} catch (error) {
+		console.error('[Approve] Failed to get student email:', error);
+	}
 
 	// Update certificate status in your DB table `certificates`
 	const { error: updateErr } = await supabase
@@ -60,29 +81,43 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
 	// Send email notification
 	if (userEmail) {
 		try {
+			console.log(`[Approve] Sending ${body.status} email to:`, userEmail);
 			const notificationData = {
-				studentName: user?.user?.user_metadata?.full_name || 'Student',
+				studentName,
 				certificateTitle: certificate.title,
 				institution: certificate.institution,
-				portfolioUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/public/portfolio/${certificate.student_id}`,
+				portfolioUrl: `${getBaseUrl()}/public/portfolio/${certificate.student_id}`,
 			};
 
 			if (body.status === 'approved') {
-				await emailService.sendCertificateApproved(userEmail, notificationData);
+				const emailSent = await emailService.sendCertificateApproved(userEmail, notificationData);
+				console.log(`[Approve] Certificate approved email sent: ${emailSent}`);
 			} else {
-				await emailService.sendCertificateRejected(userEmail, notificationData);
+				const emailSent = await emailService.sendCertificateRejected(userEmail, notificationData);
+				console.log(`[Approve] Certificate rejected email sent: ${emailSent}`);
 			}
 		} catch (emailError) {
-			console.error('Failed to send email notification:', emailError);
+			console.error('[Approve] Failed to send email notification:', emailError);
 			// Don't fail the request if email fails
 		}
+	} else {
+		console.warn('[Approve] No user email found for student_id:', certificate.student_id);
 	}
 
-	// Write audit log if possible
+	// Write audit log
 	try {
-		const { user } = await getServerUserWithRole();
-		await supabase.from('audit_logs').insert({
-			actor_id: user?.id ?? null,
+		const organizationIdForLog = 'organizationId' in orgContext ? orgContext.organizationId : null;
+		console.log('[Approve] Creating audit log with:', {
+			actor_id: user.id,
+			organization_id: organizationIdForLog,
+			action: body.status === 'approved' ? 'manual_approve' : 'manual_reject',
+			target_id: body.certificateId,
+			certificate_org_id: certificate.organization_id
+		});
+		
+		const auditLog = await supabase.from('audit_logs').insert({
+			actor_id: user.id,
+			organization_id: organizationIdForLog, // Multi-org field
 			action: body.status === 'approved' ? 'manual_approve' : 'manual_reject',
 			target_id: body.certificateId,
 			details: {
@@ -91,7 +126,14 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
 			},
 			created_at: new Date().toISOString(),
 		});
-	} catch {
+		
+		if (auditLog.error) {
+			console.error('[Approve] Audit log error:', auditLog.error);
+		} else {
+			console.log('[Approve] Audit log created successfully');
+		}
+	} catch (auditError) {
+		console.error('[Approve] Failed to create audit log:', auditError);
 		// ignore audit failures
 	}
 
@@ -100,6 +142,8 @@ export const POST = withRole(['faculty', 'admin'], async (req: NextRequest) => {
 		`Certificate ${body.status} successfully`
 	);
 });
+
+
 
 
 

@@ -1,7 +1,8 @@
 // Unified document verification API
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { success, apiError, parseAndValidateBody, isValidUUID } from '@/lib/api';
+import { success, apiError, parseAndValidateBody, isValidUUID, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -16,6 +17,17 @@ interface VerifyDocumentBody {
 }
 
 export async function POST(request: NextRequest) {
+  // Get authenticated user
+  const authSupabase = await createSupabaseServerClient();
+  const { data: { user }, error: authError } = await authSupabase.auth.getUser();
+  if (authError || !user) {
+    throw apiError.unauthorized('Authentication required');
+  }
+
+  // Get organization context for multi-tenancy
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+
   const result = await parseAndValidateBody<VerifyDocumentBody>(
     request, 
     ['documentId', 'verificationStatus']
@@ -29,6 +41,18 @@ export async function POST(request: NextRequest) {
     throw apiError.badRequest('Invalid document ID format');
   }
 
+  // Verify document belongs to user's organization before updating
+  const { data: doc, error: fetchError } = await supabase
+    .from('documents')
+    .select('organization_id')
+    .eq('id', documentId)
+    .in('organization_id', targetOrgIds) // Multi-org filter
+    .single();
+    
+  if (fetchError || !doc) {
+    throw apiError.notFound('Document not found or access denied');
+  }
+
   // Update document verification status
   const { error: updateError } = await supabase
     .from('documents')
@@ -36,7 +60,8 @@ export async function POST(request: NextRequest) {
       verification_status: verificationStatus,
       updated_at: new Date().toISOString()
     })
-    .eq('id', documentId);
+    .eq('id', documentId)
+    .in('organization_id', targetOrgIds); // Ensure org match
 
   if (updateError) {
     console.error('Document update error:', updateError);
@@ -62,9 +87,9 @@ export async function POST(request: NextRequest) {
 
   // Log audit entry
   try {
-    const { data: { user } } = await supabase.auth.getUser();
     await supabase.from('audit_logs').insert({
-      user_id: user?.id,
+      user_id: user.id,
+      organization_id: 'organizationId' in orgContext ? orgContext.organizationId : null, // Multi-org support
       action: 'verify_document',
       target_id: documentId,
       details: { verification_status: verificationStatus, reason },
@@ -83,6 +108,17 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  // Get authenticated user
+  const authSupabase = await createSupabaseServerClient();
+  const { data: { user }, error: authError } = await authSupabase.auth.getUser();
+  if (authError || !user) {
+    throw apiError.unauthorized('Authentication required');
+  }
+
+  // Get organization context for multi-tenancy
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+
   const { searchParams } = new URL(request.url);
   const documentId = searchParams.get('documentId');
 
@@ -90,7 +126,7 @@ export async function GET(request: NextRequest) {
     throw apiError.badRequest('Document ID required');
   }
 
-  // Get document with metadata
+  // Get document with metadata (filtered by organization)
   const { data: document, error: docError } = await supabase
     .from('documents')
     .select(`
@@ -103,6 +139,7 @@ export async function GET(request: NextRequest) {
       )
     `)
     .eq('id', documentId)
+    .in('organization_id', targetOrgIds) // Multi-org filter
     .single();
 
   if (docError || !document) {
@@ -118,3 +155,5 @@ export async function GET(request: NextRequest) {
     }
   });
 }
+
+

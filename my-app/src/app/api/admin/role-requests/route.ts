@@ -1,19 +1,34 @@
 import { NextRequest } from 'next/server';
-import { withRole, success, apiError } from '@/lib/api';
+import { withRole, success, apiError, getOrganizationContext, getUserAccessibleOrganizations, isRecruiterContext } from '@/lib/api';
 import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
 
-export const GET = withRole(['admin'], async (req: NextRequest) => {
+export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (req: NextRequest, { user }) => {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get('status') || 'pending';
   const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
   const offset = Math.max(parseInt(searchParams.get('offset') || '0', 10), 0);
 
   const supabase = await createSupabaseServerClient();
-  const adminSupabase = createSupabaseAdminClient();
+  const adminSupabase = await createSupabaseAdminClient();
+  
+  // Get accessible organizations (super admins see all, org admins see their org)
+  const orgContext = await getOrganizationContext(user);
+  let accessibleOrgs: string[];
+  
+  if (orgContext.isSuperAdmin) {
+    accessibleOrgs = await getUserAccessibleOrganizations(user);
+  } else if (isRecruiterContext(orgContext)) {
+    accessibleOrgs = orgContext.selectedOrganization 
+      ? [orgContext.selectedOrganization]
+      : orgContext.accessibleOrganizations;
+  } else {
+    accessibleOrgs = [orgContext.organizationId];
+  }
   
   const query = supabase
     .from('role_requests')
-    .select('id, user_id, requested_role, metadata, status, reviewed_by, reviewed_at, created_at')
+    .select('id, user_id, requested_role, metadata, status, reviewed_by, reviewed_at, created_at, organization_id')
+    .in('organization_id', accessibleOrgs) // Multi-org filter
     .eq('status', status)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
@@ -42,7 +57,7 @@ export const GET = withRole(['admin'], async (req: NextRequest) => {
     
     if (!authError && authUsers?.users) {
       // Create a map of user_id to auth user data with profile full_name
-      authUsers.users.forEach(authUser => {
+      authUsers.users.forEach((authUser: { id: string; email?: string; user_metadata?: Record<string, unknown> }) => {
         if (userIds.includes(authUser.id)) {
           authUsersMap.set(authUser.id, {
             email: authUser.email,

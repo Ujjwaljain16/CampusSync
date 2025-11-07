@@ -1,19 +1,28 @@
 // Admin analytics API
-import { withRole, success, apiError } from '@/lib/api';
+import { withRole, success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export const GET = withRole(['admin'], async () => {
+export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (_req, { user }) => {
   const supabase = await createSupabaseServerClient();
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+  
+  // Build queries with organization filter - super admins see all, org admins see only their org
+  let profilesQuery = supabase.from('profiles').select('id, role, created_at');
+  let certsQuery = supabase.from('certificates').select('id, verification_status, created_at');
+  let roleReqQuery = supabase.from('role_requests').select('id, status, created_at');
+  
+  if (!orgContext.isSuperAdmin) {
+    profilesQuery = profilesQuery.in('organization_id', targetOrgIds);
+    certsQuery = certsQuery.in('organization_id', targetOrgIds);
+    roleReqQuery = roleReqQuery.in('organization_id', targetOrgIds);
+  }
 
   const [
     { data: users, error: usersError },
     { data: certificates, error: certsError },
     { data: roleRequests, error: roleError }
-  ] = await Promise.all([
-    supabase.from('profiles').select('id, role, created_at'),
-    supabase.from('certificates').select('id, verification_status, created_at'),
-    supabase.from('role_requests').select('id, status, created_at')
-  ]);
+  ] = await Promise.all([profilesQuery, certsQuery, roleReqQuery]);
 
   if (usersError || certsError || roleError) {
     console.error('Analytics errors:', { usersError, certsError, roleError });
@@ -53,3 +62,5 @@ export const GET = withRole(['admin'], async () => {
 
   return success(analytics);
 });
+
+

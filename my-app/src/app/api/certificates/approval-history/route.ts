@@ -2,32 +2,53 @@ import { NextRequest } from 'next/server';
 import { withRole, success, apiError } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
+export const GET = withRole(['faculty', 'admin'], async (req: NextRequest, { user }) => {
   const supabase = await createSupabaseServerClient();
   const url = new URL(req.url);
   const page = parseInt(url.searchParams.get('page') || '1');
   const limit = parseInt(url.searchParams.get('limit') || '20');
   const offset = (page - 1) * limit;
 
-    // Get approval history first
-    const { data: approvals, error: approvalsError } = await supabase
-      .from('audit_logs')
-      .select(`
-        id,
-        actor_id,
-        target_user_id,
-        action,
-        target_id,
-        details,
-        created_at
-      `)
-      .in('action', ['manual_approve', 'manual_reject', 'batch_approve', 'batch_reject'])
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+  // Get user's organization
+  const { data: userRole } = await supabase
+    .from('user_roles')
+    .select('organization_id')
+    .eq('user_id', user.id)
+    .single();
+
+  if (!userRole?.organization_id) {
+    console.error('[Approval History API] User organization not found for user:', user.id);
+    throw apiError.forbidden('User organization not found');
+  }
+
+  console.log('[Approval History API] Fetching history for org:', userRole.organization_id, 'page:', page, 'limit:', limit);
+
+  // Get approval history filtered by organization
+  const { data: approvals, error: approvalsError } = await supabase
+    .from('audit_logs')
+    .select(`
+      id,
+      actor_id,
+      target_user_id,
+      action,
+      target_id,
+      details,
+      created_at,
+      organization_id
+    `)
+    .eq('organization_id', userRole.organization_id)
+    .in('action', ['manual_approve', 'manual_reject', 'batch_approve', 'batch_reject'])
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (approvalsError) {
     console.error('Error fetching approval history:', approvalsError);
     throw apiError.internal('Failed to fetch approval history');
+  }
+
+  console.log('[Approval History API] Query returned:', approvals?.length || 0, 'approvals');
+  if (approvals && approvals.length > 0) {
+    console.log('[Approval History API] First approval:', approvals[0]);
   }
 
   // Get certificate details for each approval
@@ -68,10 +89,11 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
   // Create a map of certificate IDs to their latest revert timestamp
   const revertMap = new Map(reverts?.map(r => [r.target_id, r.created_at]) || []);
 
-  // Get total count for pagination
+  // Get total count for pagination (filtered by organization)
   const { count, error: countError } = await supabase
     .from('audit_logs')
     .select('*', { count: 'exact', head: true })
+    .eq('organization_id', userRole.organization_id)
     .in('action', ['manual_approve', 'manual_reject', 'batch_approve', 'batch_reject']);
 
   if (countError) {
@@ -79,7 +101,9 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
   }
 
   // Get user details for the approvers
-  const approverIds = [...new Set(approvals?.map(a => a.actor_id).filter(Boolean) || [])];
+  const approverIds = [...new Set(
+    approvals?.map(a => a.actor_id).filter(Boolean) || []
+  )];
   const { data: users } = await supabase
     .from('user_roles')
     .select('user_id, role')
@@ -112,6 +136,11 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest) => {
       canRevert: isApproval && !wasReverted
     };
   }) || [];
+
+  console.log('[Approval History API] Raw approvals count:', approvals?.length || 0);
+  console.log('[Approval History API] Formatted approvals count:', formattedApprovals.length);
+  console.log('[Approval History API] Total count:', count);
+  console.log('[Approval History API] Sample approval:', formattedApprovals[0]);
 
   return success({
     approvals: formattedApprovals,

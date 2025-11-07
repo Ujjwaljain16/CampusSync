@@ -1,21 +1,37 @@
 import { NextRequest } from 'next/server';
-import { success, apiError } from '@/lib/api';
+import { success, apiError, getOrganizationContext, isRecruiterContext } from '@/lib/api';
 import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { emailService } from '@/lib/emailService';
+import { getBaseUrl } from '@/lib/envValidator';
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-	const { user, role } = await getServerUserWithRole();
-	if (!user || role !== 'admin') {
+	const userWithRole = await getServerUserWithRole();
+	if (!userWithRole || !['admin', 'org_admin', 'super_admin'].includes(userWithRole.role)) {
 		throw apiError.forbidden('Unauthorized');
 	}
+	const { user } = userWithRole;
 	const supabase = await createSupabaseServerClient();
+	const orgContext = await getOrganizationContext(user);
 	const { id } = await params;
 	
-	// Load request
-	const { data: reqRow, error: loadErr } = await supabase
+	// Load request (must be in admin's organization unless super admin)
+	let requestQuery = supabase
 		.from('role_requests')
-		.select('id, user_id, requested_role, status')
-		.eq('id', id)
-		.single();
+		.select('id, user_id, requested_role, status, organization_id')
+		.eq('id', id);
+	
+	if (!orgContext.isSuperAdmin) {
+		if (isRecruiterContext(orgContext)) {
+			const orgId = orgContext.selectedOrganization || orgContext.accessibleOrganizations[0];
+			if (orgId) {
+				requestQuery = requestQuery.eq('organization_id', orgId);
+			}
+		} else {
+			requestQuery = requestQuery.eq('organization_id', orgContext.organizationId);
+		}
+	}
+	
+	const { data: reqRow, error: loadErr } = await requestQuery.single();
 	if (loadErr || !reqRow) throw apiError.notFound(loadErr?.message || 'Not found');
 	if (reqRow.status !== 'pending') throw apiError.badRequest('Already processed');
 
@@ -26,12 +42,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 		console.warn('[approve] RPC ensure_role failed, will insert directly:', e);
 	}
 	
-	// Ensure role is in user_roles table (fallback if RPC failed)
+	// Ensure role is in user_roles table with organization (fallback if RPC failed)
 	const { error: roleInsertError } = await supabase
 		.from('user_roles')
 		.upsert({
 			user_id: reqRow.user_id,
 			role: reqRow.requested_role,
+			organization_id: reqRow.organization_id, // Use request's organization
 			assigned_by: user.id,
 			created_at: new Date().toISOString(),
 			updated_at: new Date().toISOString()
@@ -75,10 +92,36 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 	
 	console.log('[approve] Successfully approved request:', id, 'for user:', reqRow.user_id);
 
+	// Send email notification to user
+	try {
+		const { data: userData } = await supabase.auth.admin.getUserById(reqRow.user_id);
+		const userEmail = userData?.user?.email;
+
+		if (userEmail) {
+			const { data: orgData } = await supabase
+				.from('organizations')
+				.select('name')
+				.eq('id', reqRow.organization_id)
+				.single();
+
+			await emailService.sendRoleApproved(userEmail, {
+				userName: userData?.user?.user_metadata?.full_name || 'User',
+				requestedRole: reqRow.requested_role,
+				institution: orgData?.name || 'Your Organization',
+				adminNotes: 'Your role request has been approved by the admin team.',
+				dashboardUrl: `${getBaseUrl()}/dashboard`
+			});
+		}
+	} catch (emailError) {
+		console.error('[approve] Failed to send email notification:', emailError);
+		// Don't fail the request if email fails
+	}
+
 	// Audit log (optional, don't fail if it errors)
 	try {
 		await supabase.from('audit_logs').insert({
 			user_id: reqRow.user_id,
+			organization_id: reqRow.organization_id, // Multi-org field
 			action: 'role_approve',
 			target_id: reqRow.user_id,
 			details: { request_id: id, role: reqRow.requested_role, by: user.id },

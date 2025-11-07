@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
+import { logger } from '@/lib/logger';
 
 interface DeleteCertificateBody {
   certificateId: string;
@@ -11,7 +12,7 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
   if (result.error) return result.error;
   
   const { certificateId } = result.data;
-  console.log('🗑️  DELETE Request for ID:', certificateId);
+  logger.debug('DELETE Request for certificate', { certificateId });
 
   const supabase = await createSupabaseServerClient();
 
@@ -43,7 +44,7 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
         await supabase.storage.from(bucket).remove([path]);
       }
     } catch (storageError) {
-      console.error('Error deleting file from storage:', storageError);
+      logger.error('Error deleting file from storage', storageError);
     }
   };
 
@@ -55,7 +56,7 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
     .maybeSingle();
 
   if (certRecord) {
-    console.log('📄 Found in certificates table:', certRecord.id);
+    logger.debug('Found in certificates table', { id: certRecord.id });
     // Ownership check for students
     if (role === 'student' && certRecord.student_id !== user.id) {
       throw apiError.forbidden('Access denied');
@@ -69,7 +70,7 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
       .delete()
       .eq('certificate_id', certificateId);
     if (metadataError) {
-      console.error('Error deleting certificate metadata:', metadataError);
+      logger.error('Error deleting certificate metadata', metadataError);
     }
 
     const { error: deleteError } = await supabase
@@ -77,16 +78,16 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
       .delete()
       .eq('id', certificateId);
     if (deleteError) {
-      console.error('❌ Failed to delete from certificates:', deleteError);
+      logger.error('Failed to delete from certificates', deleteError);
       throw apiError.internal(deleteError.message);
     }
 
-    console.log('✅ Deleted from certificates table');
+    logger.debug('Deleted from certificates table successfully');
     return success({ success: true }, 'Certificate deleted successfully');
   }
 
   // If not a certificate, try as a document id (new flow)
-  console.log('🔍 Searching documents table for:', certificateId);
+  logger.debug('Searching documents table for certificate', { certificateId });
   const { data: docRecord, error: docQueryError } = await supabase
     .from('documents')
     .select('id, student_id, file_url')
@@ -94,16 +95,18 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
     .maybeSingle();
 
   if (docQueryError) {
-    console.error('❌ Query error:', docQueryError);
+    logger.error('Query error in documents table', docQueryError);
   }
 
   if (!docRecord) {
-    console.log('❌ Not found in either certificates or documents table');
+    logger.debug('Certificate not found in either table');
     throw apiError.notFound('Certificate not found');
   }
 
-  console.log('📄 Found in documents table:', docRecord.id);
-  console.log('🆔 ID Match:', certificateId === docRecord.id ? '✅ MATCH' : '❌ MISMATCH');
+  logger.debug('Found in documents table', { 
+    id: docRecord.id, 
+    idMatch: certificateId === docRecord.id 
+  });
 
   // Ownership check for students
   if (role === 'student' && docRecord.student_id !== user.id) {
@@ -118,7 +121,7 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
     .delete()
     .eq('document_id', certificateId);
   if (dmdError) {
-    console.error('Error deleting document metadata:', dmdError);
+    logger.error('Error deleting document metadata', dmdError);
   }
 
   // Verify deletion by checking if record exists
@@ -127,7 +130,7 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
     .select('id')
     .eq('id', certificateId)
     .maybeSingle();
-  console.log('🔍 Before delete - record exists:', !!beforeDelete);
+  logger.debug('Before delete verification', { recordExists: !!beforeDelete });
 
   const { error: docDeleteError } = await supabase
     .from('documents')
@@ -135,7 +138,7 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
     .eq('id', certificateId);
   
   if (docDeleteError) {
-    console.error('❌ Failed to delete from documents:', docDeleteError);
+    logger.error('Failed to delete from documents', docDeleteError);
     throw apiError.internal(docDeleteError.message);
   }
 
@@ -145,9 +148,9 @@ export const DELETE = withRole(['student', 'admin'], async (req: NextRequest, { 
     .select('id')
     .eq('id', certificateId)
     .maybeSingle();
-  console.log('🔍 After delete - record still exists:', !!afterDelete);
+  logger.debug('After delete verification', { recordStillExists: !!afterDelete });
 
-  console.log('✅ Deleted from documents table');
+  logger.debug('Deleted from documents table successfully');
   return success({ success: true }, 'Document deleted successfully');
 });
 
