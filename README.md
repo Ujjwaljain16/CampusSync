@@ -116,6 +116,23 @@ Key internal documentation that explains the app flows, DB query patterns, error
 - [Tech Guide](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/TechGUIDE.md) — development conventions, deployment notes and operational guidance
 
 ---
+## Demo :
+
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 020659" src="https://github.com/user-attachments/assets/2215fee3-3ac0-4c8f-b8eb-ff49635fce14" />
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 020728" src="https://github.com/user-attachments/assets/68fe9b65-0400-404e-a4b6-76833c241d39" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/365776ff-9902-4b67-b613-b35819277e85" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/7165c7d0-a63c-4544-90f4-428abee3f0e6" />
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 021252" src="https://github.com/user-attachments/assets/e6934b5d-c6b8-408a-9711-b36e68709600" />
+<img width="1436" height="98" alt="Screenshot 2025-11-08 021437" src="https://github.com/user-attachments/assets/0156943f-6e78-4a4d-ad3d-3eebbd52e15b" />
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 021400" src="https://github.com/user-attachments/assets/81c5f47c-ac9a-47d5-9e0a-b8eadf2234e0" />
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 023426" src="https://github.com/user-attachments/assets/6bd9b53e-c107-4662-9aaf-d38b8c3c02a7" />
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 021635" src="https://github.com/user-attachments/assets/c955233f-8da1-4a2f-b59a-cc332dfc0942" />
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 021615" src="https://github.com/user-attachments/assets/20e8ffda-c656-41ed-96c2-170131375313" />
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 021654" src="https://github.com/user-attachments/assets/d7a95f63-d3e6-47b3-a3fb-5a9254614513" />
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 022348" src="https://github.com/user-attachments/assets/1e5defe6-8002-48c1-82e4-de5cf8392d7e" />
+<img width="1920" height="1080" alt="Screenshot 2025-11-08 023613" src="https://github.com/user-attachments/assets/2eaeb796-fc84-43b7-9b05-c506ad408e75" />
+
+---
 
 ## 🛠️ Tech Stack
 
