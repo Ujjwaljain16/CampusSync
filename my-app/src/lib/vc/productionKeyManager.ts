@@ -53,7 +53,7 @@ export class ProductionKeyManager {
     const keyId = `key-${randomUUID()}`;
     
     // Generate RSA key pair for production
-    const { publicKey, privateKey } = await generateKeyPair('RS256', {
+    const { privateKey } = await generateKeyPair('RS256', {
       modulusLength: 2048, // Production-grade key size
     });
 
@@ -160,7 +160,7 @@ export class ProductionKeyManager {
    * Get key metadata for monitoring
    */
   getKeyMetadata(): Array<{ keyId: string; createdAt: Date; isActive: boolean }> {
-    return Array.from(this.keys.entries()).map(([keyId, key]) => ({
+    return Array.from(this.keys.entries()).map(([keyId]) => ({
       keyId,
       createdAt: new Date(), // In production, store actual creation time
       isActive: keyId === this.currentKeyId

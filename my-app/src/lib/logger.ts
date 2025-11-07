@@ -18,7 +18,7 @@ class Logger {
    */
   debug(message: string, context?: LogContext) {
     if (isDev) {
-      console.debug(`🔍 [DEBUG] ${message}`, context || '');
+      console.debug(`[DEBUG] ${message}`, context || '');
     }
   }
 
@@ -28,7 +28,7 @@ class Logger {
    */
   log(message: string, context?: LogContext) {
     if (isDev) {
-      console.log(`ℹ️  [INFO] ${message}`, context || '');
+      console.log(`[INFO] ${message}`, context || '');
     }
   }
 
@@ -38,7 +38,7 @@ class Logger {
    */
   warn(message: string, context?: LogContext) {
     if (isDev) {
-      console.warn(`⚠️  [WARN] ${message}`, context || '');
+      console.warn(`[WARN] ${message}`, context || '');
     }
   }
 
@@ -48,7 +48,7 @@ class Logger {
    */
   error(message: string, error?: Error | unknown, context?: LogContext) {
     // Always log errors to console
-    console.error(`❌ [ERROR] ${message}`, {
+    console.error(`[ERROR] ${message}`, {
       error: error instanceof Error ? {
         name: error.name,
         message: error.message,
@@ -71,7 +71,7 @@ class Logger {
    */
   success(message: string, context?: LogContext) {
     if (isDev) {
-      console.log(`✅ [SUCCESS] ${message}`, context || '');
+      console.log(`[SUCCESS] ${message}`, context || '');
     }
   }
 
@@ -81,8 +81,8 @@ class Logger {
    */
   http(method: string, path: string, statusCode: number, duration: number) {
     if (isDev) {
-      const statusEmoji = statusCode < 300 ? '✅' : statusCode < 400 ? '↗️' : statusCode < 500 ? '⚠️' : '❌';
-      console.log(`${statusEmoji} [HTTP] ${method} ${path} - ${statusCode} (${duration}ms)`);
+      const statusIndicator = statusCode < 300 ? 'OK' : statusCode < 400 ? 'REDIRECT' : statusCode < 500 ? 'WARN' : 'ERROR';
+      console.log(`[HTTP:${statusIndicator}] ${method} ${path} - ${statusCode} (${duration}ms)`);
     }
   }
 
@@ -91,7 +91,7 @@ class Logger {
    * Use for security-related events
    */
   security(message: string, context?: LogContext) {
-    console.warn(`🔒 [SECURITY] ${message}`, context || '');
+    console.warn(`[SECURITY] ${message}`, context || '');
 
     // Always send security events to monitoring
     if (!isTest) {
@@ -105,8 +105,8 @@ class Logger {
    */
   perf(operation: string, duration: number, context?: LogContext) {
     if (isDev) {
-      const emoji = duration < 100 ? '⚡' : duration < 500 ? '🐢' : '🐌';
-      console.log(`${emoji} [PERF] ${operation} - ${duration}ms`, context || '');
+      const perfIndicator = duration < 100 ? 'FAST' : duration < 500 ? 'SLOW' : 'VERY_SLOW';
+      console.log(`[PERF:${perfIndicator}] ${operation} - ${duration}ms`, context || '');
     }
   }
 
@@ -120,13 +120,17 @@ class Logger {
     error?: Error | unknown,
     context?: LogContext
   ) {
-    // Placeholder for monitoring integration
-    // Prevents unused parameter warnings while keeping the interface
+    // Monitoring integration placeholder
+    // Enable with ENABLE_MONITORING=true environment variable
+    // Recommended: Integrate Sentry, DataDog, or New Relic
+    // Example Sentry integration:
+    // import * as Sentry from '@sentry/nextjs';
+    // Sentry.captureException(error || new Error(message), {
+    //   level, contexts: { custom: context }
+    // });
     if (process.env.ENABLE_MONITORING === 'true') {
-      // TODO: Implement your monitoring service integration
-      // Example: Sentry.captureException(error || new Error(message), {
-      //   level, contexts: { custom: context }
-      // });
+      // TODO (Optional): Implement your preferred monitoring service integration
+      // Prevents unused parameter warnings while keeping the interface
       void level;
       void message;
       void error;

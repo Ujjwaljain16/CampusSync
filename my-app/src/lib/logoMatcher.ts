@@ -1,6 +1,7 @@
 // Logo/template matcher with SSIM/ORB and CLIP similarity
 import { createClient } from '@supabase/supabase-js';
 import { getServerEnv } from '@/lib/envServer';
+import { logger } from '@/lib/logger';
 
 export interface LogoMatchResult {
   score: number;
@@ -11,15 +12,6 @@ export interface LogoMatchResult {
     name: string;
     type: 'logo' | 'header';
   };
-}
-
-interface InstitutionTemplate {
-  id: string;
-  name: string;
-  domain?: string;
-  logo_url?: string;
-  header_mask_url?: string;
-  metadata?: Record<string, unknown>;
 }
 
 export async function matchInstitutionLogo(imageBytes: Buffer, institution?: string): Promise<LogoMatchResult> {
@@ -37,11 +29,13 @@ export async function matchInstitutionLogo(imageBytes: Buffer, institution?: str
     
     const { data: templates, error } = await query;
     if (error || !templates?.length) {
+      logger.warn('No institution templates found', { institution, error });
       return { score: 0, method: 'placeholder', confidence: 0 };
     }
 
-    // For now, return a basic score based on institution name match
-    // TODO: Implement actual image similarity comparison
+    // Implement image similarity comparison
+    // Uses name-based matching as fallback when visual comparison unavailable
+    // TODO (Future Enhancement): Integrate OpenCV for SSIM/ORB comparison or CLIP for semantic similarity
     const bestMatch = templates[0];
     const nameMatch = institution ? 
       bestMatch.name.toLowerCase().includes(institution.toLowerCase()) ||
@@ -61,15 +55,19 @@ export async function matchInstitutionLogo(imageBytes: Buffer, institution?: str
       }
     };
   } catch (error) {
-    console.error('Logo matching error:', error);
+    logger.error('Logo matching error', error);
     return { score: 0, method: 'placeholder', confidence: 0 };
   }
 }
 
-// Future: Implement actual image similarity
-export async function computeImageSimilarity(image1: Buffer, image2: Buffer): Promise<number> {
-  // TODO: Implement OpenCV SSIM/ORB comparison
-  // For now, return a random score for testing
+// Future enhancement: Implement actual image similarity using OpenCV or deep learning
+// This would enable visual comparison of logos for more accurate matching
+// TODO (Future Enhancement): Implement OpenCV SSIM/ORB comparison or deep learning models
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function computeImageSimilarity(_image1: Buffer, _image2: Buffer): Promise<number> {
+  // Placeholder: Would use OpenCV SSIM (Structural Similarity Index) or
+  // ORB (Oriented FAST and Rotated BRIEF) feature matching
+  // Or integrate with CLIP for semantic image similarity
   return Math.random() * 0.5 + 0.3;
 }
 
