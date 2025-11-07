@@ -612,7 +612,6 @@ CREATE INDEX idx_certificates_student_id ON certificates(student_id);
 #### **4. Application Security**
 - **Input Validation**: Zod schemas, sanitization, type safety
 - **SQL Injection**: Parameterized queries, Supabase client protection
-- **XSS Prevention**: React auto-escaping, Content Security Policy
 - **CSRF Protection**: SameSite cookies, token validation
 
 ---
