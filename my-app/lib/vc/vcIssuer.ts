@@ -18,8 +18,8 @@ export interface IssuanceRequest {
   credentialSubject: CredentialSubject;
   credentialType: string;
   validityPeriod?: number; // days
-  customFields?: Record<string, any>;
-  metadata?: Record<string, any>;
+  customFields?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface IssuanceResult {
@@ -40,7 +40,7 @@ export interface IssuanceAudit {
   policyCompliance: boolean;
   validationPassed: boolean;
   keyId: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export class ProductionVCIssuer {

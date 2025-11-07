@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { success, apiError } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { getIssuerJwk, verifyCredentialJws } from '../../../../../lib/vc';
+import { getIssuerJwk, verifyCredentialJws } from '@/lib/vc';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);

@@ -3,19 +3,29 @@ import { success, apiError } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ userId: string }> }
 ) {
   const { userId } = await params;
   const supabase = await createSupabaseServerClient();
+  
+  // Get organization_id from query param (optional - for organization-scoped public portfolios)
+  const { searchParams } = new URL(request.url);
+  const organizationId = searchParams.get('organizationId');
 
-  // Get user's verified certificates/documents
-  const { data: certificates, error } = await supabase
+  // Build query for user's verified certificates
+  let query = supabase
     .from('certificates')
     .select('*')
     .eq('student_id', userId)
-    .eq('verification_status', 'verified')
-    .order('created_at', { ascending: false });
+    .eq('verification_status', 'verified');
+  
+  // If organizationId is provided, filter by it (for org-scoped public viewing)
+  if (organizationId) {
+    query = query.eq('organization_id', organizationId);
+  }
+  
+  const { data: certificates, error } = await query.order('created_at', { ascending: false });
 
   if (error) {
     throw apiError.internal(error.message);

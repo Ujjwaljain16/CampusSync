@@ -42,7 +42,9 @@ export async function POST(request: NextRequest) {
       email_confirm: true,
       user_metadata: role ? { invited_role: role } : undefined,
     });
-    if (error) throw apiError.internal(error.message);
+    if (error) {
+      throw apiError.internal(error.message);
+    }
     return success({ ok: true, created: true, userId: data.user.id });
   }
 
@@ -51,7 +53,9 @@ export async function POST(request: NextRequest) {
     password,
     user_metadata: role ? { invited_role: role } : undefined,
   });
-  if (updateError) throw apiError.internal(updateError.message);
+  if (updateError) {
+    throw apiError.internal(updateError.message);
+  }
 
   return success({ ok: true, created: false, userId: existing.id });
 }

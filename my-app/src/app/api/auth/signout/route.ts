@@ -1,4 +1,4 @@
-import { success, apiError } from '@/lib/api';
+import { success } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function POST() {

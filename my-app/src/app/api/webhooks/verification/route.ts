@@ -82,11 +82,23 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleVerificationCompleted(payload: Record<string, unknown>) {
-  const { credentialId, status, confidence, method, timestamp } = payload;
+  const { credentialId, status, confidence, method, timestamp, organizationId } = payload;
   
-  // Log verification completion
+  // Get organization from certificate if not provided
+  let orgId = organizationId as string | undefined;
+  if (!orgId && credentialId) {
+    const { data: cert } = await supabase
+      .from('certificates')
+      .select('organization_id')
+      .eq('id', credentialId)
+      .single();
+    orgId = cert?.organization_id;
+  }
+  
+  // Log verification completion with organization
   await supabase.from('audit_logs').insert({
     actor_id: null, // System event
+    organization_id: orgId,
     target_id: credentialId,
     action: 'webhook_verification_completed',
     details: {
@@ -114,11 +126,23 @@ async function handleVerificationCompleted(payload: Record<string, unknown>) {
 }
 
 async function handleVerificationFailed(payload: Record<string, unknown>) {
-  const { credentialId, error, reason, timestamp } = payload;
+  const { credentialId, error, reason, timestamp, organizationId } = payload;
   
-  // Log verification failure
+  // Get organization from certificate if not provided
+  let orgId = organizationId as string | undefined;
+  if (!orgId && credentialId) {
+    const { data: cert } = await supabase
+      .from('certificates')
+      .select('organization_id')
+      .eq('id', credentialId)
+      .single();
+    orgId = cert?.organization_id;
+  }
+  
+  // Log verification failure with organization
   await supabase.from('audit_logs').insert({
     actor_id: null,
+    organization_id: orgId,
     target_id: credentialId,
     action: 'webhook_verification_failed',
     details: {
@@ -146,11 +170,23 @@ async function handleVerificationFailed(payload: Record<string, unknown>) {
 }
 
 async function handleCertificateApproved(payload: Record<string, unknown>) {
-  const { certificateId, approvedBy, timestamp, reason } = payload;
+  const { certificateId, approvedBy, timestamp, reason, organizationId } = payload;
   
-  // Log certificate approval
+  // Get organization from certificate if not provided
+  let orgId = organizationId as string | undefined;
+  if (!orgId && certificateId) {
+    const { data: cert } = await supabase
+      .from('certificates')
+      .select('organization_id')
+      .eq('id', certificateId)
+      .single();
+    orgId = cert?.organization_id;
+  }
+  
+  // Log certificate approval with organization
   await supabase.from('audit_logs').insert({
     actor_id: approvedBy,
+    organization_id: orgId,
     target_id: certificateId,
     action: 'webhook_certificate_approved',
     details: {
@@ -163,11 +199,23 @@ async function handleCertificateApproved(payload: Record<string, unknown>) {
 }
 
 async function handleCertificateRejected(payload: Record<string, unknown>) {
-  const { certificateId, rejectedBy, timestamp, reason } = payload;
+  const { certificateId, rejectedBy, timestamp, reason, organizationId } = payload;
   
-  // Log certificate rejection
+  // Get organization from certificate if not provided
+  let orgId = organizationId as string | undefined;
+  if (!orgId && certificateId) {
+    const { data: cert } = await supabase
+      .from('certificates')
+      .select('organization_id')
+      .eq('id', certificateId)
+      .single();
+    orgId = cert?.organization_id;
+  }
+  
+  // Log certificate rejection with organization
   await supabase.from('audit_logs').insert({
     actor_id: rejectedBy,
+    organization_id: orgId,
     target_id: certificateId,
     action: 'webhook_certificate_rejected',
     details: {
@@ -180,11 +228,23 @@ async function handleCertificateRejected(payload: Record<string, unknown>) {
 }
 
 async function handleVCIssued(payload: Record<string, unknown>) {
-  const { credentialId, issuedTo, timestamp, credentialType } = payload;
+  const { credentialId, issuedTo, timestamp, credentialType, organizationId } = payload;
   
-  // Log VC issuance
+  // Get organization from certificate if not provided
+  let orgId = organizationId as string | undefined;
+  if (!orgId && credentialId) {
+    const { data: cert } = await supabase
+      .from('certificates')
+      .select('organization_id')
+      .eq('id', credentialId)
+      .single();
+    orgId = cert?.organization_id;
+  }
+  
+  // Log VC issuance with organization
   await supabase.from('audit_logs').insert({
     actor_id: null,
+    organization_id: orgId,
     target_id: credentialId,
     action: 'webhook_vc_issued',
     details: {
@@ -198,11 +258,23 @@ async function handleVCIssued(payload: Record<string, unknown>) {
 }
 
 async function handleVCRevoked(payload: Record<string, unknown>) {
-  const { credentialId, revokedBy, timestamp, reason } = payload;
+  const { credentialId, revokedBy, timestamp, reason, organizationId } = payload;
   
-  // Log VC revocation
+  // Get organization from certificate if not provided
+  let orgId = organizationId as string | undefined;
+  if (!orgId && credentialId) {
+    const { data: cert } = await supabase
+      .from('certificates')
+      .select('organization_id')
+      .eq('id', credentialId)
+      .single();
+    orgId = cert?.organization_id;
+  }
+  
+  // Log VC revocation with organization
   await supabase.from('audit_logs').insert({
     actor_id: revokedBy,
+    organization_id: orgId,
     target_id: credentialId,
     action: 'webhook_vc_revoked',
     details: {
