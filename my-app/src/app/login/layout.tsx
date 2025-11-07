@@ -1,15 +1,15 @@
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Sign In | CredentiVault",
-  description: "Sign in to your CredentiVault account to manage and showcase your digital credentials securely.",
+  title: "Sign In | CampusSync",
+  description: "Sign in to your CampusSync account to manage your verified credentials and connect with career opportunities.",
   openGraph: {
-    title: "Sign In | CredentiVault",
-    description: "Sign in to your CredentiVault account to manage and showcase your digital credentials securely.",
+    title: "Sign In | CampusSync",
+    description: "Sign in to your CampusSync account to manage your verified credentials and connect with career opportunities.",
   },
   twitter: {
-    title: "Sign In | CredentiVault",
-    description: "Sign in to your CredentiVault account to manage and showcase your digital credentials securely.",
+    title: "Sign In | CampusSync",
+    description: "Sign in to your CampusSync account to manage your verified credentials and connect with career opportunities.",
   },
 };
 

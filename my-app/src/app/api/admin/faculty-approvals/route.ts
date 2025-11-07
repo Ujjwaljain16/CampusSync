@@ -102,10 +102,10 @@ export async function GET(request: NextRequest) {
     const userIds = [...new Set(requests.map((r: { user_id: string }) => r.user_id))];
     const orgIds = [...new Set(requests.map((r: { organization_id: string }) => r.organization_id))];
 
-    // Fetch user profiles separately
+    // Fetch user profiles separately (including company_name for recruiters)
     const { data: profiles } = await adminClient
       .from('profiles')
-      .select('id, email, full_name')
+      .select('id, email, full_name, company_name')
       .in('id', userIds);
 
     // Fetch organizations separately
@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
       .in('id', orgIds);
 
     // Create lookup maps
-    type Profile = { id: string; email: string; full_name: string };
+    type Profile = { id: string; email: string; full_name: string; company_name?: string };
     type Organization = { id: string; name: string };
     const profileMap = new Map<string, Profile>((profiles || []).map((p: Profile) => [p.id, p]));
     const orgMap = new Map<string, Organization>((organizations || []).map((o: Organization) => [o.id, o]));
@@ -134,6 +134,11 @@ export async function GET(request: NextRequest) {
       const profile = profileMap.get(req.user_id);
       const org = orgMap.get(req.organization_id);
       
+      // For recruiters, use company_name instead of organization name
+      const displayOrganization = req.role === 'recruiter' 
+        ? (profile?.company_name || 'Platform Access') 
+        : (org?.name || 'Unknown Organization');
+      
       return {
         user_id: req.user_id,
         role: req.role,
@@ -145,7 +150,8 @@ export async function GET(request: NextRequest) {
         approval_notes: req.approval_notes,
         user_email: profile?.email || 'Unknown',
         user_name: profile?.full_name || profile?.email?.split('@')[0] || 'Unknown User',
-        organization_name: org?.name || 'Unknown Organization'
+        organization_name: displayOrganization,
+        company_name: profile?.company_name || null
       };
     });
 

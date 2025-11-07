@@ -86,7 +86,30 @@ export async function GET(request: NextRequest) {
 		return NextResponse.redirect(signupUrl);
 	}
 
-	// User exists, check for role assignment scenarios
+	// User exists, check for role and approval status for proper redirect
+	console.log(`OAuth user ${user.email} has existing profile`);
+	
+	// Check if user is a recruiter and their approval status
+	const { data: recruiterRole } = await supabase
+		.from('user_roles')
+		.select('role, approval_status')
+		.eq('user_id', user.id)
+		.eq('role', 'recruiter')
+		.maybeSingle();
+	
+	// If user is a recruiter with pending/denied approval, redirect to waiting page
+	if (recruiterRole) {
+		console.log(`OAuth recruiter found with approval status: ${recruiterRole.approval_status}`);
+		if (recruiterRole.approval_status === 'pending' || recruiterRole.approval_status === 'denied') {
+			console.log(`Redirecting recruiter to waiting page`);
+			const waitingUrl = `${base}/recruiter/waiting`;
+			const redirectResponse = NextResponse.redirect(waitingUrl);
+			cookieStore.forEach(({ name, value, options }) => {
+				redirectResponse.cookies.set(name, value, options);
+			});
+			return redirectResponse;
+		}
+	}
 	// Handle role assignment for invited users
 	if (user?.user_metadata?.invited_role) {
 		const invitedRole = user.user_metadata.invited_role;

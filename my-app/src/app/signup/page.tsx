@@ -40,9 +40,18 @@ export default function SignupPage() {
     const shouldSignIn = data.shouldSignIn || isOAuthUser;
     
     if (shouldSignIn) {
-      // OAuth users or existing users - redirect to login
-      console.log('[SignupPage] OAuth/existing user, redirecting to login');
-      window.location.href = '/login';
+      // OAuth users or existing users
+      console.log('[SignupPage] OAuth/existing user, role:', data.role);
+      
+      // For recruiters, redirect to waiting page (pending approval)
+      if (data.role === 'recruiter') {
+        console.log('[SignupPage] Recruiter signup complete, redirecting to waiting page');
+        window.location.href = '/recruiter/waiting';
+      } else {
+        // Other roles - redirect to login
+        console.log('[SignupPage] Non-recruiter OAuth user, redirecting to login');
+        window.location.href = '/login';
+      }
     } else {
       // Email/password users - redirect to email verification page
       console.log('[SignupPage] New email/password user, redirecting to email verification');

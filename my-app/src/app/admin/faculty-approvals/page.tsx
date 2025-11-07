@@ -18,6 +18,7 @@ interface FacultyApproval {
   user_email: string;
   user_name: string;
   organization_name: string;
+  company_name?: string | null;
 }
 
 export default function AdminFacultyApprovalsPage() {
@@ -353,6 +354,11 @@ export default function AdminFacultyApprovalsPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-white/80 font-medium">{approval.organization_name}</div>
+                        {approval.role === 'recruiter' && approval.company_name && (
+                          <div className="text-emerald-300 text-xs mt-1 font-medium">
+                            🏢 {approval.company_name}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-semibold border ${getStatusColor(approval.approval_status)}`}>
@@ -450,6 +456,11 @@ export default function AdminFacultyApprovalsPage() {
                   <div>
                     <div className="text-white/60 text-xs uppercase tracking-wider font-bold mb-1.5">Organization</div>
                     <div className="text-white/80 font-medium">{selectedApproval.organization_name}</div>
+                    {selectedApproval.role === 'recruiter' && selectedApproval.company_name && (
+                      <div className="mt-1.5 text-emerald-300 text-sm font-medium">
+                        Company: {selectedApproval.company_name}
+                      </div>
+                    )}
                   </div>
 
                   <div>

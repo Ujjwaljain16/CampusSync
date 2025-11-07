@@ -10,6 +10,7 @@ import {
   Target, ChevronRight, UserCircle2, Building2
 } from 'lucide-react';
 import OrganizationSwitcher from '@/components/OrganizationSwitcher';
+import LogoutButton from '@/components/LogoutButton';
 import { apiFetch } from '@/lib/apiClient';
 import { logger } from '@/lib/logger';
 
@@ -490,6 +491,8 @@ export default function RecruiterDashboard() {
                 <Download className="w-4 h-4 md:w-5 md:h-5 relative z-10" />
                 <span className="hidden sm:inline relative z-10">Export Report</span>
               </button>
+              
+              <LogoutButton variant="minimal" />
             </div>
           </div>
         </div>

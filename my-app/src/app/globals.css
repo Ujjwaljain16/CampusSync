@@ -41,7 +41,7 @@ html {
   --animate-glow: glow 2s ease-in-out infinite;
 }
 
-/* CredentiVault Design System */
+/* CampusSync Design System */
 :root {
   /* Primary Colors - Updated to match CampusSync blue-to-emerald theme */
   --primary-gradient: linear-gradient(135deg, #3b82f6 0%, #10b981 100%);
@@ -103,7 +103,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* CredentiVault Utility Classes */
+/* CampusSync Utility Classes */
 .cv-primary-gradient {
   background: var(--primary-gradient);
 }

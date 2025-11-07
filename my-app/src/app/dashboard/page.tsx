@@ -34,8 +34,17 @@ export default async function DashboardRedirectPage() {
     redirect('/faculty/dashboard');
   }
 
-  // Recruiter get their dashboard
+  // Recruiter - check approval status first
   if (role === 'recruiter') {
+    // If pending approval, redirect to waiting page
+    if (approvalStatus === 'pending') {
+      redirect('/recruiter/waiting');
+    }
+    // If denied, redirect to waiting page (shows denied message)
+    if (approvalStatus === 'denied') {
+      redirect('/recruiter/waiting');
+    }
+    // If approved, go to recruiter dashboard
     redirect('/recruiter/dashboard');
   }
 

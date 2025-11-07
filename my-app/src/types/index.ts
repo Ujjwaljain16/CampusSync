@@ -1,4 +1,4 @@
-// Global TypeScript type definitions for CredentiVault
+// Global TypeScript type definitions for CampusSync
 
 
 export interface User {

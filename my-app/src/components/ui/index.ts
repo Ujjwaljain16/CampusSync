@@ -4,7 +4,7 @@
  * Usage: import { Button, Card, Alert } from '@/components/ui'
  */
 
-// CredentiVault Custom Components (cv-* design system)
+// CampusSync Custom Components (cv-* design system)
 export {
   FormField,
   FormLabel,

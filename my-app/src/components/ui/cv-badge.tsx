@@ -1,5 +1,5 @@
 /**
- * CredentiVault Badge Components
+ * CampusSync Badge Components
  * Reusable badge components using the cv-* design system
  */
 

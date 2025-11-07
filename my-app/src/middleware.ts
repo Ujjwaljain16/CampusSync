@@ -124,6 +124,25 @@ export async function middleware(req: NextRequest) {
 		}
 	}
 
+	// IMPORTANT: Check recruiter approval when accessing /dashboard
+	// This handles OAuth flow where recruiters land on /dashboard after login
+	if (user && req.nextUrl.pathname === '/dashboard') {
+		const { data: roleData } = await supabase
+			.from('user_roles')
+			.select('role, approval_status')
+			.eq('user_id', user.id)
+			.eq('role', 'recruiter')
+			.maybeSingle();
+
+		if (roleData) {
+			// If recruiter has pending or denied approval, redirect to waiting page
+			if (roleData.approval_status === 'pending' || roleData.approval_status === 'denied') {
+				if (isDev) logger.debug('Recruiter accessing /dashboard with pending/denied approval, redirecting to waiting');
+				return NextResponse.redirect(new URL('/recruiter/waiting', req.url));
+			}
+		}
+	}
+
 	return supabaseResponse;
 }
 

@@ -56,19 +56,33 @@ export async function POST(request: NextRequest) {
 	}
 
 	let role: string | null = null;
+	let approvalStatus: string | null = null;
 	try {
 		const { data: roles, error: roleError } = await supabase
 			.from('user_roles')
-			.select('role')
+			.select('role, approval_status')
 			.eq('user_id', user.id)
 			.limit(1);
 		if (roleError) {
 			console.error('[complete-login] role query error:', roleError);
 		}
-		role = roles && roles.length > 0 ? (roles[0] as Record<string, unknown>).role as string : null;
+		if (roles && roles.length > 0) {
+			const roleRecord = roles[0] as Record<string, unknown>;
+			role = roleRecord.role as string;
+			approvalStatus = roleRecord.approval_status as string | null;
+		}
 	} catch (e) {
 		console.error('[complete-login] role query exception:', e);
 		role = null;
+		approvalStatus = null;
+	}
+
+	// Special handling for recruiters - check approval status
+	if (role === 'recruiter') {
+		if (approvalStatus === 'pending' || approvalStatus === 'denied') {
+			console.log('[complete-login] Recruiter with pending/denied approval, redirecting to waiting page');
+			return NextResponse.json({ ok: true, redirectTo: '/recruiter/waiting' }, { status: 200, headers: response.headers });
+		}
 	}
 
 	const redirectTo = getRedirectForRole(role);

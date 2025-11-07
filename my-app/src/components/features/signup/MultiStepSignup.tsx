@@ -141,11 +141,16 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
 
       setData(prev => ({ ...prev, email: emailParam }));
 
-      // Auto-validate email for OAuth users. Pass roleParam as override so
-      // recruiters won't be blocked by domain checks even if UI hasn't rendered
-      setTimeout(() => {
-        validateEmail(emailParam, roleParam || undefined);
-      }, 500);
+      // IMPORTANT: Only auto-validate email if role is known
+      // If no role, let user choose first (they might be a recruiter with non-org email)
+      if (roleParam) {
+        // Auto-validate email for OAuth users with known role
+        setTimeout(() => {
+          validateEmail(emailParam, roleParam);
+        }, 500);
+      } else {
+        console.log('[OAuth] Email set but validation skipped - waiting for role selection');
+      }
     }
   }, [validateEmail]);
 
@@ -153,9 +158,21 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
   const selectRole = useCallback((role: Role) => {
     setData(prev => ({ ...prev, role }));
     setError(null);
+    
+    // For OAuth users who came without a role, validate email now that role is selected
+    const params = new URLSearchParams(window.location.search);
+    const isOAuthUser = params.get('oauth') === 'true';
+    const emailParam = params.get('email');
+    
+    if (isOAuthUser && emailParam && (role === 'student' || role === 'faculty')) {
+      // Validate email for student/faculty to check org match
+      console.log('[selectRole] OAuth user selected student/faculty, validating email');
+      validateEmail(emailParam, role);
+    }
+    
     // Auto-advance to next step after brief delay
     setTimeout(() => setCurrentStep(2), 300);
-  }, []);
+  }, [validateEmail]);
 
   // Handle email blur
   const handleEmailBlur = useCallback(() => {
@@ -165,9 +182,18 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
   }, [data.email, validateEmail]);
 
   // Navigate steps
-  const nextStep = () => {
+  const nextStep = useCallback(() => {
+    // Before moving to step 3 (organization), validate email for student/faculty if not done yet
+    if (currentStep === 2 && (data.role === 'student' || data.role === 'faculty') && data.email) {
+      // Trigger validation if organizations array is empty (means not validated yet)
+      if (organizations.length === 0 && !validatingEmail && !error) {
+        console.log('[nextStep] Triggering email validation before proceeding to org selection');
+        validateEmail(data.email, data.role);
+      }
+    }
+    
     if (currentStep < 4) setCurrentStep((prev) => (prev + 1) as Step);
-  };
+  }, [currentStep, data.role, data.email, organizations.length, validatingEmail, error, validateEmail]);
 
   const prevStep = () => {
     if (currentStep > 1) setCurrentStep((prev) => (prev - 1) as Step);
@@ -262,9 +288,9 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
       });
       
       if (shouldSignIn) {
-        // OAuth users or existing users - redirect to login/dashboard
+        // OAuth users or existing users - redirect to appropriate page
         toast.success('Account setup complete! Signing you in...');
-        console.log('[MultiStepSignup] OAuth user or existing account, redirecting to login');
+        console.log('[MultiStepSignup] OAuth user or existing account, role:', data.role);
         
         // If onComplete callback exists, call it with shouldSignIn flag
         if (onComplete) {
@@ -273,11 +299,19 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
           return;
         }
         
-        // Otherwise redirect to login
-        console.log('[MultiStepSignup] Performing redirect to /login');
-        setTimeout(() => {
-          window.location.href = '/login';
-        }, 500); // Small delay to ensure logs and toast are visible
+        // For recruiters, redirect to waiting page (pending approval)
+        if (data.role === 'recruiter') {
+          console.log('[MultiStepSignup] Recruiter OAuth signup, redirecting to waiting page');
+          setTimeout(() => {
+            window.location.href = '/recruiter/waiting';
+          }, 500);
+        } else {
+          // Other roles - redirect to login
+          console.log('[MultiStepSignup] Non-recruiter OAuth user, redirecting to login');
+          setTimeout(() => {
+            window.location.href = '/login';
+          }, 500);
+        }
         return; // Important: exit here
       } else {
         // Regular email/password users - need email verification

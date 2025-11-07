@@ -1,5 +1,5 @@
 /**
- * CredentiVault Alert Components
+ * CampusSync Alert Components
  * Reusable alert components for displaying messages
  */
 

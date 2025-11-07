@@ -1,5 +1,5 @@
 /**
- * CredentiVault Button Components
+ * CampusSync Button Components
  * Reusable button components using the cv-* design system
  */
 

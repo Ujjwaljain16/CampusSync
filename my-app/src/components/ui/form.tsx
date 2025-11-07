@@ -1,5 +1,5 @@
 /**
- * CredentiVault Form Components
+ * CampusSync Form Components
  * Reusable form components using the cv-* design system
  */
 
