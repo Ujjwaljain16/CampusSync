@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Shield, Users, Mail, Lock, ArrowRight, CheckCircle, AlertCircle, ExternalLink, Copy, Check, ArrowLeft, Settings } from 'lucide-react';
+import { Shield, Users, ArrowRight, CheckCircle, AlertCircle, ExternalLink, Copy, Check, Settings } from 'lucide-react';
 
 export default function SetupPage() {
   const router = useRouter();

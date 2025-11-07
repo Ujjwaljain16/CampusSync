@@ -65,7 +65,7 @@ export default function EnhancedLandingPage() {
   }, []);
 
   const handleGetStarted = () => {
-    router.push('/login');
+    router.push('/signup');
   };
 
   const workflowSteps = [
@@ -164,10 +164,10 @@ export default function EnhancedLandingPage() {
 
               {/* Main Heading */}
               <div className="space-y-8">
-                <h1 className="text-5xl sm:text-6xl lg:text-7xl xl:text-8xl font-bold text-white leading-[1.15] tracking-tight max-w-5xl mx-auto animate-fade-in-up px-4">
+                <h1 className="text-5xl sm:text-6xl lg:text-7xl xl:text-8xl font-bold text-white leading-[1.3] tracking-tight max-w-5xl mx-auto animate-fade-in-up px-4">
                   <span className="inline-block hover:scale-105 transition-transform duration-300">Transform Certificates</span>
                   <br />
-                  <span className="bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent inline-block hover:scale-105 transition-transform duration-300 animate-gradient">
+                  <span className="bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent inline-block hover:scale-105 transition-transform duration-300 animate-gradient pb-2">
                     Into Digital Trust
                   </span>
                 </h1>

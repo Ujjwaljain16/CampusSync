@@ -40,7 +40,100 @@ export interface Profile {
   id: string;
   full_name: string;
   role: string;
+  organization_id: string;
   created_at: string;
+}
+
+// Organization types for multi-tenancy
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  subdomain?: string;
+  custom_domain?: string;
+  type: 'university' | 'college' | 'school' | 'institute' | 'enterprise';
+  email: string;
+  phone?: string;
+  address?: OrganizationAddress;
+  branding: OrganizationBranding;
+  settings: OrganizationSettings;
+  subscription: OrganizationSubscription;
+  usage_stats: OrganizationUsageStats;
+  is_active: boolean;
+  is_verified: boolean;
+  verified_at?: string;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganizationAddress {
+  street?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postal_code?: string;
+}
+
+export interface OrganizationBranding {
+  logo_url?: string;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  favicon_url?: string;
+}
+
+export interface OrganizationSettings {
+  timezone: string;
+  date_format: string;
+  language: string;
+  allowed_email_domains: string[];
+  require_email_verification: boolean;
+  enable_sso: boolean;
+  sso_provider?: string;
+  features: OrganizationFeatures;
+}
+
+export interface OrganizationFeatures {
+  document_verification: boolean;
+  certificate_issuance: boolean;
+  student_profiles: boolean;
+  recruiter_access: boolean;
+  analytics: boolean;
+}
+
+export interface OrganizationSubscription {
+  plan: 'free' | 'basic' | 'premium' | 'enterprise';
+  status: 'active' | 'inactive' | 'suspended' | 'trial';
+  billing_email?: string;
+  max_users: number;
+  max_documents_per_month: number;
+  max_storage_gb: number;
+  started_at?: string;
+  expires_at?: string;
+  trial_ends_at?: string;
+}
+
+export interface OrganizationUsageStats {
+  total_users: number;
+  total_documents: number;
+  total_storage_bytes: number;
+  monthly_api_calls: number;
+  last_calculated_at?: string;
+}
+
+export interface UserWithOrganization extends User {
+  organization_id: string;
+  organization?: Organization;
+  role: 'student' | 'faculty' | 'admin' | 'recruiter' | 'org_admin' | 'super_admin';
+}
+
+export interface OrganizationContext {
+  currentOrganization: Organization | null;
+  organizations: Organization[];
+  switchOrganization: (orgId: string) => Promise<void>;
+  refreshOrganization: () => Promise<void>;
+  isLoading: boolean;
 }
 
 export interface TrustedIssuer {
