@@ -139,6 +139,28 @@ export async function POST(request: NextRequest) {
         // Allow multi-org - continue to role assignment below
       }
 
+      // IMPORTANT: For OAuth users completing signup, set the password they entered
+      // This allows them to login with email/password in addition to OAuth
+      if (isOAuthUser && password) {
+        console.log('[STUDENT_FACULTY_SIGNUP] Setting password for OAuth user:', email);
+        try {
+          const { error: passwordError } = await adminClient.auth.admin.updateUserById(
+            userId,
+            { password }
+          );
+          
+          if (passwordError) {
+            console.error('[STUDENT_FACULTY_SIGNUP] Failed to set password for OAuth user:', passwordError);
+            // Don't fail the signup - they can still use OAuth
+          } else {
+            console.log('[STUDENT_FACULTY_SIGNUP] ✅ Password set successfully for OAuth user');
+          }
+        } catch (err) {
+          console.error('[STUDENT_FACULTY_SIGNUP] Error setting password:', err);
+          // Don't fail the signup - they can still use OAuth
+        }
+      }
+
       // User exists but needs role setup for THIS org - continue to role assignment below
     } else {
       // Create new auth user

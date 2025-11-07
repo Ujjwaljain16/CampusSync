@@ -48,6 +48,8 @@ export async function POST(request: NextRequest) {
       userId = existingUser.id;
       console.log('[RECRUITER_SIGNUP] User already exists:', userId);
       
+      const isOAuthUser = existingUser.app_metadata?.provider && existingUser.app_metadata.provider !== 'email';
+      
       // Check ALL roles for this user (both with and without organization_id)
       const { data: existingRoles } = await adminClient
         .from('user_roles')
@@ -55,6 +57,7 @@ export async function POST(request: NextRequest) {
         .eq('user_id', userId);
 
       console.log('[RECRUITER_SIGNUP] Existing roles:', existingRoles);
+      console.log('[RECRUITER_SIGNUP] Is OAuth user:', isOAuthUser);
 
       // Check if user already has a recruiter role
       const recruiterRole = existingRoles?.find(r => r.role === 'recruiter' && r.organization_id === null);
@@ -90,6 +93,28 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           error: `This email is already registered as ${roleNames}.\n\nPlease sign in with your existing account or use a different email address.`,
         }, { status: 409 }); // 409 Conflict
+      }
+
+      // IMPORTANT: For OAuth users completing signup, set the password they entered
+      // This allows them to login with email/password in addition to OAuth
+      if (isOAuthUser && password) {
+        console.log('[RECRUITER_SIGNUP] Setting password for OAuth user:', email);
+        try {
+          const { error: passwordError } = await adminClient.auth.admin.updateUserById(
+            userId,
+            { password }
+          );
+          
+          if (passwordError) {
+            console.error('[RECRUITER_SIGNUP] Failed to set password for OAuth user:', passwordError);
+            // Don't fail the signup - they can still use OAuth
+          } else {
+            console.log('[RECRUITER_SIGNUP] ✅ Password set successfully for OAuth user');
+          }
+        } catch (err) {
+          console.error('[RECRUITER_SIGNUP] Error setting password:', err);
+          // Don't fail the signup - they can still use OAuth
+        }
       }
 
       // User exists but has no roles at all - this shouldn't happen but we'll allow it
