@@ -1,9 +1,8 @@
 'use client';
 
 import { LogOut } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { supabase } from '../../lib/supabaseClient';
+import { supabase } from '@/lib/supabase/client';
 
 interface LogoutButtonProps {
   className?: string;
@@ -11,7 +10,6 @@ interface LogoutButtonProps {
 }
 
 export default function LogoutButton({ className = '', variant = 'default' }: LogoutButtonProps) {
-  const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = async () => {
@@ -20,7 +18,7 @@ export default function LogoutButton({ className = '', variant = 'default' }: Lo
     setLoggingOut(true);
     try {
       // Clear client session first to avoid refresh token errors
-      try { await supabase.auth.signOut(); } catch {}
+      try { await supabase.auth.signOut(); } catch { /* ignore error */ }
 
       // Call the logout API to clear server cookies/session
       const response = await fetch('/api/auth/signout', {
@@ -36,7 +34,7 @@ export default function LogoutButton({ className = '', variant = 'default' }: Lo
 
       // Force a full page reload to clear all client-side state
       window.location.href = '/login';
-    } catch (error) {
+    } catch {
       // Even if the API call fails, redirect to login
       window.location.href = '/login';
     } finally {

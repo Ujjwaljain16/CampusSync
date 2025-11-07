@@ -38,7 +38,7 @@ export function Header({ user, onLogout }: HeaderProps) {
     : [
         { name: 'Features', href: '#features' },
         { name: 'How It Works', href: '#how-it-works' },
-        { name: 'Setup', href: '/setup' },
+        { name: 'Pricing', href: '#pricing' },
       ];
 
   const handleNavClick = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
@@ -173,7 +173,7 @@ export function Header({ user, onLogout }: HeaderProps) {
                 Sign in
               </Link>
               <Link
-                href="/login?mode=signup"
+                href="/signup"
                 className="rounded-xl bg-gradient-to-r from-blue-500 to-emerald-500 px-6 py-2.5 text-[15px] font-semibold text-white shadow-lg hover:shadow-2xl hover:shadow-blue-500/50 hover:scale-105 transition-all duration-300 relative overflow-hidden group"
               >
                 <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 transform -skew-x-12 translate-x-[-100%] group-hover:translate-x-[200%] transition-transform duration-1000"></span>
@@ -236,7 +236,7 @@ export function Header({ user, onLogout }: HeaderProps) {
                   Sign in
                 </Link>
                 <Link
-                  href="/login?mode=signup"
+                  href="/signup"
                   className="block rounded-lg bg-gradient-to-r from-blue-500 to-emerald-500 px-3 py-2 text-base font-medium text-white text-center"
                   onClick={() => setMobileMenuOpen(false)}
                 >

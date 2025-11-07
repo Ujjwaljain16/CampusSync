@@ -133,9 +133,7 @@ export const FormError = forwardRef<HTMLParagraphElement, FormErrorProps>(
 FormError.displayName = 'FormError';
 
 // Form Helper Text
-export interface FormHelperProps extends React.HTMLAttributes<HTMLParagraphElement> {
-  // Extends HTMLAttributes with no additional props
-}
+export type FormHelperProps = React.HTMLAttributes<HTMLParagraphElement>;
 
 export const FormHelper = forwardRef<HTMLParagraphElement, FormHelperProps>(
   ({ className, children, ...props }, ref) => {
