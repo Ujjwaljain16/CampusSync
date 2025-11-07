@@ -69,46 +69,47 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
   const [validatingEmail, setValidatingEmail] = useState(false);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
 
-  // Handle role selection
-  const selectRole = useCallback((role: Role) => {
-    setData(prev => ({ ...prev, role }));
-    setError(null);
-    // Auto-advance to next step after brief delay
-    setTimeout(() => setCurrentStep(2), 300);
-  }, []);
-
   // Validate email and fetch organizations
-  const validateEmail = useCallback(async (email: string) => {
+  // validateEmail now accepts an optional role override so OAuth redirects
+  // that include a role (e.g. recruiter) won't be subject to student/faculty checks
+  const validateEmail = useCallback(async (email: string, roleOverride?: Role) => {
     if (!email || !email.includes('@')) return;
-    
+
+    const effectiveRole = roleOverride ?? data.role;
+
+    // IMPORTANT: Recruiters can use ANY email - skip validation entirely
+    if (effectiveRole === 'recruiter') {
+      console.log('[validateEmail] Skipping validation for recruiter');
+      setOrganizations([]);
+      setError(null);
+      setValidatingEmail(false);
+      return;
+    }
+
+    // Only validate for students and faculty (they need university emails)
     setValidatingEmail(true);
     setError(null);
-    
+
     try {
       const res = await fetch('/api/auth/check-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });
-      
+
       const result: EmailValidationResult = await res.json();
-      
+
       if (!res.ok) {
         throw new Error(result.canSignup === false ? 'Email not eligible for signup' : 'Validation failed');
       }
-      
+
       setOrganizations(result.matches || []);
-      
+
       // For students/faculty, require org match
-      if (data.role !== 'recruiter' && result.matches.length === 0) {
+      if (result.matches.length === 0) {
         const errorMsg = 'Email domain not recognized. Please use your university email.';
         setError(errorMsg);
         toast.error(errorMsg);
-      }
-      
-      // For recruiters, any email is fine
-      if (data.role === 'recruiter') {
-        setOrganizations([]);
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Email validation failed';
@@ -118,6 +119,40 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
       setValidatingEmail(false);
     }
   }, [data.role]);
+
+  // Check for OAuth user on mount
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const emailParam = params.get('email');
+    const oauthParam = params.get('oauth');
+    
+    if (emailParam && oauthParam === 'true') {
+      const roleParam = params.get('role') as Role | null;
+      // If role is present in query (e.g. role=recruiter) set it immediately
+      if (roleParam) {
+        setData(prev => ({ ...prev, role: roleParam }));
+      } else {
+        // leave role null so user selects it
+        setData(prev => ({ ...prev }));
+      }
+
+      setData(prev => ({ ...prev, email: emailParam }));
+
+      // Auto-validate email for OAuth users. Pass roleParam as override so
+      // recruiters won't be blocked by domain checks even if UI hasn't rendered
+      setTimeout(() => {
+        validateEmail(emailParam, roleParam || undefined);
+      }, 500);
+    }
+  }, [validateEmail]);
+
+  // Handle role selection
+  const selectRole = useCallback((role: Role) => {
+    setData(prev => ({ ...prev, role }));
+    setError(null);
+    // Auto-advance to next step after brief delay
+    setTimeout(() => setCurrentStep(2), 300);
+  }, []);
 
   // Handle email blur
   const handleEmailBlur = useCallback(() => {

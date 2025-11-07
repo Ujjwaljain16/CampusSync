@@ -2,7 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 
-// OAuth callback handler - no auth required (public endpoint)
+/**
+ * OAuth Callback Handler
+ * 
+ * Handles the OAuth callback from Google and completes the authentication flow.
+ * 
+ * Flow:
+ * 1. Exchange OAuth code for session
+ * 2. Check if user has a profile in our database
+ * 3. If NO profile → Redirect to signup (OAuth created auth.users but no profile yet)
+ * 4. If HAS profile → Continue to dashboard (existing user)
+ * 
+ * Note: Supabase automatically creates an entry in auth.users during OAuth,
+ * but we only create a profile after the user completes our signup flow.
+ * This ensures users provide required information (role, organization, etc.)
+ */
 export async function GET(request: NextRequest) {
 	const url = new URL(request.url);
 	const code = url.searchParams.get('code');
@@ -13,8 +27,10 @@ export async function GET(request: NextRequest) {
 		return NextResponse.redirect(absolute);
 	}
 
-	// Prepare response for cookie writes during session exchange
-	const response = NextResponse.next();
+	const base = `${url.protocol}//${url.host}`;
+	
+	// Create supabase client with cookie handling
+	const cookieStore: Array<{ name: string; value: string; options?: Record<string, unknown> }> = [];
 	const supabase = createServerClient(
 		process.env.NEXT_PUBLIC_SUPABASE_URL!,
 		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -24,8 +40,8 @@ export async function GET(request: NextRequest) {
 					return request.cookies.getAll();
 				},
 				setAll(cookiesToSet) {
-					cookiesToSet.forEach(({ name, value, options }) => {
-						response.cookies.set(name, value, options);
+					cookiesToSet.forEach((cookie) => {
+						cookieStore.push(cookie);
 					});
 				},
 			},
@@ -34,14 +50,44 @@ export async function GET(request: NextRequest) {
 
 	const { error } = await supabase.auth.exchangeCodeForSession(code);
 
-	const base = `${url.protocol}//${url.host}`;
 	if (error) {
 		const errorUrl = `${base}/login?error=${encodeURIComponent(error.message)}`;
 		return NextResponse.redirect(errorUrl);
 	}
 
-	// Handle role assignment for invited users
+	// Get the authenticated user
 	const { data: { user } } = await supabase.auth.getUser();
+	
+	if (!user) {
+		const errorUrl = `${base}/login?error=${encodeURIComponent('Authentication failed')}`;
+		return NextResponse.redirect(errorUrl);
+	}
+
+	// Check if this is a new OAuth user (first time signing in with OAuth)
+	const { data: existingProfile } = await supabase
+		.from('profiles')
+		.select('id, email')
+		.eq('id', user.id)
+		.single();
+
+	// If no profile exists, this user hasn't completed signup - redirect to signup
+	if (!existingProfile) {
+		console.log(`OAuth user ${user.email} has no profile - redirecting to signup`);
+		// If user metadata signals a recruiter signup or invited role, pass role in query
+		const roleFromMeta = user.user_metadata?.signup_type || user.user_metadata?.invited_role;
+		const qs = new URLSearchParams({
+			email: user.email || '',
+			oauth: 'true'
+		});
+		if (roleFromMeta) {
+			qs.set('role', String(roleFromMeta));
+		}
+		const signupUrl = `${base}/signup?${qs.toString()}`;
+		return NextResponse.redirect(signupUrl);
+	}
+
+	// User exists, check for role assignment scenarios
+	// Handle role assignment for invited users
 	if (user?.user_metadata?.invited_role) {
 		const invitedRole = user.user_metadata.invited_role;
 		const invitedBy = user.user_metadata.invited_by;
@@ -166,5 +212,12 @@ export async function GET(request: NextRequest) {
 	}
 
 	const dest = redirectTo.startsWith('http') ? redirectTo : `${base}${redirectTo}`;
-	return NextResponse.redirect(dest);
+	const redirectResponse = NextResponse.redirect(dest);
+	
+	// Apply all cookies to the redirect response
+	cookieStore.forEach(({ name, value, options }) => {
+		redirectResponse.cookies.set(name, value, options);
+	});
+	
+	return redirectResponse;
 }

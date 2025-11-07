@@ -33,8 +33,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate environment variables
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      console.error('[CHECK_EMAIL] Missing NEXT_PUBLIC_SUPABASE_URL');
+      return NextResponse.json(
+        { error: 'Server configuration error' },
+        { status: 500 }
+      );
+    }
+
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('[CHECK_EMAIL] Missing SUPABASE_SERVICE_ROLE_KEY');
+      return NextResponse.json(
+        { error: 'Server configuration error' },
+        { status: 500 }
+      );
+    }
+
     // Use admin client to bypass RLS (this is a public signup endpoint)
-    const supabase = await createSupabaseAdminClient();
+    let supabase;
+    try {
+      supabase = await createSupabaseAdminClient();
+    } catch (clientError) {
+      console.error('[CHECK_EMAIL] Failed to create Supabase client:', clientError);
+      return NextResponse.json(
+        { error: 'Database connection failed' },
+        { status: 500 }
+      );
+    }
 
     // Get all active organizations
     const { data: allOrganizations, error } = await supabase
@@ -43,7 +69,12 @@ export async function POST(request: NextRequest) {
       .eq('is_active', true);
 
     if (error) {
-      console.error('[CHECK_EMAIL] Database error:', error);
+      console.error('[CHECK_EMAIL] Database error:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
       return NextResponse.json(
         { error: 'Failed to check email domain' },
         { status: 500 }
@@ -84,9 +115,23 @@ export async function POST(request: NextRequest) {
       });
     }
   } catch (error: unknown) {
-    console.error('[CHECK_EMAIL] Error:', error);
+    console.error('[CHECK_EMAIL] Uncaught error:', error);
+    
+    // Log more details for fetch errors
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      console.error('[CHECK_EMAIL] Network/fetch error details:', {
+        message: error.message,
+        stack: error.stack,
+        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+        hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+      });
+    }
+    
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
