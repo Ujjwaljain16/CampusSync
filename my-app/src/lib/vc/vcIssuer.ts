@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { ProductionKeyManager, type ProductionJWK } from './productionKeyManager';
 import { VCValidator, type ValidationResult } from './vcValidator';
 import type { VerifiableCredential, CredentialSubject } from '../../types/index';
+import { getIssuerDID } from '../envValidator';
 
 export interface IssuancePolicy {
   allowedTypes: string[];
@@ -18,8 +19,8 @@ export interface IssuanceRequest {
   credentialSubject: CredentialSubject;
   credentialType: string;
   validityPeriod?: number; // days
-  customFields?: Record<string, any>;
-  metadata?: Record<string, any>;
+  customFields?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface IssuanceResult {
@@ -40,7 +41,7 @@ export interface IssuanceAudit {
   policyCompliance: boolean;
   validationPassed: boolean;
   keyId: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export class ProductionVCIssuer {
@@ -64,7 +65,7 @@ export class ProductionVCIssuer {
       allowedTypes: ['VerifiableCredential', 'AchievementCredential'],
       maxValidityPeriod: 365 * 10, // 10 years
       requiredFields: ['certificateId', 'title', 'institution', 'dateIssued'],
-      allowedIssuers: [process.env.NEXT_PUBLIC_ISSUER_DID || 'did:web:localhost:3000'],
+      allowedIssuers: [getIssuerDID()],
       requiresApproval: true,
       maxCredentialsPerUser: 100,
       cooldownPeriod: 5 // 5 minutes
@@ -75,7 +76,7 @@ export class ProductionVCIssuer {
       allowedTypes: ['VerifiableCredential', 'DegreeCredential'],
       maxValidityPeriod: 365 * 50, // 50 years
       requiredFields: ['degreeId', 'degreeName', 'institution', 'dateIssued', 'grade'],
-      allowedIssuers: [process.env.NEXT_PUBLIC_ISSUER_DID || 'did:web:localhost:3000'],
+      allowedIssuers: [getIssuerDID()],
       requiresApproval: true,
       maxCredentialsPerUser: 50,
       cooldownPeriod: 10
@@ -86,7 +87,7 @@ export class ProductionVCIssuer {
       allowedTypes: ['VerifiableCredential', 'CourseCredential'],
       maxValidityPeriod: 365 * 5, // 5 years
       requiredFields: ['courseId', 'courseName', 'institution', 'dateIssued', 'grade'],
-      allowedIssuers: [process.env.NEXT_PUBLIC_ISSUER_DID || 'did:web:localhost:3000'],
+      allowedIssuers: [getIssuerDID()],
       requiresApproval: false,
       maxCredentialsPerUser: 200,
       cooldownPeriod: 1
@@ -258,7 +259,7 @@ export class ProductionVCIssuer {
     const validityPeriod = request.validityPeriod || policy.maxValidityPeriod;
     const expiresAt = new Date(now.getTime() + validityPeriod * 24 * 60 * 60 * 1000);
 
-    const issuerDid = process.env.NEXT_PUBLIC_ISSUER_DID || 'did:web:localhost:3000';
+    const issuerDid = getIssuerDID();
     const verificationMethod = `${issuerDid}#${key.kid}`;
 
     // Create the unsigned VC

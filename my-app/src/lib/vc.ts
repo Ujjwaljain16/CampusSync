@@ -27,7 +27,7 @@ export async function signCredential(params: CreateVcParams): Promise<Verifiable
 	const isDevelopmentJWK = jwk.n === 'placeholder-n-value-for-development';
 	
 	if (isDevelopmentJWK) {
-		console.warn('⚠️  Using development JWK - VCs will not be cryptographically valid');
+		console.warn('[WARNING] Using development JWK - VCs will not be cryptographically valid');
 		// Return a mock VC for development
 		const issuanceDate = new Date().toISOString();
 		const vcId = `urn:uuid:${randomUUID()}`;

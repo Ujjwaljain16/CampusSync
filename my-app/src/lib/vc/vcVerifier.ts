@@ -257,6 +257,7 @@ export class ProductionVCVerifier {
   /**
    * Fetch issuer key from key registry
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async fetchIssuerKey(_issuer: string, _keyId: string): Promise<JWK | undefined> {
     // In a production system, this would fetch from the issuer's key registry
     // For now, we'll return undefined and rely on trusted keys being provided
