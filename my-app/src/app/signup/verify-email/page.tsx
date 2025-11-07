@@ -10,7 +10,6 @@
 import { useSearchParams } from 'next/navigation';
 import { Mail, CheckCircle, ArrowRight, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 
 export default function VerifyEmailPage() {
   const searchParams = useSearchParams();
@@ -26,13 +25,26 @@ export default function VerifyEmailPage() {
     setError(null);
     
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: email
+      const response = await fetch('/api/auth/resend-confirmation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
       });
 
-      if (error) throw error;
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to resend email');
+      }
+
+      // Check if already confirmed
+      if (result.alreadyConfirmed) {
+        setError('Your email is already confirmed! You can sign in now.');
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 2000);
+        return;
+      }
 
       setResent(true);
       setTimeout(() => setResent(false), 5000);
