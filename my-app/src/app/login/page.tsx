@@ -4,62 +4,24 @@ import React, { useState, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { supabase } from "../../../lib/supabaseClient";
-import { validateStudentEmailSync } from "../../../lib/emailValidation";
-import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Check, AlertCircle, Sparkles, Zap, Award } from "lucide-react";
+import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Check, Sparkles, Zap, Award } from "lucide-react";
 import {
   FormField,
   FormLabel,
-  FormInput,
-  FormError,
-  FormHelper,
   CVButton,
   CVAlert,
 } from "@/components/ui";
 
 export default function LoginPage() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [emailError, setEmailError] = useState<string | null>(null);
-  // Signup-only fields
-  const [fullName, setFullName] = useState("");
-  const [university] = useState("");
-  const [graduationYear] = useState<string>("");
-  const [major] = useState("");
-  const [location] = useState("");
-  const [gpa] = useState<string>("");
-  // Desired access (required) - only one can be selected
-  const [requestedRole, setRequestedRole] = useState<'student' | 'recruiter' | 'faculty' | 'admin'>('student');
+  const [resetEmailSent, setResetEmailSent] = useState(false);
 
   // Remove automatic redirect - let middleware handle it
   // This prevents infinite redirect loops
-
-  // Email validation - role-aware validation system
-  const validateEmail = useCallback((email: string, role: string) => {
-    // Recruiters can use any email (including non-educational)
-    if (role === 'recruiter') {
-      return { isValid: true, error: null };
-    }
-    // Students, faculty, and admins need educational emails
-    return validateStudentEmailSync(email);
-  }, []);
-
-  const handleEmailChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const newEmail = e.target.value;
-    setEmail(newEmail);
-    setEmailError(null);
-    
-    // Only validate on signup mode and if email is not empty
-    if (mode === 'signup' && newEmail.trim()) {
-      const validation = validateEmail(newEmail, requestedRole);
-      if (!validation.isValid) {
-        setEmailError(validation.error || 'Invalid email');
-      }
-    }
-  }, [mode, validateEmail, requestedRole]);
 
   const handleGoogleSignIn = useCallback(() => {
     const redirectTo = '/dashboard';
@@ -70,230 +32,90 @@ export default function LoginPage() {
     const redirectTo = '/dashboard';
     window.location.href = `/api/auth/oauth/microsoft?redirectTo=${encodeURIComponent(redirectTo)}`;
   }, []);
-  const handleSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+
+  const handleForgotPassword = useCallback(async () => {
+    if (!email) {
+      setError("Please enter your email address first");
+      return;
+    }
+
     setError(null);
-    setEmailError(null);
     setLoading(true);
 
     try {
-      // Validate email for signup
-      if (mode === "signup") {
-        const validation = validateEmail(email, requestedRole);
-        if (!validation.isValid) {
-          setEmailError(validation.error || 'Invalid email');
-          setLoading(false);
-          return;
-        }
+      // First, check if the user exists in the database
+      const checkResponse = await fetch('/api/auth/check-user-exists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
 
-          // Password constraint: min 8 chars, 1 number, 1 uppercase
-          const passwordConstraint = /^(?=.*[A-Z])(?=.*\d).{8,}$/;
-          if (!passwordConstraint.test(password)) {
-            setError('Password must be at least 8 characters, include 1 uppercase letter and 1 number');
-            setLoading(false);
-            return;
-          }
-        // Basic required field check
-        if (!fullName.trim()) {
-          setError('Please provide your full name');
-          setLoading(false);
-          return;
-        }
+      const checkData = await checkResponse.json();
 
-        // Ensure a role is selected
-        if (!requestedRole) {
-          setError('Please select an access type');
-          setLoading(false);
-          return;
-        }
+      if (!checkResponse.ok) {
+        throw new Error(checkData.error || 'Failed to verify email');
       }
 
-      if (mode === "login") {
-        const { data, error: signInError } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
-        if (signInError) throw signInError;
+      if (!checkData.exists) {
+        setError("No account found with this email address");
+        setLoading(false);
+        return;
+      }
+
+      // User exists, send reset email
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || window.location.origin}/reset-password`,
+      });
+
+      if (resetError) throw resetError;
+
+      setResetEmailSent(true);
+      setError(null);
+      
+      // Log success for debugging
+      console.log('Password reset email sent successfully to:', email.trim());
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to send reset email";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [email]);
+
+  const handleSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (signInError) throw signInError;
+      
+      // Check if user was successfully authenticated
+      if (data.user && data.session) {
+        console.log('Login successful, user data:', data.user);
         
-        // Check if user was successfully authenticated
-        if (data.user && data.session) {
-          console.log('Login successful, user data:', data.user);
-          
-          // Establish session and get redirect target in one step (avoid duplicate setSession)
-          const completeResp = await fetch('/api/auth/complete-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              access_token: data.session.access_token,
-              refresh_token: data.session.refresh_token,
-            })
-          });
-          const completeJson = await completeResp.json().catch(() => ({ redirectTo: undefined })) as { redirectTo?: string };
-          if (!completeResp.ok || !completeJson?.redirectTo) {
-            console.error('Complete-login failed, falling back to /dashboard', completeJson);
-            window.location.href = '/dashboard';
-          } else {
-            window.location.href = completeJson.redirectTo;
-          }
+        // Establish session and get redirect target in one step (avoid duplicate setSession)
+        const completeResp = await fetch('/api/auth/complete-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          })
+        });
+        const completeJson = await completeResp.json().catch(() => ({ redirectTo: undefined })) as { redirectTo?: string };
+        if (!completeResp.ok || !completeJson?.redirectTo) {
+          console.error('Complete-login failed, falling back to /dashboard', completeJson);
+          window.location.href = '/dashboard';
         } else {
-          throw new Error('Authentication failed');
+          window.location.href = completeJson.redirectTo;
         }
       } else {
-        if (process.env.NODE_ENV === 'development') {
-          // In development, first check if the account already exists by attempting sign-in.
-          try {
-            const precheck = await supabase.auth.signInWithPassword({
-              email: email.trim(),
-              password,
-            });
-            if (precheck.data?.user) {
-              setError('Email already registered. Please sign in.');
-              setLoading(false);
-            return;
-          }
-        } catch (precheckError: unknown) {
-          // Expected error if account doesn't exist - proceed with signup
-          const error = precheckError as { status?: number };
-          if (error?.status === 400) {
-            console.log('Account does not exist, proceeding with signup');
-          } else {
-            console.warn('Unexpected error during precheck:', precheckError);
-          }
-        }          // Bypass Supabase signUp entirely in development by creating the user directly
-          try {
-            const resp = await fetch('/api/auth/dev-upsert-user', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: email.trim(), password, role: 'student' })
-            });
-            const payload = await resp.json();
-            if (!resp.ok || !payload.ok) {
-              throw new Error(payload?.error || 'Dev upsert failed');
-            }
-            const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
-              email: email.trim(),
-              password,
-            });
-            if (signInErr || !signInData.user) {
-              throw new Error(signInErr?.message || 'Sign-in failed');
-            }
-            if (signInData.session?.access_token && signInData.session?.refresh_token) {
-              await fetch('/api/auth/set-session', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  access_token: signInData.session.access_token,
-                  refresh_token: signInData.session.refresh_token
-                })
-              });
-              // Complete signup with profile details
-              await fetch('/api/auth/complete-signup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  access_token: signInData.session.access_token,
-                  refresh_token: signInData.session.refresh_token,
-                  full_name: fullName.trim(),
-                  university: university.trim() || undefined,
-                  graduation_year: graduationYear ? Number(graduationYear) : undefined,
-                  major: major.trim() || undefined,
-                  location: location.trim() || undefined,
-                  gpa: gpa ? Number(gpa) : undefined,
-                })
-              });
-              // Submit role request if needed
-              if (requestedRole && requestedRole !== 'student') {
-                await fetch('/api/role-requests', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ requested_role: requestedRole, metadata: { university, company: university, major, location } })
-                }).catch(()=>null);
-              }
-              const completeResp = await fetch('/api/auth/complete-login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  access_token: signInData.session.access_token,
-                  refresh_token: signInData.session.refresh_token
-                })
-              });
-              const completeJson = await completeResp.json().catch(() => ({ redirectTo: undefined })) as { redirectTo?: string };
-              if (requestedRole && requestedRole !== 'student') {
-                window.location.href = '/waiting';
-              } else {
-                window.location.href = completeJson?.redirectTo || '/dashboard';
-              }
-            } else {
-              window.location.href = '/dashboard';
-            }
-            return;
-          } catch (e: unknown) {
-            setError(e instanceof Error ? e.message : 'Signup failed');
-            return;
-          }
-        } else {
-          const { data, error: signUpError } = await supabase.auth.signUp({
-            email: email.trim(),
-            password,
-          });
-          if (signUpError) {
-            const lower = (signUpError.message || '').toLowerCase();
-            if (lower.includes('already') || lower.includes('registered') || lower.includes('exists')) {
-              setError('Email already registered. Please sign in.');
-            } else {
-              setError(signUpError.message || 'Signup failed');
-            }
-            setLoading(false);
-            return;
-          }
-          if (data.user && !data.user.email_confirmed_at) {
-            setError('Account created! Please check your email and click the confirmation link to complete your registration. After confirming, sign in to continue.');
-            return;
-          }
-          // If email confirmation is disabled in dev, complete signup immediately with minimal details
-          if (process.env.NODE_ENV !== 'production' && data.session?.access_token && data.session?.refresh_token) {
-            const complete = await fetch('/api/auth/complete-signup', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  access_token: data.session.access_token,
-                  refresh_token: data.session.refresh_token,
-                  full_name: fullName.trim() || 'New Student',
-                  role: requestedRole, // Include the selected role
-                  university: university.trim() || undefined,
-                  graduation_year: graduationYear ? Number(graduationYear) : undefined,
-                  major: major.trim() || undefined,
-                  location: location.trim() || undefined,
-                gpa: gpa ? Number(gpa) : undefined,
-              })
-            });
-            if (complete.ok) {
-              if (requestedRole && requestedRole !== 'student') {
-                await fetch('/api/role-requests', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ requested_role: requestedRole, metadata: { university, company: university, major, location } })
-                }).catch(()=>null);
-              }
-              const go = await fetch('/api/auth/complete-login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  access_token: data.session.access_token,
-                  refresh_token: data.session.refresh_token
-                })
-              });
-              const payload = await go.json().catch(() => ({ redirectTo: undefined })) as { redirectTo?: string };
-              if (requestedRole && requestedRole !== 'student') {
-                window.location.href = '/waiting';
-              } else {
-                window.location.href = payload?.redirectTo || '/dashboard';
-              }
-              return;
-            }
-          }
-          window.location.href = '/login';
-        }
+        throw new Error('Authentication failed');
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
@@ -301,7 +123,7 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  }, [mode, email, password, validateEmail, requestedRole, fullName, university, graduationYear, major, location, gpa]);
+  }, [email, password]);
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900">
@@ -390,7 +212,7 @@ export default function LoginPage() {
                 </h2>
                 
                 <p className="text-white/70 text-lg leading-relaxed mb-8">
-                  Create an account or sign in to manage certificates, build your portfolio, and
+                  Sign in to manage certificates, build your portfolio, and
                   verify achievements instantly with W3C Verifiable Credentials.
                 </p>
 
@@ -455,44 +277,6 @@ export default function LoginPage() {
             <div className="relative rounded-3xl p-6 sm:p-8 lg:p-10 border border-white/20 bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl shadow-2xl">
               <h2 id="auth-heading" className="sr-only">Authentication</h2>
 
-              {/* Mode Toggle - Enhanced design */}
-              <div role="tablist" aria-label="Authentication mode" className="flex bg-white/5 rounded-2xl p-1.5 mb-8 border border-white/10 backdrop-blur-sm">
-                <button
-                  type="button"
-                  role="tab"
-                  id="tab-login"
-                  aria-selected={mode === "login"}
-                  aria-controls="login-panel"
-                  tabIndex={mode === "login" ? 0 : -1}
-                  disabled={loading}
-                  onClick={() => { setMode("login"); setError(null); setShowPassword(false); }}
-                  className={`flex-1 py-3.5 text-sm font-bold rounded-xl transition-all duration-300 ${
-                    mode === "login"
-                      ? "bg-gradient-to-r from-blue-500 to-emerald-500 text-white shadow-lg shadow-blue-500/25 scale-[1.02]"
-                      : "text-white/90 hover:text-white hover:bg-white/10 hover:scale-[1.01]"
-                  }`}
-                >
-                  Sign In
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  id="tab-signup"
-                  aria-selected={mode === "signup"}
-                  aria-controls="signup-panel"
-                  tabIndex={mode === "signup" ? 0 : -1}
-                  disabled={loading}
-                  onClick={() => { setMode("signup"); setError(null); setShowPassword(false); }}
-                  className={`flex-1 py-3.5 text-sm font-bold rounded-xl transition-all duration-300 ${
-                    mode === "signup"
-                      ? "bg-gradient-to-r from-blue-500 to-emerald-500 text-white shadow-lg shadow-emerald-500/25 scale-[1.02]"
-                      : "text-white/90 hover:text-white hover:bg-white/10 hover:scale-[1.01]"
-                  }`}
-                >
-                  Create Account
-                </button>
-              </div>
-
               {/* Error Alert - Enhanced with animation */}
               {error && (
                 <div className="mb-6 animate-in slide-in-from-top-2 fade-in duration-300">
@@ -502,113 +286,38 @@ export default function LoginPage() {
                 </div>
               )}
 
-              {/* Form with enhanced styling */}
-              <form onSubmit={handleSubmit} noValidate className="space-y-5" id={mode === "login" ? "login-panel" : "signup-panel"}>
-                {mode === 'signup' && (
-                  <>
-                    <FormField>
-                      <FormLabel htmlFor="full_name" required className="text-white font-semibold text-sm">
-                        Full Name
-                      </FormLabel>
-                      <FormInput
-                        id="full_name"
-                        type="text"
-                        required
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        className="bg-white/10 text-white border-white/20 focus:border-blue-400 hover:bg-white/15 transition-all duration-300 placeholder:text-white/40"
-                        placeholder="Jane Doe"
-                      />
-                    </FormField>
+              {/* Success Alert for Password Reset */}
+              {resetEmailSent && (
+                <div className="mb-6 animate-in slide-in-from-top-2 fade-in duration-300">
+                  <CVAlert variant="success" className="border-emerald-500/30 bg-emerald-500/10 backdrop-blur-sm">
+                    Password reset email sent! Check your inbox.
+                  </CVAlert>
+                </div>
+              )}
 
-                    {/* Desired Access - Enhanced design */}
-                    <div className="space-y-3 p-4 rounded-xl bg-white/5 border border-white/10">
-                      <p className="text-white/90 font-bold text-sm flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500/20 to-emerald-500/20 flex items-center justify-center">
-                          <Shield className="w-3.5 h-3.5 text-blue-400" />
-                        </span>
-                        Access Type <span className="text-red-400">*</span>
-                      </p>
-                      <div className="space-y-2.5">
-                        <label className="flex items-center gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-blue-400/30 cursor-pointer transition-all duration-300 group">
-                          <input 
-                            type="radio" 
-                            name="requestedRole" 
-                            value="student" 
-                            checked={requestedRole === 'student'} 
-                            onChange={(e) => setRequestedRole(e.target.value as 'student' | 'recruiter' | 'faculty' | 'admin')} 
-                            className="w-4 h-4 text-blue-500 focus:ring-2 focus:ring-blue-400"
-                          />
-                          <span className="text-white/80 group-hover:text-white font-medium text-sm">Student <span className="text-white/50 text-xs">(Default)</span></span>
-                        </label>
-                        <label className="flex items-center gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-400/30 cursor-pointer transition-all duration-300 group">
-                          <input 
-                            type="radio" 
-                            name="requestedRole" 
-                            value="recruiter" 
-                            checked={requestedRole === 'recruiter'} 
-                            onChange={(e) => setRequestedRole(e.target.value as 'student' | 'recruiter' | 'faculty' | 'admin')} 
-                            className="w-4 h-4 text-emerald-500 focus:ring-2 focus:ring-emerald-400"
-                          />
-                          <span className="text-white/80 group-hover:text-white font-medium text-sm">Recruiter <span className="text-white/50 text-xs">(Any email)</span></span>
-                        </label>
-                        <label className="flex items-center gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-purple-400/30 cursor-pointer transition-all duration-300 group">
-                          <input 
-                            type="radio" 
-                            name="requestedRole" 
-                            value="faculty" 
-                            checked={requestedRole === 'faculty'} 
-                            onChange={(e) => setRequestedRole(e.target.value as 'student' | 'recruiter' | 'faculty' | 'admin')} 
-                            className="w-4 h-4 text-purple-500 focus:ring-2 focus:ring-purple-400"
-                          />
-                          <span className="text-white/80 group-hover:text-white font-medium text-sm">Faculty <span className="text-white/50 text-xs">(Edu email)</span></span>
-                        </label>
-                        <label className="flex items-center gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-orange-400/30 cursor-pointer transition-all duration-300 group">
-                          <input 
-                            type="radio" 
-                            name="requestedRole" 
-                            value="admin" 
-                            checked={requestedRole === 'admin'} 
-                            onChange={(e) => setRequestedRole(e.target.value as 'student' | 'recruiter' | 'faculty' | 'admin')} 
-                            className="w-4 h-4 text-orange-500 focus:ring-2 focus:ring-orange-400"
-                          />
-                          <span className="text-white/80 group-hover:text-white font-medium text-sm">Admin <span className="text-white/50 text-xs">(Edu email)</span></span>
-                        </label>
-                      </div>
-                      <FormHelper className="text-white/60 text-xs">
-                        Non-student access requires admin approval
-                      </FormHelper>
-                    </div>
-                  </>
-                )}
+              {/* Form with enhanced styling */}
+              <form onSubmit={handleSubmit} noValidate className="space-y-5" id="login-panel">
                 
                 <FormField>
                   <FormLabel htmlFor="email" required className="text-white font-semibold text-sm">
                     Email Address
                   </FormLabel>
-                  <FormInput
-                    id="email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    required
-                    icon={<Mail className="text-white/60" />}
-                    value={email}
-                    onChange={handleEmailChange}
-                    error={!!emailError}
-                    className="bg-white/10 text-white border-white/20 focus:border-blue-400 hover:bg-white/15 transition-all duration-300 placeholder:text-white/40"
-                    placeholder={
-                      mode === 'signup' 
-                        ? (requestedRole === 'recruiter' ? 'recruiter@company.com' : 'student@university.edu')
-                        : 'your@email.com'
-                    }
-                    aria-invalid={Boolean(error || emailError)}
-                  />
-                  {emailError && (
-                    <FormError icon={<AlertCircle className="w-4 h-4" />} className="text-red-400">
-                      {emailError}
-                    </FormError>
-                  )}
+                  <div className="relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <Mail className="w-5 h-5 text-white/60" />
+                    </div>
+                    <input
+                      id="email"
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full pl-12 pr-4 py-3 bg-white/10 text-white border border-white/20 rounded-xl focus:outline-none focus:border-blue-400 hover:bg-white/15 transition-all duration-300 placeholder:text-white/40"
+                      placeholder="your@email.com"
+                    />
+                  </div>
                 </FormField>
 
                 <FormField>
@@ -622,12 +331,12 @@ export default function LoginPage() {
                     <input
                       id="password"
                       type={showPassword ? "text" : "password"}
-                      autoComplete={mode === "login" ? "current-password" : "new-password"}
+                      autoComplete="current-password"
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full pl-12 pr-12 py-3 bg-white/10 text-white border border-white/20 rounded-xl focus:outline-none focus:border-blue-400 hover:bg-white/15 transition-all duration-300 placeholder:text-white/40"
-                      placeholder={mode === "login" ? "Enter your password" : "Create a strong password"}
+                      placeholder="Enter your password"
                     />
                     <button
                       type="button"
@@ -641,27 +350,23 @@ export default function LoginPage() {
                   </div>
                 </FormField>
 
-                {mode === "login" && (
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center group cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="w-4 h-4 text-blue-500 bg-white/10 border-white/30 rounded focus:ring-2 focus:ring-blue-400 transition-all"
-                      />
-                      <span className="ml-2 text-sm text-white/80 group-hover:text-white font-medium transition-colors">Remember me</span>
-                    </label>
-                    <button type="button" className="text-sm text-white/80 hover:text-white font-semibold hover:underline transition-all">
-                      Forgot password?
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center justify-end">
+                  <button 
+                    type="button" 
+                    onClick={handleForgotPassword}
+                    disabled={loading}
+                    className="text-sm text-blue-400 hover:text-blue-300 font-semibold hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
 
                 {/* Enhanced CTA Button */}
                 <CVButton
                   type="submit"
                   variant="primary"
                   loading={loading}
-                  disabled={loading || (mode === 'signup' && (!!emailError || !email.trim() || !requestedRole))}
+                  disabled={loading}
                   icon={!loading ? <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" /> : undefined}
                   iconPosition="right"
                   className="w-full relative overflow-hidden bg-gradient-to-r from-blue-400 via-cyan-500 to-emerald-400 hover:from-blue-500 hover:via-cyan-600 hover:to-emerald-500 py-4 shadow-xl hover:shadow-2xl hover:shadow-cyan-500/60 transform hover:-translate-y-1 hover:scale-[1.03] active:scale-[0.98] transition-all duration-300 group"
@@ -669,8 +374,8 @@ export default function LoginPage() {
                   <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/30 to-white/0 transform -skew-x-12 translate-x-[-100%] group-hover:translate-x-[200%] transition-transform duration-1000"></span>
                   <span className="relative font-bold text-white drop-shadow-lg">
                     {loading 
-                      ? (mode === "login" ? "Signing you in..." : "Creating your account...")
-                      : (mode === "login" ? "Sign In to CampusSync" : "Create My Account")
+                      ? "Signing you in..."
+                      : "Sign In to CampusSync"
                     }
                   </span>
                 </CVButton>
@@ -750,6 +455,20 @@ export default function LoginPage() {
                 {" "} and {" "}
                 <button className="text-white/80 hover:text-white hover:underline font-semibold transition-colors">Privacy Policy</button>
               </p>
+
+              {/* Sign Up Link */}
+              <div className="mt-6 text-center">
+                <p className="text-white/70 text-sm">
+                  Don&apos;t have an account?{" "}
+                  <Link 
+                    href="/signup" 
+                    className="text-blue-400 hover:text-blue-300 font-semibold hover:underline transition-all duration-300 inline-flex items-center gap-1 group"
+                  >
+                    Create Account
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </Link>
+                </p>
+              </div>
             </div>
           </section>
         </div>
