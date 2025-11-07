@@ -52,15 +52,14 @@ const nextConfig: NextConfig = {
   // =====================================================
   // EXPERIMENTAL FEATURES
   // =====================================================
+  // Consolidate experimental flags in one object to avoid accidental overrides.
+  // We explicitly disable Next's CSS optimizer (Critters) to avoid parsing errors
+  // for modern color functions such as `oklch(...)`. This is a pragmatic
+  // workaround; long-term fixes include upgrading Critters/csstree or emitting
+  // legacy color formats.
   experimental: {
     optimizePackageImports: ['lucide-react', '@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu'],
-  },
-
-  // =====================================================
-  // DISABLE ESLINT DURING BUILD
-  // =====================================================
-  eslint: {
-    ignoreDuringBuilds: true, // <-- Add this line
+    optimizeCss: false,
   },
 };
 
