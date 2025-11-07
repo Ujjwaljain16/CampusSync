@@ -132,7 +132,7 @@ export class DocumentTypeDetector {
     const textLower = text.toLowerCase();
     let bestMatch: DocumentTypeInfo = { type: 'unknown', confidence: 0, characteristics: [], extraction_hints: [] };
     
-    console.log(`🔍 Detecting document type from ${text.length} characters...`);
+    console.log(`[INFO] Detecting document type from ${text.length} characters...`);
 
     for (const docType of this.documentTypes) {
       let confidence = 0;
@@ -222,7 +222,7 @@ export class DocumentTypeDetector {
       bestMatch = this.inferDocumentType(text);
     }
 
-    console.log(`✅ Detected document type: ${bestMatch.type} (confidence: ${bestMatch.confidence.toFixed(2)})`);
+    console.log(`[SUCCESS] Detected document type: ${bestMatch.type} (confidence: ${bestMatch.confidence.toFixed(2)})`);
     
     return bestMatch;
   }

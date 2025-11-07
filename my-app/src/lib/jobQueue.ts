@@ -1,102 +1,108 @@
-// Job queue client for background processing
+// Job Queue system for background processing
 import { createClient } from '@supabase/supabase-js';
-import { getServerEnv } from '@/lib/envServer';
 
-// Job queue is a server-side module and must not be imported into client bundles.
-const env = getServerEnv();
-const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
-export interface JobPayload {
-  documentId: string;
-  fileUrl?: string;
-  documentType?: string;
-  userId?: string;
-  [key: string]: unknown;
-}
-
-export interface JobResult {
-  success: boolean;
-  data?: Record<string, unknown>;
+export interface Job {
+  id: string;
+  type: string;
+  payload: Record<string, unknown>;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  created_at: string;
+  updated_at: string;
+  result?: Record<string, unknown>;
   error?: string;
-  metadata?: Record<string, unknown>;
 }
 
 export class JobQueue {
-  // Enqueue a new job
-  static async enqueue(
-    type: 'ocr' | 'verification' | 'normalization',
-    payload: JobPayload,
-    options: {
-      priority?: number;
-      maxRetries?: number;
-      expiresAt?: Date;
-    } = {}
+  // Add a new job to the queue
+  static async addJob(
+    type: string,
+    payload: Record<string, unknown>,
+    priority: number = 0
   ): Promise<string> {
-    const { data, error } = await supabase.rpc('enqueue_job', {
-      job_type: type,
-      job_payload: payload,
-      job_priority: options.priority || 0,
-      job_max_retries: options.maxRetries || 3,
-      job_expires_at: options.expiresAt?.toISOString() || null
-    });
+    const { data, error } = await supabase
+      .from('job_queue')
+      .insert({
+        type,
+        payload,
+        priority,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select('id')
+      .single();
 
     if (error) {
-      throw new Error(`Failed to enqueue job: ${error.message}`);
+      throw new Error(`Failed to add job: ${error.message}`);
     }
 
-    return data;
+    return data.id;
   }
 
-  // Get next job for processing (worker function)
-  static async getNextJob(): Promise<{
-    id: string;
-    type: string;
-    payload: JobPayload;
-    retryCount: number;
-    maxRetries: number;
-  } | null> {
-    const { data, error } = await supabase.rpc('get_next_job');
+  // Get the next pending job
+  static async getNextJob(): Promise<Job | null> {
+    const { data, error } = await supabase
+      .from('job_queue')
+      .select('*')
+      .eq('status', 'pending')
+      .order('priority', { ascending: false })
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .single();
 
-    if (error || !data || data.length === 0) {
+    if (error || !data) {
       return null;
     }
 
-    const job = data[0];
-    return {
-      id: job.id,
-      type: job.type,
-      payload: job.payload,
-      retryCount: job.retry_count,
-      maxRetries: job.max_retries
-    };
+    // Mark as processing
+    await supabase
+      .from('job_queue')
+      .update({
+        status: 'processing',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', data.id);
+
+    return data as Job;
   }
 
-  // Complete a job
+  // Complete a job with result
   static async completeJob(
     jobId: string,
-    result: JobResult
+    result: Record<string, unknown>
   ): Promise<void> {
-    const { error } = await supabase.rpc('complete_job', {
-      job_id: jobId,
-      job_result: result.success ? result : null,
-      job_error: result.error || null
-    });
+    const status = result.success ? 'completed' : 'failed';
+    const updateData: Record<string, unknown> = {
+      status,
+      updated_at: new Date().toISOString(),
+      result
+    };
 
-    if (error) {
-      throw new Error(`Failed to complete job: ${error.message}`);
+    if (!result.success && result.error) {
+      updateData.error = result.error;
     }
+
+    await supabase
+      .from('job_queue')
+      .update(updateData)
+      .eq('id', jobId);
+
+    // Log to job history
+    await supabase.from('job_history').insert({
+      job_id: jobId,
+      status,
+      result,
+      created_at: new Date().toISOString()
+    });
   }
 
   // Get job status
-  static async getJobStatus(jobId: string): Promise<{
-    id: string;
-    status: string;
-    result?: Record<string, unknown>;
-    error?: string;
-    createdAt: string;
-    startedAt?: string;
-    completedAt?: string;
-  } | null> {
+  static async getJobStatus(jobId: string): Promise<Job | null> {
     const { data, error } = await supabase
       .from('job_queue')
       .select('*')
@@ -107,97 +113,90 @@ export class JobQueue {
       return null;
     }
 
-    return {
-      id: data.id,
-      status: data.status,
-      result: data.result,
-      error: data.error,
-      createdAt: data.created_at,
-      startedAt: data.started_at,
-      completedAt: data.completed_at
-    };
+    return data as Job;
   }
 
   // Get job history
-  static async getJobHistory(jobId: string): Promise<Array<{
-    status: string;
-    message?: string;
-    metadata?: Record<string, unknown>;
-    createdAt: string;
-  }>> {
+  static async getJobHistory(jobId: string): Promise<Record<string, unknown>[]> {
     const { data, error } = await supabase
-      .from('job_status')
+      .from('job_history')
       .select('*')
       .eq('job_id', jobId)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false });
 
     if (error || !data) {
       return [];
     }
 
-    return data.map(item => ({
-      status: item.status,
-      message: item.message,
-      metadata: item.metadata,
-      createdAt: item.created_at
-    }));
+    return data;
   }
 
-  // Clean up old jobs
-  static async cleanupOldJobs(olderThanDays: number = 7): Promise<void> {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+  // Retry a failed job
+  static async retryJob(jobId: string): Promise<void> {
+    await supabase
+      .from('job_queue')
+      .update({
+        status: 'pending',
+        updated_at: new Date().toISOString(),
+        error: null
+      })
+      .eq('id', jobId);
+  }
 
-    const { error } = await supabase
+  // Delete old completed jobs
+  static async cleanupOldJobs(daysOld: number = 7): Promise<void> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+
+    await supabase
       .from('job_queue')
       .delete()
-      .lt('created_at', cutoffDate.toISOString())
-      .in('status', ['completed', 'failed']);
-
-    if (error) {
-      throw new Error(`Failed to cleanup old jobs: ${error.message}`);
-    }
+      .eq('status', 'completed')
+      .lt('updated_at', cutoffDate.toISOString());
   }
 }
 
-// Worker class for processing jobs
 export class JobWorker {
+  private processors: Record<string, (payload: Record<string, unknown>) => Promise<Record<string, unknown>>>;
+  private intervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
-  private intervalId?: NodeJS.Timeout;
 
   constructor(
-    private processors: {
-      ocr?: (payload: JobPayload) => Promise<JobResult>;
-      verification?: (payload: JobPayload) => Promise<JobResult>;
-      normalization?: (payload: JobPayload) => Promise<JobResult>;
-    }
-  ) {}
-
-  start(pollIntervalMs: number = 5000): void {
-    if (this.isRunning) return;
-
-    this.isRunning = true;
-    this.intervalId = setInterval(() => {
-      this.processNextJob();
-    }, pollIntervalMs);
+    processors: Record<string, (payload: Record<string, unknown>) => Promise<Record<string, unknown>>>
+  ) {
+    this.processors = processors;
   }
 
+  // Start polling for jobs
+  start(intervalMs: number = 5000): void {
+    if (this.isRunning) {
+      return;
+    }
+
+    this.isRunning = true;
+    this.intervalId = setInterval(async () => {
+      await this.processNextJob();
+    }, intervalMs);
+  }
+
+  // Stop polling
   stop(): void {
     if (this.intervalId) {
       clearInterval(this.intervalId);
-      this.intervalId = undefined;
+      this.intervalId = null;
     }
     this.isRunning = false;
   }
 
+  // Process a single job
   private async processNextJob(): Promise<void> {
     try {
       const job = await JobQueue.getNextJob();
-      if (!job) return;
+      if (!job) {
+        return;
+      }
 
-      console.log(`Processing job ${job.id} of type ${job.type}`);
-
-      const processor = this.processors[job.type as keyof typeof this.processors];
+      const processor = this.processors[job.type];
       if (!processor) {
         await JobQueue.completeJob(job.id, {
           success: false,
@@ -209,26 +208,14 @@ export class JobWorker {
       try {
         const result = await processor(job.payload);
         await JobQueue.completeJob(job.id, result);
-        console.log(`Completed job ${job.id}`);
-      } catch (error: unknown) {
-        console.error(`Job ${job.id} failed:`, error);
-        
-        // Check if we should retry
-        if (job.retryCount < job.maxRetries) {
-          // Reset status to pending for retry
-          await supabase
-            .from('job_queue')
-            .update({ status: 'pending', started_at: null })
-            .eq('id', job.id);
-        } else {
-          await JobQueue.completeJob(job.id, {
-            success: false,
-            error: (error as Error).message || 'Unknown error'
-          });
-        }
+      } catch (error) {
+        await JobQueue.completeJob(job.id, {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
       }
     } catch (error) {
-      console.error('Job processing error:', error);
+      console.error('Error processing job:', error);
     }
   }
 }

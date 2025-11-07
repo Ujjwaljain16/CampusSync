@@ -1,5 +1,6 @@
 // LLM-based Text Structure Extraction
 import { extractFromText } from '../ocrExtract';
+import { logger } from '../logger';
 
 export interface ExtractedFields {
   title?: string;
@@ -19,19 +20,18 @@ export class LLMExtractor {
 
   async structureText(rawText: string): Promise<ExtractedFields> {
     if (!this.apiKey) {
-      console.warn('⚠️ No Gemini API key found, using fallback extraction');
+      logger.warn('No Gemini API key found, using fallback extraction');
       return this.fallbackExtraction(rawText);
     }
 
     // Always use Gemini if we have an API key - no matter how short the text
     if (!rawText || rawText.trim().length === 0) {
-      console.warn('⚠️ Empty text, using fallback');
+      logger.warn('Empty text, using fallback');
       return this.fallbackExtraction(rawText);
     }
 
     try {
-      console.log('🤖 Using Gemini AI for extraction...');
-      console.log(`📝 Text length: ${rawText.trim().length} characters`);
+      logger.debug('Using Gemini AI for extraction', { textLength: rawText.trim().length });
       
       // Add timeout to prevent hanging (increased to 15s for better accuracy)
       const result = await Promise.race([
@@ -41,11 +41,10 @@ export class LLMExtractor {
         )
       ]);
       
-      console.log('✅ Gemini extraction completed successfully');
-      console.log('📊 Extracted fields:', result);
+      logger.debug('Gemini extraction completed successfully', { extractedFields: result });
       return result;
     } catch (error) {
-      console.warn('❌ Gemini extraction failed, using fallback:', error);
+      logger.warn('Gemini extraction failed, using fallback', { error });
       return this.fallbackExtraction(rawText);
     }
   }
@@ -87,8 +86,8 @@ ${text}`;
       }
       
       return JSON.parse(cleanResponse);
-    } catch (e) {
-      console.error('Failed to parse LLM response:', response);
+    } catch {
+      logger.error('Failed to parse LLM response', { response });
       return this.fallbackExtraction(text);
     }
   }

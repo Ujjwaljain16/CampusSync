@@ -43,14 +43,19 @@ export class LLMNormalizer {
     };
   }
 
-  async normalize(fields: Record<string, any>): Promise<NormalizedFields> {
-    const originalValues = { ...fields };
+  async normalize(fields: Record<string, unknown>): Promise<NormalizedFields> {
+    const originalValues: Record<string, string> = {};
+    // Convert unknown values to strings for originalValues
+    for (const [key, value] of Object.entries(fields)) {
+      originalValues[key] = String(value ?? '');
+    }
+    
     const normalizedValues: Record<string, string> = {};
     let confidence = 1.0;
 
     // Normalize name
     if (fields.name || fields.studentName || fields.recipient) {
-      const name = fields.name || fields.studentName || fields.recipient;
+      const name = String(fields.name || fields.studentName || fields.recipient);
       const normalized = await this.normalizeName(name);
       normalizedValues.name = normalized.value;
       confidence *= normalized.confidence;
@@ -58,7 +63,7 @@ export class LLMNormalizer {
 
     // Normalize institution
     if (fields.institution || fields.issuer || fields.university) {
-      const institution = fields.institution || fields.issuer || fields.university;
+      const institution = String(fields.institution || fields.issuer || fields.university);
       const normalized = await this.normalizeInstitution(institution);
       normalizedValues.institution = normalized.value;
       confidence *= normalized.confidence;
@@ -66,7 +71,7 @@ export class LLMNormalizer {
 
     // Normalize degree
     if (fields.degree || fields.program || fields.major) {
-      const degree = fields.degree || fields.program || fields.major;
+      const degree = String(fields.degree || fields.program || fields.major);
       const normalized = await this.normalizeDegree(degree);
       normalizedValues.degree = normalized.value;
       confidence *= normalized.confidence;
@@ -74,7 +79,7 @@ export class LLMNormalizer {
 
     // Normalize date
     if (fields.date || fields.issueDate || fields.dateIssued) {
-      const date = fields.date || fields.issueDate || fields.dateIssued;
+      const date = String(fields.date || fields.issueDate || fields.dateIssued);
       const normalized = await this.normalizeDate(date);
       normalizedValues.date = normalized.value;
       confidence *= normalized.confidence;
@@ -82,7 +87,7 @@ export class LLMNormalizer {
 
     // Normalize GPA
     if (fields.gpa || fields.cgpa) {
-      const gpa = fields.gpa || fields.cgpa;
+      const gpa = String(fields.gpa || fields.cgpa);
       const normalized = await this.normalizeGPA(gpa);
       normalizedValues.gpa = normalized.value;
       confidence *= normalized.confidence;
@@ -90,7 +95,7 @@ export class LLMNormalizer {
 
     // Normalize ID number
     if (fields.idNumber || fields.studentId || fields.id) {
-      const idNumber = fields.idNumber || fields.studentId || fields.id;
+      const idNumber = String(fields.idNumber || fields.studentId || fields.id);
       const normalized = await this.normalizeIdNumber(idNumber);
       normalizedValues.idNumber = normalized.value;
       confidence *= normalized.confidence;
@@ -236,7 +241,7 @@ export class LLMNormalizer {
               return { value: normalized, confidence: 0.9 };
             }
           }
-        } catch (e) {
+        } catch {
           continue;
         }
       }

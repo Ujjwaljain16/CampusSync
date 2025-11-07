@@ -268,7 +268,7 @@ export function extractDate(text: string): string | undefined {
   for (const pattern of datePatterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      let date = match[1].trim();
+      const date = match[1].trim();
       
       // Try to normalize the date
       const normalized = normalizeDate(date);
@@ -435,6 +435,8 @@ export function extractFromText(text: string, confidence?: number): OcrExtractio
   return result;
 }
 
+// Helper function for fallback extraction using multiple strategies
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function fallbackExtraction(text: string, confidence?: number): OcrExtractionResult {
   // Use multiple extraction strategies and pick the best results
   const strategies = [
@@ -451,7 +453,7 @@ function fallbackExtraction(text: string, confidence?: number): OcrExtractionRes
     try {
       const candidate = strategy(text);
       if (candidate) candidates.push(candidate);
-    } catch (e) {
+    } catch {
       // Continue with other strategies
     }
   }
