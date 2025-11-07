@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Share2, Star, Zap, Shield, Brain, FileText, Upload, ExternalLink, Trash2, User2, Edit3, Building, Calendar, GraduationCap, MapPin, Award, FileCheck, ScrollText } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { CheckCircle, Clock, AlertCircle, Eye, Trash2, User2, Edit3, Building, Calendar, GraduationCap, MapPin, ScrollText, Upload, Star, Zap, FileText } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 
 interface Row {
@@ -33,10 +33,7 @@ export default function StudentDashboard() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [confidence, setConfidence] = useState<Record<string, number>>({});
-  const [details, setDetails] = useState<Record<string, any>>({});
   const [vcStatus, setVcStatus] = useState<Record<string, { status: 'active'|'revoked'|'suspended'|'expired', reason?: string }>>({});
-  const [exporting, setExporting] = useState(false);
   const [recentUploads, setRecentUploads] = useState<Row[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -112,7 +109,7 @@ export default function StudentDashboard() {
       
       // Fetch metadata for confidence per cert
       const confMap: Record<string, number> = {};
-      const detMap: Record<string, any> = {};
+      const detMap: Record<string, unknown> = {};
       for (const r of list) {
         // Prefer document metadata; fallback to certificate metadata
         let got = false;
@@ -142,13 +139,7 @@ export default function StudentDashboard() {
             }
           } catch {}
         }
-        if (!got) {
-          confMap[r.id] = 0;
-          detMap[r.id] = {};
-        }
       }
-      setConfidence(confMap);
-      setDetails(detMap);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unexpected error');
     } finally {
@@ -160,36 +151,6 @@ export default function StudentDashboard() {
     load(); 
     loadProfile();
   }, [load, loadProfile]);
-
-  const exportPortfolioPDF = useCallback(async () => {
-    setExporting(true);
-    try {
-      const response = await fetch('/api/portfolio/export-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: 'current-user' }) // In real app, get from auth
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to generate PDF');
-      }
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `campusync-portfolio-${new Date().toISOString().split('T')[0]}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error('PDF export error:', error);
-      setError('Failed to export portfolio PDF');
-    } finally {
-      setExporting(false);
-    }
-  }, []);
 
   const showDeleteConfirmation = useCallback((certificateId: string, certificateTitle: string) => {
     setDeleteConfirm({ show: true, certId: certificateId, certTitle: certificateTitle });
@@ -223,24 +184,12 @@ export default function StudentDashboard() {
       // Remove from local state immediately
       setRows(prev => prev.filter(cert => cert.id !== certificateId));
       setRecentUploads(prev => prev.filter(cert => cert.id !== certificateId));
-      
-      // Remove from confidence and details maps
-      setConfidence(prev => {
-        const newConf = { ...prev };
-        delete newConf[certificateId];
-        return newConf;
-      });
-      setDetails(prev => {
-        const newDetails = { ...prev };
-        delete newDetails[certificateId];
-        return newDetails;
-      });
 
       // Show success message briefly
-      console.log(`✅ Successfully deleted: ${certificateTitle}`);
+      console.log(`[SUCCESS] Successfully deleted: ${certificateTitle}`);
 
     } catch (error) {
-      console.error('❌ Delete certificate error:', error);
+      console.error('[ERROR] Delete certificate error:', error);
       setError(error instanceof Error ? error.message : 'Failed to delete certificate');
       // Re-open modal on error so user can try again
       setDeleteConfirm({ show: true, certId: certificateId, certTitle: certificateTitle });
@@ -248,19 +197,6 @@ export default function StudentDashboard() {
       setDeleting(null);
     }
   }, [deleteConfirm.certId, deleteConfirm.certTitle]);
-
-  const getStatusIcon = (status: string, autoApproved?: boolean) => {
-    switch (status) {
-      case 'verified':
-        return autoApproved ? <Zap className="w-4 h-4 text-emerald-400" /> : <CheckCircle className="w-4 h-4 text-emerald-400" />;
-      case 'pending':
-        return <Clock className="w-4 h-4 text-yellow-400" />;
-      case 'rejected':
-        return <XCircle className="w-4 h-4 text-red-400" />;
-      default:
-        return <AlertCircle className="w-4 h-4 text-gray-400" />;
-    }
-  };
 
   const getStatusText = (status: string, autoApproved?: boolean) => {
     switch (status) {
@@ -307,363 +243,6 @@ export default function StudentDashboard() {
     );
   };
 
-  const getVerificationMethod = (details: Record<string, unknown>) => {
-    const qrVerification = details?.qr_verification as Record<string, unknown> | undefined;
-    const logoMatch = details?.logo_match as Record<string, unknown> | undefined;
-    const templateMatch = details?.template_match as Record<string, unknown> | undefined;
-    
-    if (qrVerification?.verified) {
-      return { icon: <Shield className="w-3 h-3" />, text: 'QR Verified', color: 'text-emerald-400' };
-    }
-    if (typeof logoMatch?.score === 'number' && logoMatch.score > 0.8) {
-      return { icon: <Brain className="w-3 h-3" />, text: 'Logo Match', color: 'text-blue-400' };
-    }
-    if (typeof templateMatch?.score === 'number' && templateMatch.score > 0.6) {
-      return { icon: <Star className="w-3 h-3" />, text: 'Template Match', color: 'text-purple-400' };
-    }
-    return { icon: <AlertCircle className="w-3 h-3" />, text: 'Manual Review', color: 'text-gray-400' };
-  };
-
-  const content = useMemo(() => {
-    if (loading) {
-      return (
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
-          <span className="ml-3 text-white/80">Loading certificates...</span>
-        </div>
-      );
-    }
-    
-    if (error) {
-      return (
-        <div className="bg-red-500/10 border border-red-500/20 text-red-300 rounded-2xl p-6 text-center">
-          <AlertCircle className="w-8 h-8 mx-auto mb-3" />
-          <p className="font-medium">{error}</p>
-        </div>
-      );
-    }
-    
-    if (rows.length === 0) {
-      return (
-        <div className="text-center py-12">
-          <Star className="w-16 h-16 text-white/30 mx-auto mb-4" />
-          <h3 className="text-xl font-semibold text-white mb-2">No certificates yet</h3>
-          <p className="text-white/60 mb-6">Upload your first certificate to get started!</p>
-          <a 
-            href="/student/upload" 
-            className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 text-white px-6 py-3 rounded-xl font-medium transition-colors shadow-lg hover:shadow-blue-500/25"
-          >
-            <Download className="w-4 h-4" />
-            Upload Certificate
-          </a>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-4">
-        {/* Portfolio Preview Section with brand gradient */}
-        {rows.length > 0 && (
-          <div className="bg-gradient-to-r from-blue-500/10 to-emerald-500/10 backdrop-blur-xl border border-white/10 rounded-2xl p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-gradient-to-r from-blue-500/20 to-emerald-500/20 rounded-xl">
-                  <ExternalLink className="w-5 h-5 text-blue-300" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-semibold text-white">Portfolio Preview</h2>
-                  <p className="text-white/70 text-sm">Your public portfolio is ready to share</p>
-                </div>
-              </div>
-              <a
-                href={`/public/portfolio/${rows[0]?.id || 'preview'}`}
-                target="_blank"
-                rel="noreferrer"
-                className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-sm"
-              >
-                <ExternalLink className="w-4 h-4" />
-                View Portfolio
-              </a>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white/5 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Star className="w-4 h-4 text-yellow-400" />
-                  <span className="text-white/70 text-sm">Verified Certificates</span>
-                </div>
-                <p className="text-2xl font-bold text-white">
-                  {rows.filter(r => r.verification_status === 'verified').length}
-                </p>
-              </div>
-              <div className="bg-white/5 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Zap className="w-4 h-4 text-emerald-400" />
-                  <span className="text-white/70 text-sm">Auto-Approved</span>
-                </div>
-                <p className="text-2xl font-bold text-white">
-                  {rows.filter(r => r.auto_approved).length}
-                </p>
-              </div>
-              <div className="bg-white/5 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Shield className="w-4 h-4 text-blue-400" />
-                  <span className="text-white/70 text-sm">Trust Score</span>
-                </div>
-                <p className="text-2xl font-bold text-white">
-                  {Math.round((rows.filter(r => r.verification_status === 'verified').length / Math.max(rows.length, 1)) * 100)}%
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Recent Uploads Progress - Enhanced */}
-        {recentUploads.length > 0 && (
-          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 md:p-8 mb-8 shadow-2xl group">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-blue-400 rounded-2xl blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
-                <div className="relative p-3 bg-gradient-to-r from-emerald-500/20 to-blue-500/20 rounded-2xl">
-                  <Upload className="w-6 h-6 text-emerald-300" />
-                </div>
-              </div>
-              <div>
-                <h2 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-blue-400 bg-clip-text text-transparent">Recent Uploads</h2>
-                <p className="text-white/80 text-sm font-medium">Track your latest certificate uploads</p>
-              </div>
-            </div>
-            <div className="space-y-4">
-              {recentUploads.map((upload, index) => {
-                const confScore = confidence[upload.id] || 0;
-                const verificationMethod = getVerificationMethod(details[upload.id]);
-                
-                // Handle date calculation safely
-                let timeAgoText = 'Unknown';
-                if (upload.created_at) {
-                  const timeAgo = new Date(upload.created_at);
-                  const now = new Date();
-                  
-                  // Check if the date is valid
-                  if (!isNaN(timeAgo.getTime())) {
-                    const diffInHours = Math.floor((now.getTime() - timeAgo.getTime()) / (1000 * 60 * 60));
-                    
-                    if (diffInHours < 1) {
-                      timeAgoText = 'Just now';
-                    } else if (diffInHours < 24) {
-                      timeAgoText = `${diffInHours}h ago`;
-                    } else {
-                      timeAgoText = `${Math.floor(diffInHours / 24)}d ago`;
-                    }
-                  }
-                }
-                
-                return (
-                  <div key={upload.id} className="bg-white/5 rounded-xl p-4 hover:bg-white/10 transition-colors">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-2 h-2 rounded-full ${
-                          upload.verification_status === 'verified' ? 'bg-emerald-400' :
-                          upload.verification_status === 'pending' ? 'bg-yellow-400' :
-                          'bg-red-400'
-                        }`}></div>
-                        <h3 className="text-white font-medium truncate">{upload.title}</h3>
-                        <span className="text-white/50 text-sm">
-                          {timeAgoText}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className={`flex items-center gap-1 ${verificationMethod.color}`}>
-                          {verificationMethod.icon}
-                          <span className="text-xs">{verificationMethod.text}</span>
-                        </div>
-                        <span className={`text-xs font-semibold ${getConfidenceColor(confScore)}`}>
-                          {Math.round(confScore * 100)}%
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <p className="text-white/60 text-sm truncate">{upload.institution}</p>
-                      <div className="flex items-center gap-1">
-                        {getStatusIcon(upload.verification_status, upload.auto_approved)}
-                        <span className={`text-xs ${getStatusColor(upload.verification_status, upload.auto_approved).split(' ')[1]}`}>
-                          {getStatusText(upload.verification_status, upload.auto_approved)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Summary Stats - Enhanced design */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5 mb-8">
-          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-emerald-400/30 transition-all duration-300 group cursor-pointer">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-emerald-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
-                <CheckCircle className="w-5 h-5 md:w-6 md:h-6 text-emerald-400" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Verified</p>
-                <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-emerald-400 to-emerald-300 bg-clip-text text-transparent">
-                  {rows.filter(r => r.verification_status === 'verified').length}
-                </p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-yellow-400/30 transition-all duration-300 group cursor-pointer">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-yellow-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
-                <Clock className="w-5 h-5 md:w-6 md:h-6 text-yellow-400" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Pending</p>
-                <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-yellow-400 to-yellow-300 bg-clip-text text-transparent">
-                  {rows.filter(r => r.verification_status === 'pending').length}
-                </p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-blue-400/30 transition-all duration-300 group cursor-pointer">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-blue-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
-                <Zap className="w-5 h-5 md:w-6 md:h-6 text-blue-400" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Auto-Verified</p>
-                <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
-                  {rows.filter(r => r.auto_approved).length}
-                </p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 md:p-5 hover:scale-105 hover:border-purple-400/30 transition-all duration-300 group cursor-pointer">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-purple-500/20 rounded-xl group-hover:scale-110 transition-transform duration-300">
-                <Star className="w-5 h-5 md:w-6 md:h-6 text-purple-400" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white/70 text-xs md:text-sm font-medium mb-1">Total</p>
-                <p className="text-2xl md:text-3xl font-extrabold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">{rows.length}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Certificates Grid */}
-        <div className="grid gap-4">
-          {rows.map(cert => {
-            const confScore = confidence[cert.id] || 0;
-            const verificationMethod = getVerificationMethod(details[cert.id]);
-            
-            return (
-              <div key={cert.id} className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 md:p-6 hover:bg-white/10 transition-all duration-200">
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-lg md:text-xl font-semibold text-white mb-2 truncate">{cert.title}</h3>
-                    <p className="text-white/70 mb-1 truncate">{cert.institution}</p>
-                    <p className="text-white/50 text-sm">
-                      Issued: {new Date(cert.date_issued).toLocaleDateString()}
-                    </p>
-                  </div>
-                  
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                    {/* Status Badge */}
-                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${getStatusColor(cert.verification_status, cert.auto_approved)}`}>
-                      {getStatusIcon(cert.verification_status, cert.auto_approved)}
-                      <span className="text-xs md:text-sm font-medium">
-                        {getStatusText(cert.verification_status, cert.auto_approved)}
-                      </span>
-                      <button
-                        onClick={() => fetchVcStatus(cert.id)}
-                        className="ml-1 text-[10px] md:text-xs text-white/70 hover:text-white underline decoration-dotted"
-                        title="Check on-chain/registry status"
-                      >
-                        Check status
-                      </button>
-                    </div>
-                    {vcStatus[cert.id] && (
-                      <div className={`px-2 py-1 rounded-full text-[10px] md:text-xs border ${
-                        vcStatus[cert.id].status === 'active' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
-                        vcStatus[cert.id].status === 'revoked' ? 'bg-red-500/10 text-red-300 border-red-500/30' :
-                        vcStatus[cert.id].status === 'suspended' ? 'bg-yellow-500/10 text-yellow-300 border-yellow-500/30' :
-                        'bg-gray-500/10 text-gray-300 border-gray-500/30'
-                      }`}>
-                        VC {vcStatus[cert.id].status}
-                      </div>
-                    )}
-                    
-                    {/* Actions */}
-                    <div className="flex items-center gap-2">
-                      {cert.file_url && (
-                        <a 
-                          href={cert.file_url} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
-                          title="View Certificate"
-                        >
-                          <Eye className="w-4 h-4 text-white" />
-                        </a>
-                      )}
-                      <button 
-                        className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
-                        title="Share Portfolio"
-                      >
-                        <Share2 className="w-4 h-4 text-white" />
-                      </button>
-                      <button 
-                        onClick={() => showDeleteConfirmation(cert.id, cert.title)}
-                        disabled={deleting === cert.id}
-                        className="p-2 bg-red-500/20 hover:bg-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
-                        title="Delete Certificate"
-                      >
-                        {deleting === cert.id ? (
-                          <div className="w-4 h-4 border-2 border-red-300 border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <Trash2 className="w-4 h-4 text-red-300" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Confidence Score */}
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-white/70 text-sm">Confidence Score</span>
-                    <span className={`text-sm font-semibold ${getConfidenceColor(confScore)}`}>
-                      {Math.round(confScore * 100)}%
-                    </span>
-                  </div>
-                  {getConfidenceBar(confScore)}
-                </div>
-                
-                {/* Verification Details */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className={`flex items-center gap-1 ${verificationMethod.color}`}>
-                      {verificationMethod.icon}
-                      <span className="text-sm">{verificationMethod.text}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="text-white/50 text-xs">
-                    {cert.auto_approved ? 'Automatically verified' : 'Manual review required'}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }, [rows, loading, error, confidence, details]);
-
   return (
     <div className="min-h-screen relative overflow-hidden bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900">
       {/* Animated background - matching landing page */}
@@ -695,10 +274,10 @@ export default function StudentDashboard() {
                 </div>
               </div>
               <div className="min-w-0 flex-1 pt-1">
-                <h1 className="text-3xl md:text-5xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient mb-2 leading-[1.1]">
+                <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient mb-2 leading-tight">
                   My Certificates
                 </h1>
-                <p className="text-white/80 text-sm md:text-lg font-medium">Track your verified achievements and credentials</p>
+                <p className="text-white/80 text-xs sm:text-sm md:text-base lg:text-lg font-medium">Track your verified achievements and credentials</p>
               </div>
             </div>
             

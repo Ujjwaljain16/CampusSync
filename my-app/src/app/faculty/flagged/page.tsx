@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 
 interface FlaggedCert {
   id: string;

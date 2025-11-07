@@ -3,13 +3,14 @@
 import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, UserPlus, Mail, BarChart3, Crown, Lock, LayoutDashboard } from 'lucide-react';
+import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, BarChart3, Crown, Lock, LayoutDashboard, UserPlus } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 
 interface UserWithRole {
   user_id: string;
   role: string;
   is_super_admin?: boolean;
+  is_primary_admin?: boolean;
   created_at: string;
   updated_at: string;
   assigned_by: string | null;
@@ -25,11 +26,8 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actioning, setActioning] = useState<string | null>(null);
-  const [showInviteForm, setShowInviteForm] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('student');
-  const [inviting, setInviting] = useState(false);
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -50,9 +48,23 @@ export default function AdminDashboardPage() {
     fetchUsers();
     (async () => {
       try {
-        const res = await fetch('/api/admin/role-requests/count');
+        // Count pending faculty/recruiter approvals
+        const res = await fetch('/api/admin/faculty-approvals?status=pending');
         const json = await res.json();
-        if (res.ok) setPendingCount(json.pending || 0);
+        if (res.ok && Array.isArray(json.data)) {
+          setPendingCount(json.data.length);
+        }
+      } catch {}
+    })();
+    
+    // Fetch current user ID
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/user');
+        const json = await res.json();
+        if (res.ok && json.user) {
+          setCurrentUserId(json.user.id);
+        }
       } catch {}
     })();
   }, [fetchUsers]);
@@ -107,32 +119,32 @@ export default function AdminDashboardPage() {
     const warnings = [];
     
     if (isSuperAdmin && toRole !== 'admin') {
-      warnings.push('⚠ CRITICAL: This is the SUPER ADMIN (original/founder)');
-      warnings.push('✕ SUPER ADMIN CANNOT BE DEMOTED');
-      warnings.push('⚙ This admin serves as the system recovery mechanism');
+      warnings.push('[CRITICAL] This is the SUPER ADMIN (original/founder)');
+      warnings.push('[CRITICAL] SUPER ADMIN CANNOT BE DEMOTED');
+      warnings.push('[INFO] This admin serves as the system recovery mechanism');
       return warnings.join('\n');
     }
     
     if (fromRole === 'admin' && toRole !== 'admin') {
-      warnings.push('⚠ CRITICAL: This will remove admin privileges');
-      warnings.push('⚠ You will be required to provide a detailed reason');
-      warnings.push('⚠ This action will be logged and audited');
+      warnings.push('[CRITICAL] This will remove admin privileges');
+      warnings.push('[WARNING] You will be required to provide a detailed reason');
+      warnings.push('[WARNING] This action will be logged and audited');
     }
     
     if (fromRole === 'recruiter' && toRole === 'student') {
-      warnings.push('⚠ This user will lose access to student search and verification features');
+      warnings.push('[WARNING] This user will lose access to student search and verification features');
     }
     
     if (fromRole === 'faculty' && toRole === 'student') {
-      warnings.push('⚠ This user will lose certificate approval capabilities');
+      warnings.push('[WARNING] This user will lose certificate approval capabilities');
     }
     
     if (toRole === 'admin') {
-      warnings.push('⚠ This user will gain full system access');
+      warnings.push('[WARNING] This user will gain full system access');
     }
     
     if (warnings.length === 0) {
-      warnings.push('✓ This is a standard role change');
+      warnings.push('[INFO] This is a standard role change');
     }
     
     return warnings.join('\n');
@@ -155,30 +167,7 @@ export default function AdminDashboardPage() {
     }
   }, [fetchUsers]);
 
-  const sendInvitation = useCallback(async () => {
-    if (!inviteEmail.trim()) return;
-    
-    setInviting(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/admin/invite', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to send invitation');
-      
-      setShowInviteForm(false);
-      setInviteEmail('');
-      setInviteRole('student');
-      await fetchUsers();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to send invitation');
-    } finally {
-      setInviting(false);
-    }
-  }, [inviteEmail, inviteRole, fetchUsers]);
+
 
   const getRoleColor = (role: string, isSuperAdmin: boolean = false) => {
     if (isSuperAdmin) {
@@ -326,10 +315,10 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
               <div>
-                <h1 className="text-4xl md:text-5xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient">
+                <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient leading-tight">
                   Admin Dashboard
                 </h1>
-                <p className="text-white/80 text-base md:text-lg mt-1 font-medium">
+                <p className="text-white/80 text-xs sm:text-sm md:text-base lg:text-lg mt-1 font-medium">
                   Manage user roles and system analytics.
                   <span className="text-emerald-300"> Full control.</span>
                 </p>
@@ -347,10 +336,10 @@ export default function AdminDashboardPage() {
               </Link>
               
               <Link
-                href="/admin/role-requests"
+                href="/admin/faculty-approvals"
                 className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-white/10 to-white/5 hover:from-white/15 hover:to-white/10 text-white rounded-xl font-semibold transition-all backdrop-blur-xl border border-white/10 hover:border-white/20 relative"
               >
-                <span>Pending Requests</span>
+                <span>Pending Approvals</span>
                 {pendingCount > 0 && (
                   <span className="inline-flex items-center justify-center text-xs bg-red-600 text-white rounded-full px-2 py-0.5 font-bold animate-pulse">
                     {pendingCount}
@@ -383,14 +372,6 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setShowInviteForm(!showInviteForm)}
-                  className="group relative overflow-hidden flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-emerald-500/25"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Invite User</span>
-                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
-                </button>
-                <button
                   onClick={fetchUsers}
                   disabled={loading}
                   className="flex items-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/15 text-white rounded-xl font-semibold transition-all disabled:opacity-50 border border-white/10 hover:border-white/20 backdrop-blur-xl"
@@ -401,55 +382,6 @@ export default function AdminDashboardPage() {
               </div>
             </div>
           </div>
-
-          {/* Invite User Form - Enhanced */}
-          {showInviteForm && (
-            <div className="px-6 md:px-8 py-6 border-b border-white/10 bg-gradient-to-br from-white/5 to-white/5 backdrop-blur-xl">
-              <h3 className="text-white text-lg font-bold mb-5 flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-emerald-300" />
-                Invite New User
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-white font-semibold text-sm mb-2">Email Address</label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-white/60" />
-                    <input
-                      type="email"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      placeholder="user@example.com"
-                      className="w-full pl-10 pr-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-transparent transition-all backdrop-blur-sm hover:bg-white/15"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-white font-semibold text-sm mb-2">Role</label>
-                  <select
-                    value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-transparent transition-all backdrop-blur-sm hover:bg-white/15"
-                  >
-                    <option value="student" className="bg-gray-800">Student</option>
-                    <option value="faculty" className="bg-gray-800">Faculty</option>
-                    <option value="admin" className="bg-gray-800">Admin</option>
-                  </select>
-                </div>
-                <div className="flex items-end">
-                  <button
-                    onClick={sendInvitation}
-                    disabled={!inviteEmail.trim() || inviting}
-                    className="group relative overflow-hidden w-full px-4 py-3 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 disabled:from-gray-600 disabled:to-gray-600 text-white rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/25"
-                  >
-                    {inviting ? 'Sending...' : 'Send Invitation'}
-                    {!inviting && (
-                      <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-left">
@@ -494,41 +426,60 @@ export default function AdminDashboardPage() {
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex flex-wrap gap-2">
-                        {user.role !== 'admin' && (
-                          <button
-                            onClick={() => updateUserRole(user.user_id, 'admin', user.role)}
-                            disabled={actioning === user.user_id}
-                            className="px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-500/25 hover:scale-105 disabled:hover:scale-100"
-                          >
-                            Make Admin
-                          </button>
+                        {/* Show protection message for current user */}
+                        {user.user_id === currentUserId && (
+                          <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/30 text-yellow-300 rounded-xl text-sm font-semibold opacity-75 cursor-not-allowed backdrop-blur-sm">
+                            <Lock className="w-4 h-4" />
+                            You cannot modify your own role
+                          </div>
                         )}
-                        {user.role !== 'faculty' && !user.is_super_admin && (
-                          <button
-                            onClick={() => updateUserRole(user.user_id, 'faculty', user.role)}
-                            disabled={actioning === user.user_id}
-                            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-500/25 hover:scale-105 disabled:hover:scale-100"
-                          >
-                            Make Faculty
-                          </button>
+                        {/* Show protection message for primary admin */}
+                        {user.is_primary_admin && user.user_id !== currentUserId && (
+                          <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/30 text-yellow-300 rounded-xl text-sm font-semibold opacity-75 cursor-not-allowed backdrop-blur-sm">
+                            <Crown className="w-4 h-4" />
+                            Primary Admin (Protected)
+                          </div>
                         )}
-                        {user.role !== 'recruiter' && !user.is_super_admin && (
-                          <button
-                            onClick={() => updateUserRole(user.user_id, 'recruiter', user.role)}
-                            disabled={actioning === user.user_id}
-                            className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-purple-500/25 hover:scale-105 disabled:hover:scale-100"
-                          >
-                            Make Recruiter
-                          </button>
-                        )}
-                        {user.role !== 'student' && !user.is_super_admin && (
-                          <button
-                            onClick={() => updateUserRole(user.user_id, 'student', user.role)}
-                            disabled={actioning === user.user_id}
-                            className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/25 hover:scale-105 disabled:hover:scale-100"
-                          >
-                            Make Student
-                          </button>
+                        {/* Show action buttons only if not current user, not primary admin, and not super admin */}
+                        {user.user_id !== currentUserId && !user.is_primary_admin && !user.is_super_admin && (
+                          <>
+                            {user.role !== 'admin' && (
+                              <button
+                                onClick={() => updateUserRole(user.user_id, 'admin', user.role)}
+                                disabled={actioning === user.user_id}
+                                className="px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-500/25 hover:scale-105 disabled:hover:scale-100"
+                              >
+                                Make Admin
+                              </button>
+                            )}
+                            {user.role !== 'faculty' && (
+                              <button
+                                onClick={() => updateUserRole(user.user_id, 'faculty', user.role)}
+                                disabled={actioning === user.user_id}
+                                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-500/25 hover:scale-105 disabled:hover:scale-100"
+                              >
+                                Make Faculty
+                              </button>
+                            )}
+                            {user.role !== 'recruiter' && (
+                              <button
+                                onClick={() => updateUserRole(user.user_id, 'recruiter', user.role)}
+                                disabled={actioning === user.user_id}
+                                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-purple-500/25 hover:scale-105 disabled:hover:scale-100"
+                              >
+                                Make Recruiter
+                              </button>
+                            )}
+                            {user.role !== 'student' && (
+                              <button
+                                onClick={() => updateUserRole(user.user_id, 'student', user.role)}
+                                disabled={actioning === user.user_id}
+                                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/25 hover:scale-105 disabled:hover:scale-100"
+                              >
+                                Make Student
+                              </button>
+                            )}
+                          </>
                         )}
                         {user.is_super_admin && (
                           <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/30 text-yellow-300 rounded-xl text-sm font-semibold opacity-75 cursor-not-allowed backdrop-blur-sm">

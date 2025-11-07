@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Download, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
+import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
-import { PageHeader } from '@/components/layout';
 
 interface PendingCert {
   id: string;
@@ -67,7 +66,7 @@ export default function FacultyDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [actioning, setActioning] = useState<string | null>(null);
   const [selectedCerts, setSelectedCerts] = useState<Set<string>>(new Set());
-  const [filterStatus, setFilterStatus] = useState<'all' | 'low_confidence' | 'manual_review'>('low_confidence');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'low_confidence' | 'manual_review'>('all');
   const [showFilters, setShowFilters] = useState(false);
   const [batchActioning, setBatchActioning] = useState(false);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
@@ -78,66 +77,88 @@ export default function FacultyDashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      // Try documents pending first, fallback to certificates
       let pending: PendingCert[] = [];
+      
+      // Try documents pending first
       try {
         const dres = await fetch('/api/documents/pending');
         if (dres.ok) {
           const dj = await dres.json();
-          pending = (dj.data || []).map((d: Record<string, unknown>) => ({
-            id: d.id,
-            title: d.title,
-            institution: d.institution || '',
-            date_issued: d.issue_date || d.created_at,
-            file_url: d.file_url,
-            user_id: d.student_id,
-            created_at: d.created_at,
-          }));
+          const docs = dj.data || [];
+          if (docs.length > 0) {
+            pending = docs.map((d: Record<string, unknown>) => ({
+              id: d.id,
+              title: d.title,
+              institution: d.institution || '',
+              date_issued: d.issue_date || d.created_at,
+              file_url: d.file_url,
+              student_id: d.student_id,
+              created_at: d.created_at,
+              confidence_score: d.confidence_score,
+              auto_approved: d.auto_approved,
+              verification_method: d.verification_method,
+              verification_details: d.verification_details,
+            }));
+            console.log(`[Faculty Dashboard] Loaded ${pending.length} pending documents`);
+          }
         }
-      } catch {}
-
-      if (!pending || pending.length === 0) {
-        const res = await fetch('/api/certificates/pending');
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to load');
-        pending = json.data as PendingCert[];
+      } catch (err) {
+        console.error('Failed to fetch documents/pending:', err);
       }
 
-      // Fetch verification details for each
+      // Fallback to certificates pending if no documents found
+      if (pending.length === 0) {
+        try {
+          const res = await fetch('/api/certificates/pending');
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || 'Failed to load');
+          pending = json.data as PendingCert[];
+          console.log(`[Faculty Dashboard] Loaded ${pending.length} pending certificates`);
+        } catch (err) {
+          console.error('Failed to fetch certificates/pending:', err);
+          throw err;
+        }
+      }
+
+      console.log(`[Faculty Dashboard] Total pending items: ${pending.length}`);
+
+      // Fetch verification details for each certificate
       const certificatesWithDetails = await Promise.all(
         (pending as PendingCert[]).map(async (cert) => {
           try {
-            // Prefer document metadata
-            let md: Record<string, unknown> | null = null;
-            const dmd = await fetch(`/api/documents/${encodeURIComponent(cert.id)}/metadata`);
-            if (dmd.ok) {
-              md = await dmd.json();
-              if (md?.data) {
-                const data = md.data as Record<string, unknown>;
-                return {
-                  ...cert,
-                  confidence_score: (data?.ai_confidence_score as number) || 0,
-                  verification_details: (data?.verification_details as Record<string, unknown>) || {}
-                };
-              }
-            }
-
+            // Fetch certificate metadata directly (these are from certificates table)
             const cmdRes = await fetch(`/api/certificates/metadata/${encodeURIComponent(cert.id)}`);
             if (cmdRes.ok) {
               const cmd = await cmdRes.json();
-              return {
-                ...cert,
-                confidence_score: cmd?.data?.ai_confidence_score || 0,
-                verification_details: cmd?.data?.verification_details || {}
-              };
+              if (cmd?.data) {
+                return {
+                  ...cert,
+                  confidence_score: cmd.data.ai_confidence_score || cert.confidence_score || 0,
+                  verification_details: cmd.data.verification_details || cert.verification_details || {},
+                  auto_approved: cmd.data.auto_approved ?? cert.auto_approved ?? false,
+                  verification_method: cmd.data.verification_method || cert.verification_method || null,
+                };
+              }
+            } else {
+              // Log the error response for debugging
+              const errorData = await cmdRes.json().catch(() => ({ error: 'Unknown error' }));
+              console.error('Failed to fetch metadata for cert:', cert.id, 'Status:', cmdRes.status, 'Error:', errorData);
             }
-          } catch (e) {
-            console.error('Failed to fetch metadata for cert:', cert.id);
+          } catch (error) {
+            console.error('Exception fetching metadata for cert:', cert.id, error);
           }
-          return cert;
+          // Return certificate with default values if metadata fetch fails
+          return {
+            ...cert,
+            confidence_score: cert.confidence_score || 0,
+            verification_details: cert.verification_details || {},
+            auto_approved: cert.auto_approved ?? false,
+            verification_method: cert.verification_method || null,
+          };
         })
       );
       
+      console.log(`[Faculty Dashboard] Setting ${certificatesWithDetails.length} certificates with details:`, certificatesWithDetails);
       setRows(certificatesWithDetails);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unexpected error');
@@ -239,10 +260,21 @@ export default function FacultyDashboardPage() {
     });
   }, []);
 
+  const getFilteredRows = useCallback(() => {
+    switch (filterStatus) {
+      case 'low_confidence':
+        return rows.filter(r => (r.confidence_score || 0) < 0.9);
+      case 'manual_review':
+        return rows.filter(r => !r.auto_approved);
+      default:
+        return rows;
+    }
+  }, [rows, filterStatus]);
+
   const selectAll = useCallback(() => {
     const filteredRows = getFilteredRows();
     setSelectedCerts(new Set(filteredRows.map(r => r.id)));
-  }, []);
+  }, [getFilteredRows]);
 
   const clearSelection = useCallback(() => {
     setSelectedCerts(new Set());
@@ -301,17 +333,6 @@ export default function FacultyDashboardPage() {
       setBatchActioning(false);
     }
   }, [selectedCerts, fetchRows, fetchAnalytics]);
-
-  const getFilteredRows = useCallback(() => {
-    switch (filterStatus) {
-      case 'low_confidence':
-        return rows.filter(r => (r.confidence_score || 0) < 0.9);
-      case 'manual_review':
-        return rows.filter(r => !r.auto_approved);
-      default:
-        return rows;
-    }
-  }, [rows, filterStatus]);
 
   const getConfidenceColor = (score: number) => {
     if (score >= 0.9) return 'text-emerald-400';
@@ -549,7 +570,7 @@ export default function FacultyDashboardPage() {
         </div>
       </div>
     );
-  }, [loading, error, getFilteredRows, selectedCerts, batchApprove, batchReject, clearSelection, toggleSelect, onApprove, onReject, actioning]);
+  }, [loading, error, getFilteredRows, selectedCerts, batchApprove, batchReject, clearSelection, toggleSelect, onApprove, onReject, actioning, batchActioning, filterStatus]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 relative overflow-hidden">
@@ -582,10 +603,10 @@ export default function FacultyDashboardPage() {
                 </div>
               </div>
               <div>
-                <h1 className="text-4xl md:text-5xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient">
+                <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient leading-tight">
                   Faculty Dashboard
                 </h1>
-                <p className="text-white/80 text-base md:text-lg mt-1 font-medium">
+                <p className="text-white/80 text-xs sm:text-sm md:text-base lg:text-lg mt-1 font-medium">
                   Review and approve certificate submissions
                   <span className="text-emerald-300"> with AI assistance</span>
                 </p>
@@ -615,9 +636,9 @@ export default function FacultyDashboardPage() {
                     onChange={(e) => setFilterStatus(e.target.value as 'all' | 'low_confidence' | 'manual_review')}
                     className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 text-white px-4 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/30 font-medium transition-all"
                   >
+                    <option value="all" className="bg-slate-900">All Certificates</option>
                     <option value="low_confidence" className="bg-slate-900">Low Confidence (&lt; 90%)</option>
                     <option value="manual_review" className="bg-slate-900">Manual Review Required</option>
-                    <option value="all" className="bg-slate-900">All Certificates</option>
                   </select>
                 </div>
               )}
@@ -794,7 +815,7 @@ export default function FacultyDashboardPage() {
                 <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
                   <h3 className="text-lg font-semibold text-white mb-4">Top Institutions</h3>
                   <div className="space-y-2">
-                    {analytics.topInstitutions.map((inst, index) => (
+                    {analytics.topInstitutions.map((inst) => (
                       <div key={inst.institution} className="flex items-center justify-between">
                         <span className="text-white/70 text-sm truncate">{inst.institution}</span>
                         <span className="text-white font-semibold">{inst.count}</span>

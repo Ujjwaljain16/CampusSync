@@ -29,7 +29,7 @@ interface Certification {
   id: string;
   title: string;
   issuer: string;
-  issue_date: string;
+  issue_date?: string | null;
   verification_status: 'verified' | 'pending' | 'rejected';
   confidence_score: number;
   skills: string[];
@@ -51,12 +51,14 @@ export default function StudentDetailPage() {
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [contacting, setContacting] = useState(false);
 
   useEffect(() => {
     if (studentId) {
       fetchStudentDetails();
     }
-  }, [studentId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentId]); // fetchStudentDetails is stable and only depends on studentId which is in deps
 
   const fetchStudentDetails = async () => {
     try {
@@ -67,8 +69,11 @@ export default function StudentDetailPage() {
         throw new Error('Failed to fetch student details');
       }
       
-      const data = await response.json();
-      setStudent(data);
+      const json = await response.json();
+      // API responses use the standardized { data: T } envelope
+      // unwrap if present, otherwise fall back to the raw body
+      const payload = json && typeof json === 'object' && 'data' in json ? json.data : json;
+      setStudent(payload as Student);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -177,8 +182,97 @@ export default function StudentDetailPage() {
     );
   }
 
+  // (removed unused loadScript helper; using dynamic imports instead)
+  // Prefer server-side PDF export for robustness; fall back to client-side html2canvas
+  // if the server route isn't available.
+  const exportProfileAsPDF = async () => {
+    if (typeof window === 'undefined') return;
+
+    // First try the server-side PDF endpoint (more reliable, avoids CSS parsing issues)
+    try {
+      const res = await fetch('/api/portfolio/export-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: student?.id, includePersonalInfo: true })
+      });
+
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/pdf')) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${(student?.name || 'student').replace(/\s+/g, '_')}_profile.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Server-side PDF export failed or unavailable, falling back to client-side export:', err);
+    }
+
+    // Client-side fallback using html2canvas + jsPDF
+    try {
+      const html2canvasModule = await import('html2canvas');
+      const jspdfModule = await import('jspdf');
+      type Html2CanvasFn = (el: Element, opts?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
+      const html2canvasFn = ((html2canvasModule as unknown) as { default?: Html2CanvasFn }).default ?? ((html2canvasModule as unknown) as Html2CanvasFn);
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const jsPDF = (jspdfModule as unknown as any).jsPDF ?? (jspdfModule as unknown as any).default ?? (jspdfModule as unknown as any);
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+
+      if (!html2canvasFn || !jsPDF) throw new Error('PDF libraries not available');
+
+      const element = document.getElementById('profile-root') || document.body;
+      const canvas = await html2canvasFn(element, { scale: 2 });
+      const imgData = canvas.toDataURL('image/png');
+
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const pdf = typeof jsPDF === 'function' ? new jsPDF('p', 'pt', 'a4') : new (jsPDF as any).jsPDF('p', 'pt', 'a4');
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgProps = { width: canvas.width, height: canvas.height };
+      const ratio = imgProps.width / imgProps.height;
+      const imgWidth = pageWidth;
+      const imgHeight = pageWidth / ratio;
+
+      let position = 0;
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      position -= pageHeight;
+      while (Math.abs(position) < imgHeight - pageHeight) {
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        position -= pageHeight;
+      }
+
+      const filename = `${(student?.name || 'student').replace(/\s+/g, '_')}_profile.pdf`;
+      pdf.save(filename);
+    } catch (err) {
+      console.error('Failed to export PDF (client fallback)', err);
+      console.debug('PDF export failed, falling back to JSON. Error:', err);
+      if (student) {
+        const dataStr = JSON.stringify(student, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(student.name || 'student').replace(/\s+/g, '_')}_profile.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div id="profile-root" className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -196,13 +290,44 @@ export default function StudentDetailPage() {
               </div>
             </div>
             <div className="flex space-x-3">
-              <button className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+              <button
+                onClick={() => exportProfileAsPDF()}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
                 <Download className="w-4 h-4 mr-2" />
                 Export Profile
               </button>
-              <button className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
+              <button
+                onClick={async () => {
+                  if (contacting) return;
+                  if (!student || !student.email) return;
+
+                  setContacting(true);
+                  try {
+                    const subject = encodeURIComponent(`Opportunity to connect`);
+                    const body = encodeURIComponent(`Hi ${student.name || ''},%0D%0A%0D%0AI found your profile on CampusSync and would like to discuss opportunities with you.%0D%0A%0D%0ARegards,`);
+                    // open mail client once
+                    window.location.href = `mailto:${student.email}?subject=${subject}&body=${body}`;
+
+                    // Log contact server-side (debounced server-side as well)
+                    await fetch('/api/recruiter/contacts', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ studentId: student.id, method: 'email', notes: `Email sent via mailto on ${new Date().toLocaleString()}` })
+                    });
+                  } catch (err) {
+                    console.error('Failed to log contact from student page', err);
+                  } finally {
+                    // allow again after the request completes
+                    setTimeout(() => setContacting(false), 500);
+                  }
+                }}
+                disabled={contacting}
+                aria-busy={contacting}
+                className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${contacting ? 'bg-blue-600/70 opacity-80 pointer-events-none' : 'bg-blue-600 hover:bg-blue-700'}`}
+              >
                 <Mail className="w-4 h-4 mr-2" />
-                Contact Student
+                {contacting ? 'Contacting...' : 'Contact Student'}
               </button>
             </div>
           </div>
@@ -222,7 +347,14 @@ export default function StudentDetailPage() {
                 </div>
                 <div className="ml-4">
                   <h3 className="text-lg font-medium text-gray-900">{student.name || 'Unknown Student'}</h3>
-                  <p className="text-sm text-gray-500">{student.major || 'N/A'}</p>
+                    <p className="text-sm text-gray-500">{student.major || 'N/A'}</p>
+                    {/* Add student's institution/university on the profile card */}
+                    {student.university && (
+                      <p className="text-sm text-gray-500 mt-1 flex items-center">
+                        <Building className="w-4 h-4 mr-2 text-gray-400" />
+                        <span>{student.university}</span>
+                      </p>
+                    )}
                 </div>
               </div>
 
@@ -331,7 +463,12 @@ export default function StudentDetailPage() {
               </div>
 
               <div className="divide-y divide-gray-200">
-                {(student.certifications ?? []).map((cert) => (
+                {(student.certifications ?? []).map((cert) => {
+                  const conf = typeof cert.confidence_score === 'number' && !isNaN(cert.confidence_score)
+                    ? cert.confidence_score
+                    : (cert.verification_details?.ai_confidence ?? 0);
+                  
+                  return (
                   <div key={cert.id} className="p-6">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -340,9 +477,15 @@ export default function StudentDetailPage() {
                           <h4 className="ml-2 text-lg font-medium text-gray-900">
                             {cert.title}
                           </h4>
-                          <span className={`ml-3 text-xs px-2 py-1 rounded-full ${getConfidenceColor(cert.confidence_score)}`}>
-                            {(cert.confidence_score * 100).toFixed(0)}% confidence
-                          </span>
+                          {cert.verification_status === 'verified' ? (
+                            <span className="ml-3 text-xs px-2 py-1 rounded-full bg-green-100 text-green-800 font-semibold">
+                              Approved
+                            </span>
+                          ) : (
+                            <span className={`ml-3 text-xs px-2 py-1 rounded-full ${getConfidenceColor(conf)}`}>
+                              {Number.isFinite(conf) ? `${(conf * 100).toFixed(0)}%` : 'N/A'}
+                            </span>
+                          )}
                         </div>
                         
                         <div className="text-sm text-gray-600 mb-2">
@@ -352,7 +495,7 @@ export default function StudentDetailPage() {
                           </div>
                           <div className="flex items-center mt-1">
                             <Calendar className="w-4 h-4 mr-1" />
-                            Issued: {new Date(cert.issue_date).toLocaleDateString()}
+                            Issued: {cert.issue_date ? new Date(cert.issue_date).toLocaleDateString() : 'Not available'}
                           </div>
                         </div>
 
@@ -360,41 +503,8 @@ export default function StudentDetailPage() {
                           <p className="text-sm text-gray-600 mb-3">{cert.description}</p>
                         )}
 
-                        {cert.verification_details && (
-                          <div className="bg-gray-50 rounded-lg p-3 mb-3">
-                            <h5 className="text-sm font-medium text-gray-900 mb-2">Verification Details</h5>
-                            <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div className="flex items-center">
-                                <span className="mr-2">QR Code:</span>
-                                <span className={cert.verification_details.qr_verified ? 'text-green-600' : 'text-red-600'}>
-                                  {cert.verification_details.qr_verified ? 'Verified' : 'Failed'}
-                                </span>
-                              </div>
-                              <div className="flex items-center">
-                                <span className="mr-2">Logo:</span>
-                                <span className={cert.verification_details.logo_verified ? 'text-green-600' : 'text-red-600'}>
-                                  {cert.verification_details.logo_verified ? 'Verified' : 'Failed'}
-                                </span>
-                              </div>
-                              <div className="flex items-center">
-                                <span className="mr-2">Template:</span>
-                                <span className={cert.verification_details.template_verified ? 'text-green-600' : 'text-red-600'}>
-                                  {cert.verification_details.template_verified ? 'Verified' : 'Failed'}
-                                </span>
-                              </div>
-                              <div className="flex items-center">
-                                <span className="mr-2">AI Confidence:</span>
-                                <span className={cert.verification_details.ai_confidence >= 0.8 ? 'text-green-600' : 'text-yellow-600'}>
-                                  {(cert.verification_details.ai_confidence * 100).toFixed(0)}%
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="text-xs text-gray-500">
-                          Verification Method: {cert.verification_method}
-                        </div>
+                        {/* Simplified verification UI: hide granular verification details and method.
+                            Show only Approved badge when certificate is verified (e.g., approved by faculty). */}
                       </div>
 
                       <div className="ml-4 flex flex-col space-y-2">
@@ -426,7 +536,8 @@ export default function StudentDetailPage() {
                       </div>
                     </div>
                   </div>
-                ))}
+                );
+                })}
               </div>
             </div>
           </div>

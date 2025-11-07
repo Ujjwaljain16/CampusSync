@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, TrendingUp, Users, CheckCircle, Clock, XCircle, Zap, Shield, Brain, Star, AlertCircle, Download, RefreshCw } from 'lucide-react';
+import { BarChart3, TrendingUp, Clock, Zap, Shield, Brain, Star, AlertCircle, Download, RefreshCw } from 'lucide-react';
 
 interface AnalyticsData {
   totalCertificates: number;
@@ -250,7 +250,7 @@ export default function AnalyticsDashboard() {
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
           <h3 className="text-xl font-semibold text-white mb-4">Daily Activity</h3>
           <div className="space-y-4">
-            {data.dailyStats.slice(-7).map((day, index) => (
+            {data.dailyStats.slice(-7).map((day) => (
               <div key={day.date} className="flex items-center gap-4">
                 <div className="w-20 text-white/70 text-sm">
                   {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}

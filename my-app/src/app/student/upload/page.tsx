@@ -5,6 +5,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Upload, Eye, Sparkles, Check, AlertCircle, ArrowLeft, ScrollText, Zap, Shield, Brain } from 'lucide-react';
+import { logger } from '@/lib/logger';
 
 // OCR extraction result type matching the API
 type OcrExtractionResult = {
@@ -67,7 +68,7 @@ export default function StudentUploadPage() {
     setSuccess(null);
     
     try {
-      console.log('🎓 Starting certificate extraction with Gemini AI...');
+      logger.debug('Starting certificate extraction with Gemini AI');
       const startTime = Date.now();
       
       // Use the Gemini Vision API for extraction
@@ -80,7 +81,7 @@ export default function StudentUploadPage() {
       });
       
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`⏱️ Extraction completed in ${elapsed}s`);
+      logger.debug('Certificate extraction completed', { elapsedSeconds: elapsed });
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -94,9 +95,10 @@ export default function StudentUploadPage() {
         throw new Error('Certificate extraction failed - no OCR data returned');
       }
 
-      console.log('✅ Certificate extraction completed successfully');
-      console.log('📊 Extracted data:', result.data.ocr);
-      console.log('📁 File URL:', result.data.publicUrl);
+      logger.debug('Certificate extraction completed successfully', {
+        ocrData: result.data.ocr,
+        fileUrl: result.data.publicUrl
+      });
       
       // Set the public URL for Save button
       setPublicUrl(result.data.publicUrl);
@@ -118,7 +120,7 @@ export default function StudentUploadPage() {
       setSuccess('Certificate information extracted successfully!');
       
     } catch (err) {
-      console.error('Certificate extraction error:', err);
+      logger.error('Certificate extraction error', err);
       setError(err instanceof Error ? err.message : 'Failed to extract certificate information');
     } finally {
       setUploading(false);
@@ -146,7 +148,7 @@ export default function StudentUploadPage() {
         }
       };
 
-      console.log('💾 Saving certificate with payload:', payload);
+      logger.debug('Saving certificate', payload);
 
       // Call create API endpoint with extracted data
       const response = await fetch('/api/certificates/create', {
@@ -172,7 +174,7 @@ export default function StudentUploadPage() {
       }
       
     } catch (err) {
-      console.error('Save Error:', err);
+      logger.error('Save Error', err);
       setError(err instanceof Error ? err.message : 'Failed to save certificate');
     } finally {
       setSaving(false);
@@ -632,9 +634,9 @@ export default function StudentUploadPage() {
                       <div className="w-full bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-xl px-4 py-3.5 text-white/70 text-sm font-medium">
                         {typeof ocr.confidence === 'number' ? 
                           `${(ocr.confidence * 100).toFixed(1)}% - ${
-                            ocr.confidence > 0.8 ? '✨ High confidence' :
-                            ocr.confidence > 0.6 ? '⚡ Medium confidence' :
-                            '⚠️ Low confidence - please review carefully'
+                            ocr.confidence > 0.8 ? 'High confidence' :
+                            ocr.confidence > 0.6 ? 'Medium confidence' :
+                            'Low confidence - please review carefully'
                           }` : 
                           'No confidence score available'
                         }

@@ -72,11 +72,11 @@ export default function MetricsPage() {
 
   const getMetricIcon = (metricType: string) => {
     switch (metricType) {
-      case 'accuracy': return '🎯';
-      case 'confidence': return '📊';
-      case 'processing_time': return '⏱️';
-      case 'error_rate': return '⚠️';
-      default: return '📈';
+      case 'accuracy': return '●'; // Bullet point for accuracy
+      case 'confidence': return '▣'; // Square for confidence
+      case 'processing_time': return '◐'; // Clock-like symbol
+      case 'error_rate': return '▲'; // Triangle for warning
+      default: return '■'; // Square for default
     }
   };
 
@@ -208,19 +208,19 @@ export default function MetricsPage() {
             <h2 className="text-xl font-semibold mb-4">System Health</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="border rounded-lg p-4 text-center">
-                <div className="text-2xl mb-2">📊</div>
+                <div className="text-2xl mb-2">▣</div>
                 <div className="font-medium">Processing Rate</div>
                 <div className="text-sm text-gray-500">Documents per hour</div>
                 <div className="text-lg font-semibold text-green-600">24.5</div>
               </div>
               <div className="border rounded-lg p-4 text-center">
-                <div className="text-2xl mb-2">⚡</div>
+                <div className="text-2xl mb-2">◐</div>
                 <div className="font-medium">Avg Processing Time</div>
                 <div className="text-sm text-gray-500">Seconds per document</div>
                 <div className="text-lg font-semibold text-blue-600">2.3s</div>
               </div>
               <div className="border rounded-lg p-4 text-center">
-                <div className="text-2xl mb-2">🎯</div>
+                <div className="text-2xl mb-2">●</div>
                 <div className="font-medium">Overall Accuracy</div>
                 <div className="text-sm text-gray-500">Last 24 hours</div>
                 <div className="text-lg font-semibold text-green-600">94.2%</div>

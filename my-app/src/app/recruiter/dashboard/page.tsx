@@ -1,13 +1,17 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { 
   Search, Filter, Users, CheckCircle, Clock, XCircle, 
   Eye, Mail, Star, TrendingUp, RefreshCw, Grid, List,
   MapPin, Award, Download, AlertCircle, 
   FileCheck, UserCheck, MessageSquare, Briefcase,
-  Target, ChevronRight, UserCircle2
+  Target, ChevronRight, UserCircle2, Building2
 } from 'lucide-react';
+import OrganizationSwitcher from '@/components/OrganizationSwitcher';
+import { apiFetch } from '@/lib/apiClient';
+import { logger } from '@/lib/logger';
 
 interface StudentRow {
   id: string;
@@ -79,8 +83,6 @@ export default function RecruiterDashboard() {
   
   const [pipelineStages, setPipelineStages] = useState<Record<string, PipelineStage>>({});
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const [contactedStudents, setContactedStudents] = useState<Set<string>>(new Set());
-  const [loadingPersistence, setLoadingPersistence] = useState(true);
   
   const [showContactHistory, setShowContactHistory] = useState(false);
   const [selectedStudentForHistory, setSelectedStudentForHistory] = useState<StudentRow | null>(null);
@@ -89,8 +91,6 @@ export default function RecruiterDashboard() {
   // Load persisted data from database
   const loadPersistedData = useCallback(async () => {
     try {
-      setLoadingPersistence(true);
-      
       const favRes = await fetch('/api/recruiter/favorites');
       if (favRes.ok) {
         const favData = await favRes.json();
@@ -102,47 +102,40 @@ export default function RecruiterDashboard() {
         const pipeData = await pipeRes.json();
         setPipelineStages(pipeData.pipeline || {});
       }
-      
-      const contactRes = await fetch('/api/recruiter/contacts');
-      if (contactRes.ok) {
-        const contactData = await contactRes.json();
-        const contactedIds = new Set<string>(contactData.contacts?.map((c: { student_id: string }) => c.student_id) || []);
-        setContactedStudents(contactedIds);
-      }
     } catch (err) {
-      console.error('Failed to load persisted data:', err);
-    } finally {
-      setLoadingPersistence(false);
+      logger.error('Failed to load persisted data', err);
     }
   }, []);
 
   // Fetch analytics data
   const fetchAnalytics = useCallback(async () => {
     try {
-      const response = await fetch('/api/recruiter/analytics');
+      // Using apiFetch - automatically includes X-Organization-ID header
+      const response = await apiFetch('/api/recruiter/analytics');
       const data = await response.json();
       if (response.ok) {
         setAnalytics(data.data);
       }
     } catch (err) {
-      console.error('Failed to fetch analytics:', err);
+      logger.error('Failed to fetch analytics', err);
     }
   }, []);
 
   // Search students
   const searchStudents = useCallback(async () => {
-    console.log('[DASHBOARD] searchStudents called, searchQuery:', searchQuery);
+    logger.debug('[DASHBOARD] searchStudents called', { searchQuery });
     setLoading(true);
     setError(null);
     try {
       const url = new URL('/api/recruiter/search-students', window.location.origin);
       if (searchQuery) url.searchParams.set('q', searchQuery);
       
-      console.log('[DASHBOARD] Fetching URL:', url.toString());
-      const res = await fetch(url.toString());
+      logger.debug('[DASHBOARD] Fetching URL', { url: url.toString() });
+      // Using apiFetch - automatically includes X-Organization-ID header
+      const res = await apiFetch(url.toString());
       const json = await res.json();
       
-      console.log('[DASHBOARD] API response:', {
+      logger.debug('[DASHBOARD] API response', {
         ok: res.ok,
         status: res.status,
         data: json
@@ -151,29 +144,42 @@ export default function RecruiterDashboard() {
       if (!res.ok) throw new Error(json.error || 'Search failed');
       
       const studentData = json.data?.students || [];
-      console.log('[DASHBOARD] Extracted studentData:', studentData.length, 'students');
+      logger.debug('[DASHBOARD] Extracted studentData', { count: studentData.length });
       
       setStudents(studentData);
       setPagination(json.data?.pagination || null);
       
-      console.log('[DASHBOARD] State updated with', studentData.length, 'students');
+      logger.debug('[DASHBOARD] State updated with students', { count: studentData.length });
     } catch (e: unknown) {
-      console.error('[DASHBOARD] Error:', e);
+      logger.error('[DASHBOARD] Error', e);
       setError(e instanceof Error ? e.message : 'Unexpected error');
     } finally {
       setLoading(false);
     }
   }, [searchQuery]);
 
+  // Track which student contact actions are in-flight to prevent duplicate clicks
+  const [contactingIds, setContactingIds] = useState<Set<string>>(new Set());
+
+  const addContacting = (id: string) => setContactingIds(prev => new Set(prev).add(id));
+  const removeContacting = (id: string) => setContactingIds(prev => {
+    const next = new Set(prev);
+    next.delete(id);
+    return next;
+  });
+
   // Contact student via email
   const contactStudent = useCallback(async (student: StudentRow) => {
-    const subject = encodeURIComponent(`Opportunity from ${student.university || 'Our Company'}`);
-    const body = encodeURIComponent(`Hi ${student.name},\n\nI came across your profile and verified certifications on CampusSync. I'd like to discuss potential opportunities.\n\nBest regards`);
-    window.open(`mailto:${student.email}?subject=${subject}&body=${body}`);
-    
-    setContactedStudents(prev => new Set(prev).add(student.id));
-    
+    // prevent duplicate rapid clicks
+    if (contactingIds.has(student.id)) return;
+    addContacting(student.id);
+
     try {
+      const subject = encodeURIComponent(`Opportunity from ${student.university || 'Our Company'}`);
+      const body = encodeURIComponent(`Hi ${student.name},\n\nI came across your profile and verified certifications on CampusSync. I'd like to discuss potential opportunities.\n\nBest regards`);
+      // Open mail client once
+      window.open(`mailto:${student.email}?subject=${subject}&body=${body}`);
+
       const response = await fetch('/api/recruiter/contacts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -183,16 +189,19 @@ export default function RecruiterDashboard() {
           notes: `Email sent via mailto link at ${new Date().toLocaleString()}`
         })
       });
-      
+
       if (response.ok) {
-        console.log('✅ Contact logged successfully');
+        logger.debug('Contact logged successfully');
       }
-      
+
       fetchAnalytics();
     } catch (err) {
-      console.error('Failed to log contact:', err);
+      logger.error('Failed to log contact', err);
+    } finally {
+      // allow actions again after request completes
+      removeContacting(student.id);
     }
-  }, [fetchAnalytics]);
+  }, [fetchAnalytics, contactingIds]);
   
   // View contact history for a student
   const viewContactHistory = useCallback(async (student: StudentRow) => {
@@ -206,7 +215,7 @@ export default function RecruiterDashboard() {
         setContactHistory(data.contacts || []);
       }
     } catch (err) {
-      console.error('Failed to fetch contact history:', err);
+      logger.error('Failed to fetch contact history', err);
     }
   }, []);
   
@@ -225,7 +234,7 @@ export default function RecruiterDashboard() {
       
       fetchAnalytics();
     } catch (err) {
-      console.error('Failed to update contact response:', err);
+      logger.error('Failed to update contact response', err);
     }
   }, [selectedStudentForHistory, viewContactHistory, fetchAnalytics]);
 
@@ -256,7 +265,7 @@ export default function RecruiterDashboard() {
         });
       }
     } catch (err) {
-      console.error('Failed to update favorite:', err);
+      logger.error('Failed to update favorite', err);
       setFavorites(prev => {
         const newFavorites = new Set(prev);
         if (isFavorite) {
@@ -284,7 +293,7 @@ export default function RecruiterDashboard() {
       
       fetchAnalytics();
     } catch (err) {
-      console.error('Failed to update pipeline:', err);
+      logger.error('Failed to update pipeline', err);
     }
   }, [fetchAnalytics]);
 
@@ -314,12 +323,6 @@ export default function RecruiterDashboard() {
         .map(s => s.email)
         .join(',');
       window.open(`mailto:${selectedEmails}`);
-      
-      setContactedStudents(prev => {
-        const newSet = new Set(prev);
-        selectedStudents.forEach(id => newSet.add(id));
-        return newSet;
-      });
     } else if (action === 'favorite') {
       setFavorites(prev => {
         const newSet = new Set(prev);
@@ -389,10 +392,10 @@ export default function RecruiterDashboard() {
       const filename = `talent_report_${new Date().toISOString().split('T')[0]}.pdf`;
       doc.save(filename);
       
-      alert(`✅ Exported ${selectedStudentsList.length} student(s) to PDF`);
+      alert(`[SUCCESS] Exported ${selectedStudentsList.length} student(s) to PDF`);
       
     } catch (error) {
-      console.error('PDF export error:', error);
+      logger.error('PDF export error', error);
       alert('Failed to export PDF. Please try again.');
     }
   };
@@ -468,14 +471,17 @@ export default function RecruiterDashboard() {
                 </div>
               </div>
               <div className="min-w-0 flex-1 pt-1">
-                <h1 className="text-3xl md:text-5xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient mb-2 leading-[1.1]">
+                <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-blue-400 via-emerald-400 to-blue-400 bg-clip-text text-transparent animate-gradient mb-2 leading-tight">
                   Recruiter Dashboard
                 </h1>
-                <p className="text-white/80 text-sm md:text-lg font-medium">Find and manage talented students</p>
+                <p className="text-white/80 text-xs sm:text-sm md:text-base lg:text-lg font-medium">Find and manage talented students</p>
               </div>
             </div>
             
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Organization Switcher */}
+              <OrganizationSwitcher />
+              
               <button 
                 onClick={() => exportStudentsPDF(selectedStudents.length > 0 ? selectedStudents : students.map(s => s.id))}
                 className="relative overflow-hidden bg-gradient-to-r from-blue-400 via-cyan-500 to-emerald-400 hover:from-blue-500 hover:via-cyan-600 hover:to-emerald-500 text-white px-5 md:px-7 py-3 md:py-3.5 rounded-xl font-bold transition-all duration-300 flex items-center gap-2 text-sm md:text-base shadow-xl hover:shadow-2xl hover:shadow-cyan-500/50 transform hover:-translate-y-1 hover:scale-105 group"
@@ -548,6 +554,31 @@ export default function RecruiterDashboard() {
             </div>
           </div>
         )}
+
+        {/* Request Organization Access CTA */}
+        <Link
+          href="/recruiter/organizations"
+          className="block mb-6 group"
+        >
+          <div className="bg-gradient-to-br from-emerald-500/10 to-blue-500/10 backdrop-blur-2xl border border-emerald-500/30 rounded-3xl shadow-2xl p-6 hover:shadow-emerald-500/20 transition-all duration-300 hover:scale-[1.02]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-gradient-to-br from-emerald-500/20 to-blue-500/20 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                  <Building2 className="w-8 h-8 text-emerald-300" />
+                </div>
+                <div>
+                  <h3 className="text-white text-xl font-bold mb-1">Need Access to More Organizations?</h3>
+                  <p className="text-gray-400 text-sm">
+                    Browse universities and companies to connect with talented students
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <ChevronRight className="w-6 h-6 text-emerald-300 group-hover:translate-x-2 transition-transform duration-300" />
+              </div>
+            </div>
+          </div>
+        </Link>
 
         {/* Search Bar */}
         <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-6 mb-6 shadow-2xl">
@@ -734,8 +765,10 @@ export default function RecruiterDashboard() {
                     </button>
                     <button
                       onClick={() => contactStudent(student)}
-                      className="p-2 text-white/50 hover:text-purple-400 hover:bg-purple-500/20 rounded-lg transition-all"
-                      title="Contact Student"
+                      disabled={contactingIds.has(student.id)}
+                      className={`p-2 rounded-lg transition-all ${contactingIds.has(student.id) ? 'opacity-50 pointer-events-none' : 'text-white/50 hover:text-purple-400 hover:bg-purple-500/20'}`}
+                      title={contactingIds.has(student.id) ? 'Contacting...' : 'Contact Student'}
+                      aria-busy={contactingIds.has(student.id) ? 'true' : 'false'}
                     >
                       <Mail className="w-4 h-4" />
                     </button>
@@ -857,8 +890,10 @@ export default function RecruiterDashboard() {
                   <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={() => contactStudent(student)}
-                      className="flex items-center justify-center text-sm text-white bg-purple-600 hover:bg-purple-700 px-3 py-2.5 rounded-xl transition-all font-medium shadow-lg hover:shadow-purple-500/50 hover:scale-105"
-                      title="Send email"
+                      disabled={contactingIds.has(student.id)}
+                      className={`flex items-center justify-center text-sm text-white px-3 py-2.5 rounded-xl transition-all font-medium shadow-lg ${contactingIds.has(student.id) ? 'bg-purple-600/60 opacity-70 pointer-events-none' : 'bg-purple-600 hover:bg-purple-700 hover:shadow-purple-500/50 hover:scale-105'}`}
+                      title={contactingIds.has(student.id) ? 'Contacting...' : 'Send email'}
+                      aria-busy={contactingIds.has(student.id) ? 'true' : 'false'}
                     >
                       <Mail className="w-4 h-4" />
                     </button>

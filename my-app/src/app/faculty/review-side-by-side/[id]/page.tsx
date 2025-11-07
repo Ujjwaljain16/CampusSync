@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
 
 type Document = {
   id: string;
@@ -36,7 +37,8 @@ export default function SideBySideReviewPage() {
     if (documentId) {
       loadDocument();
     }
-  }, [documentId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId]); // loadDocument is stable and only depends on documentId which is in deps
 
   const loadDocument = async () => {
     try {
@@ -163,9 +165,11 @@ export default function SideBySideReviewPage() {
                       title="Document Preview"
                     />
                   ) : (
-                    <img
+                    <Image
                       src={document.file_url}
                       alt="Document Preview"
+                      width={800}
+                      height={1000}
                       className="w-full h-auto max-h-full object-contain"
                     />
                   )}
@@ -305,7 +309,7 @@ export default function SideBySideReviewPage() {
                   onClick={handleApprove}
                   className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
                 >
-                  ✓ Approve
+                  Approve
                 </button>
                 <button
                   onClick={handleSendBack}
@@ -317,7 +321,7 @@ export default function SideBySideReviewPage() {
                   onClick={handleReject}
                   className="flex-1 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
                 >
-                  ✗ Reject
+                  Reject
                 </button>
               </div>
             </div>

@@ -45,15 +45,20 @@ export default function FacultyHistoryPage() {
     setError(null);
     try {
       const response = await fetch(`/api/certificates/approval-history?page=${page}&limit=20`);
-      const data = await response.json();
+      const json = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch approval history');
+        throw new Error(json.error || 'Failed to fetch approval history');
       }
       
-      setApprovals(data.data.approvals);
-      setPagination(data.data.pagination);
+      console.log('[Faculty History] API Response:', json);
+      console.log('[Faculty History] Approvals:', json.data?.approvals);
+      console.log('[Faculty History] Pagination:', json.data?.pagination);
+      
+      setApprovals(json.data?.approvals || []);
+      setPagination(json.data?.pagination || { page: 1, limit: 20, total: 0, totalPages: 0 });
     } catch (err: unknown) {
+      console.error('[Faculty History] Error:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch history');
     } finally {
       setLoading(false);
