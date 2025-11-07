@@ -20,6 +20,26 @@ export {
   isValidUUID,
 } from './utils/validation'
 
+// Organization utilities
+export {
+  getOrganizationContext,
+  getRequestedOrgId,
+  getUserAccessibleOrganizations,
+  isSuperAdmin,
+  isOrgAdmin,
+  isRecruiterContext,
+  getTargetOrganizationIds,
+} from './utils/organization'
+export type { OrganizationContext, RecruiterContext } from './utils/organization'
+
+// Recruiter utilities
+export {
+  getRecruiterContext,
+  getRecruiterOrganizations,
+  hasRecruiterAccess,
+  getRequestedOrgId as getRecruiterRequestedOrgId,
+} from './utils/recruiter'
+
 // Authentication middleware
 export { withAuth, withRole } from './middleware/auth'
 export type { ApiHandler, ApiHandlerWithRole } from './middleware/auth'

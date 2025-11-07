@@ -93,8 +93,14 @@ export function withRole(
         role: auth.role || 'student' 
       })
     } catch (err) {
+      // If the error is already a Response (from apiError.throw), return it
+      if (err instanceof Response) {
+        return err
+      }
+      
       console.error('[withRole] Error:', err)
-      return apiError.internal('Authorization error')
+      const errorMessage = err instanceof Error ? err.message : String(err)
+      return apiError.internal('Authorization error: ' + errorMessage)
     }
   }
 }

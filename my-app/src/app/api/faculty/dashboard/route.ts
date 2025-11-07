@@ -1,8 +1,13 @@
-import { withRole, success } from '@/lib/api';
+import { withRole, success, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { logger } from '@/lib/logger';
 
 export const GET = withRole(['faculty'], async (_req, { user }) => {
   const supabase = await createSupabaseServerClient();
+
+  // Get organization context for multi-tenancy
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
 
   // Get pending documents for review (handle missing table gracefully)
   let pendingDocs: unknown[] = [];
@@ -18,13 +23,14 @@ export const GET = withRole(['faculty'], async (_req, { user }) => {
         )
       `)
       .eq('status', 'pending')
+      .in('organization_id', targetOrgIds) // Multi-org filter
       .order('created_at', { ascending: false });
 
     if (!pendingError && data) {
       pendingDocs = data;
     }
-  } catch {
-    console.log('⚠️ Documents table not accessible, using empty array');
+  } catch (error) {
+    logger.warn('Documents table not accessible', { error: String(error) });
   }
 
   // Get recent approvals (handle missing table gracefully)
@@ -40,15 +46,16 @@ export const GET = withRole(['faculty'], async (_req, { user }) => {
         )
       `)
       .eq('action', 'approved')
-      .eq('actor_id', user.id)
+      .eq('user_id', user.id)
+      .in('organization_id', targetOrgIds) // Multi-org filter
       .order('created_at', { ascending: false })
       .limit(10);
 
     if (!approvalError && data) {
       recentApprovals = data;
     }
-  } catch {
-    console.log('⚠️ Audit logs table not accessible, using empty array');
+  } catch (error) {
+    logger.warn('Audit logs table not accessible', { error: String(error) });
   }
 
   // Get analytics (handle missing table gracefully)
@@ -63,8 +70,8 @@ export const GET = withRole(['faculty'], async (_req, { user }) => {
     if (!analyticsError && data) {
       analytics = data;
     }
-  } catch {
-    console.log('⚠️ Verification metrics table not accessible, using empty array');
+  } catch (error) {
+    logger.warn('Verification metrics table not accessible', { error: String(error) });
   }
 
   return success({
@@ -84,3 +91,5 @@ export const GET = withRole(['faculty'], async (_req, { user }) => {
     }
   });
 });
+
+

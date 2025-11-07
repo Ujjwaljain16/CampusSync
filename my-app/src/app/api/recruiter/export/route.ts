@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { withRole, success, apiError } from '@/lib/api';
+import { withRole, success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
 
 export const POST = withRole(['recruiter', 'admin'], async (req: NextRequest, { user }) => {
   const body = await req.json() as {
@@ -20,11 +21,17 @@ export const POST = withRole(['recruiter', 'admin'], async (req: NextRequest, { 
 
   const supabase = await createSupabaseServerClient();
   
-  // Get student profiles
+  // Get organization context for multi-tenancy
+  const requestedOrgId = getRequestedOrgId(req);
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+  
+  // Get student profiles (filtered by organization)
   const { data: students, error: studentsError } = await supabase
     .from('profiles')
     .select('id, full_name, email, created_at')
-    .in('id', body.studentIds);
+    .in('id', body.studentIds)
+    .in('organization_id', targetOrgIds); // Multi-org filter
 
   if (studentsError) {
     throw apiError.internal(studentsError.message);
@@ -40,7 +47,8 @@ export const POST = withRole(['recruiter', 'admin'], async (req: NextRequest, { 
         id, title, institution, date_issued, verification_status,
         confidence_score, student_id, created_at
       `)
-      .in('student_id', body.studentIds);
+      .in('student_id', body.studentIds)
+      .in('organization_id', targetOrgIds); // Multi-org filter
 
     if (certError) {
       console.error('Error fetching certificates:', certError);
@@ -72,8 +80,12 @@ export const POST = withRole(['recruiter', 'admin'], async (req: NextRequest, { 
   }
 
   // Log the export action
+  const targetOrgId = requestedOrgId || 
+    ('organizationId' in orgContext ? orgContext.organizationId : null) || 
+    ('organizationIds' in orgContext && Array.isArray(orgContext.organizationIds) ? orgContext.organizationIds[0] : null) || null;
   await supabase.from('audit_logs').insert({
     user_id: user.id,
+    organization_id: targetOrgId, // Multi-org field
     action: 'data_export',
     target_id: body.studentIds.join(','),
     details: {

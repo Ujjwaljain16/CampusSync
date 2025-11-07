@@ -1,14 +1,19 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { withRole, success, apiError } from '@/lib/api';
+import { withRole, success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
 
-export const GET = withRole(['recruiter', 'admin'], async (_req: NextRequest, { user }) => {
+export const GET = withRole(['recruiter', 'admin'], async (req: NextRequest, { user }) => {
   const supabase = await createSupabaseServerClient();
+  const requestedOrgId = getRequestedOrgId(req);
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
   
   const { data: searches, error } = await supabase
     .from('saved_searches')
     .select('*')
     .eq('user_id', user.id)
+    .in('organization_id', targetOrgIds) // Multi-org filter
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -41,11 +46,17 @@ export const POST = withRole(['recruiter', 'admin'], async (req: NextRequest, { 
   }
 
   const supabase = await createSupabaseServerClient();
+  const requestedOrgId = getRequestedOrgId(req);
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  const targetOrgId = requestedOrgId || 
+    ('organizationId' in orgContext ? orgContext.organizationId : null) || 
+    ('organizationIds' in orgContext && Array.isArray(orgContext.organizationIds) ? orgContext.organizationIds[0] : null) || null;
   
   const { data, error } = await supabase
     .from('saved_searches')
     .insert({
       user_id: user.id,
+      organization_id: targetOrgId, // Multi-org field
       name: body.name,
       description: body.description || null,
       search_filters: body.filters,
@@ -63,6 +74,7 @@ export const POST = withRole(['recruiter', 'admin'], async (req: NextRequest, { 
   // Log the creation
   await supabase.from('audit_logs').insert({
     user_id: user.id,
+    organization_id: targetOrgId, // Multi-org field
     action: 'create_saved_search',
     target_id: data.id,
     details: {

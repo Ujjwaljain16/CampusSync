@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { withRole, success, apiError } from '@/lib/api';
+import { withRole, success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
 
 export const POST = withRole(['recruiter', 'admin'], async (request: NextRequest, { user }) => {
   const body = await request.json() as {
@@ -19,13 +20,24 @@ export const POST = withRole(['recruiter', 'admin'], async (request: NextRequest
   const { student_ids, action } = body;
 
   const supabase = await createSupabaseServerClient();
+  
+  // Get requested organization from header
+  const requestedOrgId = getRequestedOrgId(request);
+  
+  // Get organization context for multi-tenancy (handles recruiter multi-org)
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  
+  // Get target org IDs
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+  
   const newStatus = action === 'verify' ? 'verified' : 'rejected';
 
-  // Update all certificates for the selected students
+  // Update all certificates for the selected students (filtered by accessible organizations)
   const { data: certificates, error: fetchError } = await supabase
     .from('certificates')
-    .select('id, student_id, title, verification_status')
-    .in('student_id', student_ids);
+    .select('id, student_id, title, verification_status, organization_id')
+    .in('student_id', student_ids)
+    .in('organization_id', targetOrgIds); // Multi-org filter for recruiter access
 
   if (fetchError) {
     console.error('Error fetching certificates:', fetchError);
@@ -39,11 +51,12 @@ export const POST = withRole(['recruiter', 'admin'], async (request: NextRequest
   // Update certificate statuses
   const { error: updateError } = await supabase
     .from('certificates')
-    .update({ 
+    .update({
       verification_status: newStatus,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     })
-    .in('id', certificates.map(c => c.id));
+    .in('id', certificates.map(c => c.id))
+    .in('organization_id', targetOrgIds); // Multi-org filter for recruiter access
 
   if (updateError) {
     console.error('Error updating certificates:', updateError);
@@ -53,6 +66,7 @@ export const POST = withRole(['recruiter', 'admin'], async (request: NextRequest
   // Create audit logs for the bulk action (align with existing schema)
   const auditLogs = certificates.map(cert => ({
     user_id: user.id,
+    organization_id: cert.organization_id, // Use cert's org for audit log
     action: `bulk_${action}`,
     target_id: cert.id,
     details: {

@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server';
-import { withRole, success, apiError } from '@/lib/api';
+import { withRole, success, apiError, getOrganizationContext, type RecruiterContext } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
 
-export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest) => {
+export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest, { user }) => {
 
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '1');
@@ -15,11 +16,32 @@ export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest)
     const supabase = await createSupabaseServerClient();
     const offset = (page - 1) * limit;
 
-    // Fetch student user_ids from user_roles
+    // Get requested organization from header
+    const requestedOrgId = getRequestedOrgId(request);
+
+    // Get organization context for multi-tenancy (handles recruiter multi-org)
+    const orgContext = await getOrganizationContext(user, requestedOrgId);
+    
+    // Determine which organization IDs to query
+    let targetOrgIds: string[] = [];
+    
+    if ('isRecruiter' in orgContext && orgContext.isRecruiter) {
+      const recruiterContext = orgContext as RecruiterContext;
+      // Recruiter: use selected org or all accessible orgs
+      targetOrgIds = recruiterContext.selectedOrganization 
+        ? [recruiterContext.selectedOrganization]
+        : recruiterContext.accessibleOrganizations;
+    } else {
+      // Regular user: use their organization
+      targetOrgIds = [orgContext.organizationId];
+    }
+
+    // Fetch student user_ids from user_roles (filtered by accessible organizations)
     const { data: studentRoleRows, error: roleErr } = await supabase
       .from('user_roles')
       .select('user_id')
-      .eq('role', 'student');
+      .eq('role', 'student')
+      .in('organization_id', targetOrgIds);
 
     if (roleErr) {
       console.error('Error fetching student roles:', roleErr);
@@ -34,7 +56,7 @@ export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest)
       });
     }
 
-    // First get certificates for students
+    // First get certificates for students (filtered by accessible organizations)
     let query = supabase
       .from('certificates')
       .select(`
@@ -46,9 +68,11 @@ export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest)
         confidence_score,
         verification_method,
         student_id,
-        created_at
+        created_at,
+        organization_id
       `)
-      .in('student_id', studentIds);
+      .in('student_id', studentIds)
+      .in('organization_id', targetOrgIds); // Multi-org filter for recruiter access
 
     // Apply filters
     if (search) {
@@ -182,11 +206,12 @@ export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest)
     );
   }
 
-    // Get total count for pagination
+    // Get total count for pagination (filtered by accessible organizations)
   const { count } = await supabase
     .from('certificates')
     .select('*', { count: 'exact', head: true })
-    .in('student_id', studentIds);
+    .in('student_id', studentIds)
+    .in('organization_id', targetOrgIds);
 
   return success({
     students,

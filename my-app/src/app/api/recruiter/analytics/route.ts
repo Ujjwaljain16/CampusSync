@@ -1,58 +1,74 @@
-import { withRole, success } from '@/lib/api';
+import { withRole, success, getOrganizationContext, type RecruiterContext } from '@/lib/api';
 import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
 
-export const GET = withRole(['recruiter', 'admin'], async (_req, { user }) => {
+export const GET = withRole(['recruiter', 'admin'], async (req, { user }) => {
   // Use admin client to bypass RLS for reading student data
-  const adminSupabase = createSupabaseAdminClient();
+  const adminSupabase = await createSupabaseAdminClient();
   const supabase = await createSupabaseServerClient();
 
-  // Get all user_ids from user_roles (as in search-students logic)
-  const { data: userRoles, error: userRolesError } = await adminSupabase
+  // Get requested organization from header
+  const requestedOrgId = getRequestedOrgId(req);
+
+  // Get organization context for multi-tenancy (handles recruiter multi-org)
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  
+  // Determine which organization IDs to query
+  let targetOrgIds: string[] = [];
+  
+  if ('isRecruiter' in orgContext && orgContext.isRecruiter) {
+    const recruiterContext = orgContext as RecruiterContext;
+    // Recruiter: use selected org or all accessible orgs
+    targetOrgIds = recruiterContext.selectedOrganization 
+      ? [recruiterContext.selectedOrganization]
+      : recruiterContext.accessibleOrganizations;
+  } else {
+    // Regular user: use their organization
+    targetOrgIds = [orgContext.organizationId];
+  }
+
+  // Get all APPROVED students from user_roles (filtered by accessible organizations)
+  const { data: userRoles } = await adminSupabase
     .from('user_roles')
     .select('user_id')
-    .eq('role', 'student');
+    .eq('role', 'student')
+    .eq('approval_status', 'approved')
+    .in('organization_id', targetOrgIds); // Multi-org filter
 
-  const userIds = (userRoles || []).map(r => r.user_id);
+  // Total students = ALL approved students (with or without certificates)
+  const totalStudents = (userRoles || []).length;
 
-  // Get unique student_ids who have at least one verified certificate
-  const { data: verifiedCerts, error: verifiedCertsError } = await adminSupabase
-    .from('certificates')
-    .select('student_id')
-    .eq('verification_status', 'verified');
-
-  const verifiedStudentIds = new Set((verifiedCerts || []).map(c => c.student_id));
-
-  // Only count students who are in both lists (user_id in user_roles, student_id in certificates)
-  const totalStudents = userIds.filter(id => verifiedStudentIds.has(id)).length;
-
-    // Get certification counts by status (use admin client)
+    // Get certification counts by status (filtered by org)
     const { data: statusCounts } = await adminSupabase
       .from('certificates')
       .select('verification_status')
-      .in('verification_status', ['verified', 'pending', 'rejected']);
+      .in('verification_status', ['verified', 'pending', 'rejected'])
+      .in('organization_id', targetOrgIds); // Multi-org filter
 
-    const verifiedCount = statusCounts?.filter(c => c.verification_status === 'verified').length || 0;
-    const pendingCount = statusCounts?.filter(c => c.verification_status === 'pending').length || 0;
-    const rejectedCount = statusCounts?.filter(c => c.verification_status === 'rejected').length || 0;
+    const verifiedCount = statusCounts?.filter((c: { verification_status: string }) => c.verification_status === 'verified').length || 0;
+    const pendingCount = statusCounts?.filter((c: { verification_status: string }) => c.verification_status === 'pending').length || 0;
+    const rejectedCount = statusCounts?.filter((c: { verification_status: string }) => c.verification_status === 'rejected').length || 0;
 
-  // Get average confidence score (use admin client)
+  // Get average confidence score (filtered by org)
   const { data: confidenceData } = await adminSupabase
     .from('certificates')
     .select('confidence_score')
-    .not('confidence_score', 'is', null);
+    .not('confidence_score', 'is', null)
+    .in('organization_id', targetOrgIds); // Multi-org filter
 
   const averageConfidence = (confidenceData && confidenceData.length > 0)
-    ? confidenceData.reduce((sum, cert) => sum + (cert.confidence_score || 0), 0) / confidenceData.length
+    ? confidenceData.reduce((sum: number, cert: { confidence_score?: number }) => sum + (cert.confidence_score || 0), 0) / confidenceData.length
     : 0;
 
-    // Get top skills (extracted from certificate titles) - use admin client
+    // Get top skills (extracted from certificate titles) - filtered by org
     const { data: certificates } = await adminSupabase
       .from('certificates')
       .select('title, issuer')
-      .eq('verification_status', 'verified');
+      .eq('verification_status', 'verified')
+      .in('organization_id', targetOrgIds); // Multi-org filter
 
     const skillCounts = new Map<string, number>();
-    certificates?.forEach(cert => {
+    certificates?.forEach((cert: { title: string; issuer: string }) => {
       // Simple skill extraction - in production, you'd have a proper skills table
       const title = cert.title.toLowerCase();
       const issuer = cert.issuer.toLowerCase();
@@ -75,7 +91,7 @@ export const GET = withRole(['recruiter', 'admin'], async (_req, { user }) => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-  // Get top universities - use admin client
+  // Get top universities - filtered by org
   const { data: universityData } = await adminSupabase
     .from('user_roles')
     .select(`
@@ -83,7 +99,8 @@ export const GET = withRole(['recruiter', 'admin'], async (_req, { user }) => {
         university
       )
     `)
-    .eq('role', 'student');
+    .eq('role', 'student')
+    .in('organization_id', targetOrgIds); // Multi-org filter
 
   const universityCounts = new Map<string, number>();
   universityData?.forEach((item: Record<string, unknown>) => {
@@ -99,7 +116,7 @@ export const GET = withRole(['recruiter', 'admin'], async (_req, { user }) => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // Get daily activity for the last 30 days - use admin client
+    // Get daily activity for the last 30 days - filtered by org
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -107,10 +124,11 @@ export const GET = withRole(['recruiter', 'admin'], async (_req, { user }) => {
       .from('certificates')
       .select('created_at')
       .gte('created_at', thirtyDaysAgo.toISOString())
+      .in('organization_id', targetOrgIds) // Multi-org filter
       .order('created_at', { ascending: true });
 
     const activityMap = new Map<string, number>();
-    dailyActivity?.forEach(cert => {
+    dailyActivity?.forEach((cert: { created_at: string }) => {
       const date = new Date(cert.created_at).toISOString().split('T')[0];
       activityMap.set(date, (activityMap.get(date) || 0) + 1);
     });

@@ -82,8 +82,22 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json({ error: userError?.message || 'Not authenticated' }, { status: 401 });
 		}
 
+		// Get organization context for multi-tenancy
+		let organizationId: string | null = null;
+		try {
+			const { data: userRole } = await supabase
+				.from('user_roles')
+				.select('organization_id')
+				.eq('user_id', user.id)
+				.single();
+			organizationId = userRole?.organization_id || null;
+		} catch {
+			// If no organization found, will be assigned later by trigger
+		}
+
 		// Build payload using best-effort columns
 		const payload: Record<string, unknown> = { id: user.id, full_name: full_name.trim(), role: 'student' };
+		if (organizationId) payload.organization_id = organizationId; // Multi-org support
 		if (university) payload.university = String(university);
 		if (graduation_year) payload.graduation_year = Number(graduation_year);
 		if (major) payload.major = String(major);

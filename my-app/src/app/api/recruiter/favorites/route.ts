@@ -1,21 +1,32 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
-import { success, apiError } from '@/lib/api';
+import { success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
 
-// GET: Fetch all favorites for current recruiter
-export async function GET() {
-  const { user, role } = await getServerUserWithRole();
+// GET: Fetch all favorites for current recruiter (org-scoped)
+export async function GET(req: NextRequest) {
+  const userWithRole = await getServerUserWithRole();
   
-  if (!user || (role !== 'recruiter' && role !== 'admin')) {
+  if (!userWithRole) {
+    throw apiError.unauthorized();
+  }
+  
+  const { user, role } = userWithRole;
+  
+  if (role !== 'recruiter' && role !== 'admin') {
     throw apiError.unauthorized();
   }
 
-  const supabase = createSupabaseAdminClient();
+  const supabase = await createSupabaseAdminClient();
+  const requestedOrgId = getRequestedOrgId(req);
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
   
   const { data, error} = await supabase
     .from('recruiter_favorites')
     .select('student_id, created_at')
     .eq('recruiter_id', user.id)
+    .in('organization_id', targetOrgIds) // Multi-org filter
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -25,15 +36,21 @@ export async function GET() {
 
   // Return array of student IDs
   return success({
-    favorites: data?.map(f => f.student_id) || []
+    favorites: data?.map((f: { student_id: string }) => f.student_id) || []
   });
 }
 
-// POST: Add a student to favorites
+// POST: Add a student to favorites (org-scoped)
 export async function POST(req: NextRequest) {
-  const { user, role } = await getServerUserWithRole();
+  const userWithRole = await getServerUserWithRole();
   
-  if (!user || (role !== 'recruiter' && role !== 'admin')) {
+  if (!userWithRole) {
+    throw apiError.unauthorized();
+  }
+  
+  const { user, role } = userWithRole;
+  
+  if (role !== 'recruiter' && role !== 'admin') {
     throw apiError.unauthorized();
   }
 
@@ -43,15 +60,19 @@ export async function POST(req: NextRequest) {
     throw apiError.badRequest('Student ID required');
   }
 
-  const supabase = createSupabaseAdminClient();
+  const supabase = await createSupabaseAdminClient();
+  const requestedOrgId = getRequestedOrgId(req);
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+  const targetOrgId = requestedOrgId || ('organizationId' in orgContext ? orgContext.organizationId : targetOrgIds[0]);
   
-  // Insert favorite (will fail if already exists due to unique constraint)
-  
+  // Insert favorite with organization (will fail if already exists due to unique constraint)
   const { data, error } = await supabase
     .from('recruiter_favorites')
     .insert({
       recruiter_id: user.id,
-      student_id: studentId
+      student_id: studentId,
+      organization_id: targetOrgId // Multi-org field
     })
     .select()
     .single();
@@ -74,11 +95,17 @@ export async function POST(req: NextRequest) {
   });
 }
 
-// DELETE: Remove a student from favorites
+// DELETE: Remove a student from favorites (org-scoped)
 export async function DELETE(req: NextRequest) {
-  const { user, role } = await getServerUserWithRole();
+  const userWithRole = await getServerUserWithRole();
   
-  if (!user || (role !== 'recruiter' && role !== 'admin')) {
+  if (!userWithRole) {
+    throw apiError.unauthorized();
+  }
+  
+  const { user, role } = userWithRole;
+  
+  if (role !== 'recruiter' && role !== 'admin') {
     throw apiError.unauthorized();
   }
 
@@ -89,13 +116,17 @@ export async function DELETE(req: NextRequest) {
     throw apiError.badRequest('Student ID required');
   }
 
-  const supabase = createSupabaseAdminClient();
+  const supabase = await createSupabaseAdminClient();
+  const requestedOrgId = getRequestedOrgId(req);
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
   
   const { error } = await supabase
     .from('recruiter_favorites')
     .delete()
     .eq('recruiter_id', user.id)
-    .eq('student_id', studentId);
+    .eq('student_id', studentId)
+    .in('organization_id', targetOrgIds); // Multi-org filter
 
   if (error) {
     console.error('Error removing favorite:', error);
@@ -104,3 +135,4 @@ export async function DELETE(req: NextRequest) {
 
   return success({ message: 'Removed from favorites' });
 }
+

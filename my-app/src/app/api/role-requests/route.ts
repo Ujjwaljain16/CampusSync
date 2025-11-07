@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { withAuth, success, apiError, parseAndValidateBody } from '@/lib/api';
+import { withAuth, success, apiError, parseAndValidateBody, getOrganizationContext } from '@/lib/api';
 
 const ALLOWED_ROLES = ['recruiter', 'faculty', 'admin'] as const;
 
@@ -11,6 +11,9 @@ interface RoleRequestBody {
 
 export const POST = withAuth(async (req: NextRequest, { user }) => {
 	const supabase = await createSupabaseServerClient();
+	
+	// Get organization context for multi-tenancy
+	const orgContext = await getOrganizationContext(user);
 	
 	const result = await parseAndValidateBody<RoleRequestBody>(req, ['requested_role']);
 	if (result.error) return result.error;
@@ -24,7 +27,8 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 	const { error } = await supabase
 		.from('role_requests')
 		.insert({ 
-			user_id: user.id, 
+			user_id: user.id,
+			organization_id: 'organizationId' in orgContext ? orgContext.organizationId : null, // Multi-org support
 			requested_role, 
 			metadata: metadata || {} 
 		});

@@ -1,24 +1,35 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
-import { success, apiError } from '@/lib/api';
+import { success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
 
 // GET: Fetch contact history for current recruiter
 export async function GET(req: NextRequest) {
-  const { user, role } = await getServerUserWithRole();
+  const userWithRole = await getServerUserWithRole();
   
-  if (!user || (role !== 'recruiter' && role !== 'admin')) {
+  if (!userWithRole) {
+    throw apiError.unauthorized();
+  }
+  
+  const { user, role } = userWithRole;
+  
+  if (role !== 'recruiter' && role !== 'admin') {
     throw apiError.unauthorized();
   }
 
     const { searchParams } = new URL(req.url);
     const studentId = searchParams.get('studentId');
 
-    const supabase = createSupabaseAdminClient();
+    const supabase = await createSupabaseAdminClient();
+    const requestedOrgId = getRequestedOrgId(req);
+    const orgContext = await getOrganizationContext(user, requestedOrgId);
+    const targetOrgIds = getTargetOrganizationIds(orgContext);
     
     let query = supabase
       .from('recruiter_contacts')
       .select('*')
       .eq('recruiter_id', user.id)
+      .in('organization_id', targetOrgIds)
       .order('contacted_at', { ascending: false });
 
     // Filter by student if provided
@@ -38,9 +49,15 @@ export async function GET(req: NextRequest) {
 
 // POST: Log a new contact attempt
 export async function POST(req: NextRequest) {
-  const { user, role } = await getServerUserWithRole();
+  const userWithRole = await getServerUserWithRole();
   
-  if (!user || (role !== 'recruiter' && role !== 'admin')) {
+  if (!userWithRole) {
+    throw apiError.unauthorized();
+  }
+  
+  const { user, role } = userWithRole;
+  
+  if (role !== 'recruiter' && role !== 'admin') {
     throw apiError.unauthorized();
   }
 
@@ -53,24 +70,57 @@ export async function POST(req: NextRequest) {
   const validMethods = ['email', 'phone', 'linkedin', 'other'];
   const contactMethod = method && validMethods.includes(method) ? method : 'email';
 
-  const supabase = createSupabaseAdminClient();
+  const supabase = await createSupabaseAdminClient();
+  const requestedOrgId = getRequestedOrgId(req);
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+  const targetOrgId = requestedOrgId || ('organizationId' in orgContext ? orgContext.organizationId : targetOrgIds[0]);
     
-    // Insert contact log
-  const { data, error } = await supabase
-    .from('recruiter_contacts')
-    .insert({
-      recruiter_id: user.id,
-      student_id: studentId,
-      method: contactMethod,
-      notes: notes || null,
-      contacted_at: new Date().toISOString()
-    })
-    .select()
-    .single();
+  // Prevent duplicate rapid clicks: if the same recruiter already logged a contact
+  // for the same student and method within the last 60 seconds, return that
+  // existing record instead of inserting a new one.
+  const recentThresholdMs = 60 * 1000; // 1 minute
+  const recentSince = new Date(Date.now() - recentThresholdMs).toISOString();
 
-  if (error) {
-    console.error('Error logging contact:', error);
-    throw apiError.internal('Failed to log contact');
+  const { data: recent, error: recentErr } = await supabase
+    .from('recruiter_contacts')
+    .select('*')
+    .eq('recruiter_id', user.id)
+    .eq('student_id', studentId)
+    .eq('method', contactMethod)
+    .gte('contacted_at', recentSince)
+    .order('contacted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (recentErr) {
+    console.error('Error checking recent contacts:', recentErr);
+    throw apiError.internal('Failed to check recent contacts');
+  }
+
+  let data = recent;
+
+  if (!recent) {
+    // Insert contact log
+    const { data: inserted, error } = await supabase
+      .from('recruiter_contacts')
+      .insert({
+        recruiter_id: user.id,
+        student_id: studentId,
+        organization_id: targetOrgId,
+        method: contactMethod,
+        notes: notes || null,
+        contacted_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error logging contact:', error);
+      throw apiError.internal('Failed to log contact');
+    }
+
+    data = inserted;
   }
 
   // Also update pipeline to 'contacted' if not already at a later stage
@@ -91,6 +141,7 @@ export async function POST(req: NextRequest) {
       .upsert({
         recruiter_id: user.id,
         student_id: studentId,
+        organization_id: targetOrgId,
         stage: 'contacted',
         updated_at: new Date().toISOString()
       }, {
@@ -106,9 +157,15 @@ export async function POST(req: NextRequest) {
 
 // PATCH: Mark contact as responded
 export async function PATCH(req: NextRequest) {
-  const { user, role } = await getServerUserWithRole();
+  const userWithRole = await getServerUserWithRole();
   
-  if (!user || (role !== 'recruiter' && role !== 'admin')) {
+  if (!userWithRole) {
+    throw apiError.unauthorized();
+  }
+  
+  const { user, role } = userWithRole;
+  
+  if (role !== 'recruiter' && role !== 'admin') {
     throw apiError.unauthorized();
   }
 
@@ -118,7 +175,7 @@ export async function PATCH(req: NextRequest) {
     throw apiError.badRequest('Contact ID required');
   }
 
-  const supabase = createSupabaseAdminClient();
+  const supabase = await createSupabaseAdminClient();
   
   const { data, error } = await supabase
     .from('recruiter_contacts')
@@ -141,3 +198,4 @@ export async function PATCH(req: NextRequest) {
     contact: data
   });
 }
+

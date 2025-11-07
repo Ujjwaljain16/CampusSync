@@ -1,6 +1,23 @@
+/**
+ * Verifiable Credential (VC) Verification Endpoint
+ * 
+ * Purpose: Cryptographically verifies W3C Verifiable Credentials using JWS signatures
+ * 
+ * Use Cases:
+ * - Verify VC authenticity using JWS (JSON Web Signature)
+ * - Validate VC structure and proof
+ * - Check VC revocation status in database
+ * 
+ * This is different from /verify-certificate which verifies database certificate records.
+ * 
+ * Supports 3 verification methods:
+ * 1. JWS Direct - Verify raw JWS string
+ * 2. VC Object - Verify complete VC with embedded proof
+ * 3. Credential ID - Lookup and verify VC from database
+ */
 import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { getIssuerJwk, verifyCredentialJws } from '../../../../../lib/vc';
+import { getIssuerJwk, verifyCredentialJws } from '@/lib/vc';
 import type { VerifiableCredential } from '@/types/index';
 import { success, apiError } from '@/lib/api';
 

@@ -1,23 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import { getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
 
 type PipelineStage = 'shortlisted' | 'contacted' | 'interviewed' | 'offered' | 'rejected';
 
-// GET: Fetch all pipeline entries for current recruiter
-export async function GET() {
+// GET: Fetch all pipeline entries for current recruiter (org-scoped)
+export async function GET(req: NextRequest) {
   try {
-    const { user, role } = await getServerUserWithRole();
+    const userWithRole = await getServerUserWithRole();
     
-    if (!user || (role !== 'recruiter' && role !== 'admin')) {
+    if (!userWithRole) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    
+    const { user, role } = userWithRole;
+    
+    if (role !== 'recruiter' && role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const supabase = createSupabaseAdminClient();
+    const supabase = await createSupabaseAdminClient();
+    const requestedOrgId = getRequestedOrgId(req);
+    const orgContext = await getOrganizationContext(user, requestedOrgId);
+    const targetOrgIds = getTargetOrganizationIds(orgContext);
     
     const { data, error } = await supabase
       .from('recruiter_pipeline')
       .select('student_id, stage, notes, updated_at')
       .eq('recruiter_id', user.id)
+      .in('organization_id', targetOrgIds) // Multi-org filter
       .order('updated_at', { ascending: false });
 
     if (error) {
@@ -27,7 +39,7 @@ export async function GET() {
 
     // Return as map: { studentId: stage }
     const pipeline: Record<string, PipelineStage> = {};
-    data?.forEach(entry => {
+    data?.forEach((entry: { student_id: string; stage: PipelineStage }) => {
       pipeline[entry.student_id] = entry.stage as PipelineStage;
     });
 
@@ -42,9 +54,15 @@ export async function GET() {
 // POST: Update pipeline stage for a student
 export async function POST(req: NextRequest) {
   try {
-    const { user, role } = await getServerUserWithRole();
+    const userWithRole = await getServerUserWithRole();
     
-    if (!user || (role !== 'recruiter' && role !== 'admin')) {
+    if (!userWithRole) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    
+    const { user, role } = userWithRole;
+    
+    if (role !== 'recruiter' && role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -59,14 +77,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid stage' }, { status: 400 });
     }
 
-    const supabase = createSupabaseAdminClient();
+    const supabase = await createSupabaseAdminClient();
+    const requestedOrgId = getRequestedOrgId(req);
+    const orgContext = await getOrganizationContext(user, requestedOrgId);
+    const targetOrgIds = getTargetOrganizationIds(orgContext);
+    const targetOrgId = requestedOrgId || ('organizationId' in orgContext ? orgContext.organizationId : targetOrgIds[0]);
     
-    // Upsert (insert or update)
+    // Upsert (insert or update) with organization
     const { data, error } = await supabase
       .from('recruiter_pipeline')
       .upsert({
         recruiter_id: user.id,
         student_id: studentId,
+        organization_id: targetOrgId, // Multi-org field
         stage,
         notes: notes || null,
         updated_at: new Date().toISOString()
@@ -95,9 +118,15 @@ export async function POST(req: NextRequest) {
 // DELETE: Remove a student from pipeline
 export async function DELETE(req: NextRequest) {
   try {
-    const { user, role } = await getServerUserWithRole();
+    const userWithRole = await getServerUserWithRole();
     
-    if (!user || (role !== 'recruiter' && role !== 'admin')) {
+    if (!userWithRole) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    
+    const { user, role } = userWithRole;
+    
+    if (role !== 'recruiter' && role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -108,13 +137,17 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Student ID required' }, { status: 400 });
     }
 
-    const supabase = createSupabaseAdminClient();
+    const supabase = await createSupabaseAdminClient();
+    const requestedOrgId = getRequestedOrgId(req);
+    const orgContext = await getOrganizationContext(user, requestedOrgId);
+    const targetOrgIds = getTargetOrganizationIds(orgContext);
     
     const { error } = await supabase
       .from('recruiter_pipeline')
       .delete()
       .eq('recruiter_id', user.id)
-      .eq('student_id', studentId);
+      .eq('student_id', studentId)
+      .in('organization_id', targetOrgIds); // Multi-org filter
 
     if (error) {
       console.error('Error removing from pipeline:', error);
@@ -128,3 +161,4 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
