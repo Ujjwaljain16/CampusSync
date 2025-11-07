@@ -34,11 +34,21 @@ const particles = [
 
 export default function SignupPage() {
 
-  const handleSignupComplete = (data: { role: string | null; email: string }) => {
-    // Redirect to email verification page
-    console.log('[SignupPage] Account created, redirecting to email verification');
-    const verifyUrl = `/signup/verify-email?email=${encodeURIComponent(data.email)}`;
-    window.location.href = verifyUrl;
+  const handleSignupComplete = (data: { role: string | null; email: string; shouldSignIn?: boolean; requiresEmailVerification?: boolean }) => {
+    // Check if this is an OAuth user or existing user who can sign in immediately
+    const isOAuthUser = new URLSearchParams(window.location.search).get('oauth') === 'true';
+    const shouldSignIn = data.shouldSignIn || isOAuthUser;
+    
+    if (shouldSignIn) {
+      // OAuth users or existing users - redirect to login
+      console.log('[SignupPage] OAuth/existing user, redirecting to login');
+      window.location.href = '/login';
+    } else {
+      // Email/password users - redirect to email verification page
+      console.log('[SignupPage] New email/password user, redirecting to email verification');
+      const verifyUrl = `/signup/verify-email?email=${encodeURIComponent(data.email)}`;
+      window.location.href = verifyUrl;
+    }
   };
 
   return (

@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Check, Sparkles, Zap, Award } from "lucide-react";
 import {
@@ -14,12 +15,25 @@ import {
 import { toast } from '@/components/ui/toast';
 
 export default function LoginPage() {
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetEmailSent, setResetEmailSent] = useState(false);
+
+  // Show success message if email was confirmed
+  useEffect(() => {
+    const message = searchParams?.get('message');
+    const errorMsg = searchParams?.get('error');
+    
+    if (message) {
+      toast.success(message);
+    } else if (errorMsg) {
+      toast.error(errorMsg);
+    }
+  }, [searchParams]);
 
   // Remove automatic redirect - let middleware handle it
   // This prevents infinite redirect loops

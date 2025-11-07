@@ -52,6 +52,9 @@ interface SignupData {
   // Recruiter specific
   companyName?: string;
   position?: string;
+  // Flow control
+  shouldSignIn?: boolean;
+  requiresEmailVerification?: boolean;
 }
 
 export default function MultiStepSignup({ onComplete }: { onComplete?: (data: SignupData) => void }) {
@@ -242,19 +245,57 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
       }
 
       // Account created successfully!
-      toast.success('Account created! Please check your email to verify.');
       setLoading(false);
       
-      // Show success message with email verification instructions
-      if (onComplete) {
-        console.log('[MultiStepSignup] Calling onComplete callback');
-        onComplete(data);
-        return;
+      // Check if this is an OAuth user or if account was already confirmed
+      const isOAuthUser = new URLSearchParams(window.location.search).get('oauth') === 'true';
+      const shouldSignInFromAPI = result.shouldSignIn === true;
+      const shouldSignIn = shouldSignInFromAPI || isOAuthUser;
+      
+      console.log('[MultiStepSignup] Response received:', {
+        shouldSignIn: result.shouldSignIn,
+        isNewUser: result.isNewUser,
+        requiresEmailVerification: result.requiresEmailVerification,
+        isOAuthUser,
+        shouldSignInFromAPI,
+        finalShouldSignIn: shouldSignIn
+      });
+      
+      if (shouldSignIn) {
+        // OAuth users or existing users - redirect to login/dashboard
+        toast.success('Account setup complete! Signing you in...');
+        console.log('[MultiStepSignup] OAuth user or existing account, redirecting to login');
+        
+        // If onComplete callback exists, call it with shouldSignIn flag
+        if (onComplete) {
+          console.log('[MultiStepSignup] Calling onComplete callback with shouldSignIn: true');
+          onComplete({ ...data, shouldSignIn: true, requiresEmailVerification: false });
+          return;
+        }
+        
+        // Otherwise redirect to login
+        console.log('[MultiStepSignup] Performing redirect to /login');
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 500); // Small delay to ensure logs and toast are visible
+        return; // Important: exit here
+      } else {
+        // Regular email/password users - need email verification
+        toast.success('Account created! Please check your email to verify.');
+        console.log('[MultiStepSignup] New email/password user, redirecting to verify email page');
+        
+        // If onComplete callback exists, call it with shouldSignIn flag
+        if (onComplete) {
+          console.log('[MultiStepSignup] Calling onComplete callback for email verification with shouldSignIn: false');
+          onComplete({ ...data, shouldSignIn: false, requiresEmailVerification: true });
+          return;
+        }
+        
+        console.log('[MultiStepSignup] Performing redirect to /signup/verify-email');
+        setTimeout(() => {
+          window.location.href = '/signup/verify-email?email=' + encodeURIComponent(data.email);
+        }, 500); // Small delay to ensure logs and toast are visible
       }
-
-      // Redirect to a "check your email" page or show message
-      console.log('[MultiStepSignup] Account created, redirecting to email verification notice');
-      window.location.href = '/signup/verify-email?email=' + encodeURIComponent(data.email);
     } catch (err) {
       console.error('[MultiStepSignup] Error during signup:', err);
       const errorMessage = err instanceof Error ? err.message : 'Signup failed';

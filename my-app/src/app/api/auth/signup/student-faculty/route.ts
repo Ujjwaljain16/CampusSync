@@ -89,6 +89,8 @@ export async function POST(request: NextRequest) {
 
     if (existingUser) {
       userId = existingUser.id;
+      const isOAuthUser = existingUser.app_metadata?.provider && existingUser.app_metadata.provider !== 'email';
+      const isEmailConfirmed = existingUser.email_confirmed_at != null;
       
       // Check ALL roles for this user
       const { data: existingRoles } = await adminClient
@@ -97,6 +99,7 @@ export async function POST(request: NextRequest) {
         .eq('user_id', userId);
 
       console.log('[STUDENT_FACULTY_SIGNUP] Existing roles:', existingRoles);
+      console.log('[STUDENT_FACULTY_SIGNUP] Is OAuth user:', isOAuthUser, 'Email confirmed:', isEmailConfirmed);
 
       // Check if user already has the correct role for this org
       const roleForThisOrg = existingRoles?.find(r => 
@@ -109,7 +112,9 @@ export async function POST(request: NextRequest) {
           success: true,
           userId,
           message: 'Account already exists. You can now sign in.',
-          shouldSignIn: true
+          shouldSignIn: true,
+          isOAuthUser,
+          isEmailConfirmed
         }, { status: 200 });
       }
 
@@ -165,22 +170,31 @@ export async function POST(request: NextRequest) {
       userId = authData.user.id;
       isNewUser = true;
 
-      // IMPORTANT: Admin API doesn't auto-send confirmation emails!
-      // Manually trigger the confirmation email
+      // IMPORTANT: When using admin.createUser() with email_confirm: false,
+      // Supabase creates the user but does NOT automatically send confirmation email.
+      // We need to trigger it manually using the regular (non-admin) client.
       try {
-        const { error: emailError } = await adminClient.auth.admin.inviteUserByEmail(email, {
-          redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://localhost:3000'}/login`
+        const { createClient } = await import('@supabase/supabase-js');
+        const regularClient = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+
+        // Trigger the confirmation email by attempting to sign in
+        // This will fail (user not confirmed) but will trigger the email resend
+        const { error: resendError } = await regularClient.auth.resend({
+          type: 'signup',
+          email: email,
         });
-        
-        if (emailError) {
-          console.error('[SIGNUP] Failed to send confirmation email:', emailError);
-          // Don't fail the signup - user can resend later
+
+        if (resendError) {
+          console.error('[SIGNUP] Failed to send confirmation email:', resendError);
+          console.log('[SIGNUP] Note: User created but confirmation email not sent.');
         } else {
-          console.log('[SIGNUP] Confirmation email sent to:', email);
+          console.log('[SIGNUP] ✅ Confirmation email sent successfully to:', email);
         }
       } catch (emailError) {
         console.error('[SIGNUP] Error sending confirmation email:', emailError);
-        // Don't fail the signup
       }
     }
 
@@ -251,18 +265,24 @@ export async function POST(request: NextRequest) {
       // Don't rollback - profile creation is not critical, can be completed later
     }
 
+    // Determine if user is OAuth (existing user) or email/password (new user)
     const successMessage = isNewUser 
-      ? 'Account created successfully! Signing you in...'
+      ? 'Account created successfully! Please verify your email.'
       : 'Account setup completed! Signing you in...';
 
-    return NextResponse.json({
+    const response = {
       success: true,
       userId,
       email,
       isNewUser,
       message: successMessage,
-      shouldSignIn: true
-    }, { status: isNewUser ? 201 : 200 });
+      shouldSignIn: !isNewUser, // OAuth users (existing) can sign in, new users need to verify email
+      requiresEmailVerification: isNewUser // Only new email/password users need verification
+    };
+
+    console.log('[STUDENT_FACULTY_SIGNUP] Returning response:', response);
+
+    return NextResponse.json(response, { status: isNewUser ? 201 : 200 });
 
   } catch (error: unknown) {
     console.error('[SIGNUP] Error:', error);

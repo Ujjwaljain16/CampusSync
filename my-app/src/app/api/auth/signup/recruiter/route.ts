@@ -127,23 +127,30 @@ export async function POST(request: NextRequest) {
       isNewUser = true;
       console.log('[RECRUITER_SIGNUP] Auth user created:', userId);
 
-      // IMPORTANT: Admin API doesn't auto-send confirmation emails!
-      // Manually trigger the confirmation email for new users only
+      // IMPORTANT: When using admin.createUser() with email_confirm: false,
+      // Supabase creates the user but does NOT automatically send confirmation email.
+      // We need to trigger it manually using the regular (non-admin) client.
       try {
-        console.log('[RECRUITER_SIGNUP] Sending confirmation email to:', email);
-        const { error: emailError } = await adminClient.auth.admin.inviteUserByEmail(email, {
-          redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/login`
+        const { createClient } = await import('@supabase/supabase-js');
+        const regularClient = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+
+        // Trigger the confirmation email
+        const { error: resendError } = await regularClient.auth.resend({
+          type: 'signup',
+          email: email,
         });
-        
-        if (emailError) {
-          console.error('[RECRUITER_SIGNUP] Failed to send confirmation email:', emailError);
-          // Don't fail the signup - user can resend later via /test-email
+
+        if (resendError) {
+          console.error('[RECRUITER_SIGNUP] Failed to send confirmation email:', resendError);
+          console.log('[RECRUITER_SIGNUP] Note: User created but confirmation email not sent.');
         } else {
-          console.log('[RECRUITER_SIGNUP] Confirmation email sent successfully to:', email);
+          console.log('[RECRUITER_SIGNUP] ✅ Confirmation email sent successfully to:', email);
         }
       } catch (emailError) {
         console.error('[RECRUITER_SIGNUP] Error sending confirmation email:', emailError);
-        // Don't fail the signup - user can resend later
       }
     }
 
@@ -191,7 +198,7 @@ export async function POST(request: NextRequest) {
 
     const successMessage = isNewUser 
       ? 'Recruiter account created! Please check your email to verify your account.'
-      : 'Account setup completed! Please check your email for verification if needed.';
+      : 'Account setup completed! Signing you in...';
 
     return NextResponse.json({
       success: true,
@@ -200,7 +207,8 @@ export async function POST(request: NextRequest) {
       email,
       isNewUser,
       message: successMessage,
-      requiresVerification: true // Flag to indicate email verification needed
+      shouldSignIn: !isNewUser, // OAuth users (existing) can sign in, new users need to verify email
+      requiresEmailVerification: isNewUser // Only new email/password users need verification
     }, { status: isNewUser ? 201 : 200 });
 
   } catch (error: unknown) {
