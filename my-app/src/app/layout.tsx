@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Inter, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { OrganizationProvider } from "@/contexts/OrganizationContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ToastProvider } from "@/components/ui/toast";
 
 // Font configurations
 const inter = Inter({
@@ -78,9 +80,13 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
       </head>
       <body className="antialiased font-sans min-h-screen">
-        <OrganizationProvider>
-          {children}
-        </OrganizationProvider>
+        <ErrorBoundary>
+          <ToastProvider>
+            <OrganizationProvider>
+              {children}
+            </OrganizationProvider>
+          </ToastProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );

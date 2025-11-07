@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle, Clock, AlertCircle, Eye, Trash2, User2, Edit3, Building, Calendar, GraduationCap, MapPin, ScrollText, Upload, Star, Zap, FileText } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
+import { toast } from '@/components/ui/toast';
 
 interface Row {
   id: string;
@@ -141,7 +142,9 @@ export default function StudentDashboard() {
         }
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Unexpected error');
+      const errorMsg = e instanceof Error ? e.message : 'Unexpected error';
+      toast.error(errorMsg);
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -185,12 +188,15 @@ export default function StudentDashboard() {
       setRows(prev => prev.filter(cert => cert.id !== certificateId));
       setRecentUploads(prev => prev.filter(cert => cert.id !== certificateId));
 
-      // Show success message briefly
+      // Show success message
+      toast.success(`Successfully deleted: ${certificateTitle}`);
       console.log(`[SUCCESS] Successfully deleted: ${certificateTitle}`);
 
     } catch (error) {
       console.error('[ERROR] Delete certificate error:', error);
-      setError(error instanceof Error ? error.message : 'Failed to delete certificate');
+      const errorMsg = error instanceof Error ? error.message : 'Failed to delete certificate';
+      toast.error(errorMsg);
+      setError(errorMsg);
       // Re-open modal on error so user can try again
       setDeleteConfirm({ show: true, certId: certificateId, certTitle: certificateTitle });
     } finally {
@@ -727,9 +733,12 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
         throw new Error(json?.error || 'Failed to save profile');
       }
 
+      toast.success('Profile updated successfully!');
       onSave();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save profile');
+      const errorMsg = e instanceof Error ? e.message : 'Failed to save profile';
+      toast.error(errorMsg);
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }

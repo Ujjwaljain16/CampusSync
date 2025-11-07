@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Shield, Users, UserCheck, UserX, RefreshCw, AlertCircle, BarChart3, Crown, Lock, LayoutDashboard, UserPlus } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
+import { toast } from '@/components/ui/toast';
 
 interface UserWithRole {
   user_id: string;
@@ -159,9 +160,12 @@ export default function AdminDashboardPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to remove role');
+      toast.success('Role Removed', 'User role has been removed');
       await fetchUsers();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Unexpected error');
+      const message = e instanceof Error ? e.message : 'Unexpected error';
+      setError(message);
+      toast.error('Role Removal Failed', message);
     } finally {
       setActioning(null);
     }

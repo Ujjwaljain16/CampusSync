@@ -90,5 +90,14 @@ export {
 // Navigation
 export { Tabs, TabsList, TabsTrigger, TabsContent } from './tabs'
 
+// Toast Notifications
+export {
+  ToastProvider,
+  useToast,
+  toast,
+  type ToastProps,
+  type ToastVariant,
+} from './toast'
+
 // User
 export { Avatar, AvatarImage, AvatarFallback } from './avatar'

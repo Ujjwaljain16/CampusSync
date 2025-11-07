@@ -17,6 +17,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { GraduationCap, Briefcase, UserCheck, Mail, Lock, User, Building2, Calendar, BookOpen, MapPin, Star, Eye, EyeOff, CheckCircle, ArrowRight, ArrowLeft, Sparkles, Shield } from 'lucide-react';
+import { toast } from '@/components/ui/toast';
 
 // Types
 interface Organization {
@@ -100,7 +101,9 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
       
       // For students/faculty, require org match
       if (data.role !== 'recruiter' && result.matches.length === 0) {
-        setError('Email domain not recognized. Please use your university email.');
+        const errorMsg = 'Email domain not recognized. Please use your university email.';
+        setError(errorMsg);
+        toast.error(errorMsg);
       }
       
       // For recruiters, any email is fine
@@ -108,7 +111,9 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
         setOrganizations([]);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Email validation failed');
+      const errorMsg = err instanceof Error ? err.message : 'Email validation failed';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setValidatingEmail(false);
     }
@@ -202,7 +207,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
       }
 
       // Account created successfully!
-      // User needs to verify email before they can sign in
+      toast.success('Account created! Please check your email to verify.');
       setLoading(false);
       
       // Show success message with email verification instructions
@@ -218,6 +223,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
     } catch (err) {
       console.error('[MultiStepSignup] Error during signup:', err);
       const errorMessage = err instanceof Error ? err.message : 'Signup failed';
+      toast.error(errorMessage);
       setError(errorMessage);
       setLoading(false);
     }

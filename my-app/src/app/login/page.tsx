@@ -11,6 +11,7 @@ import {
   CVButton,
   CVAlert,
 } from "@/components/ui";
+import { toast } from '@/components/ui/toast';
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -35,11 +36,10 @@ export default function LoginPage() {
 
   const handleForgotPassword = useCallback(async () => {
     if (!email) {
-      setError("Please enter your email address first");
+      toast.error("Please enter your email address first");
       return;
     }
 
-    setError(null);
     setLoading(true);
 
     try {
@@ -57,7 +57,7 @@ export default function LoginPage() {
       }
 
       if (!checkData.exists) {
-        setError("No account found with this email address");
+        toast.error("No account found with this email address");
         setLoading(false);
         return;
       }
@@ -71,12 +71,13 @@ export default function LoginPage() {
 
       setResetEmailSent(true);
       setError(null);
+      toast.success('Password reset email sent successfully!');
       
       // Log success for debugging
       console.log('Password reset email sent successfully to:', email.trim());
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to send reset email";
-      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -97,6 +98,7 @@ export default function LoginPage() {
       // Check if user was successfully authenticated
       if (data.user && data.session) {
         console.log('Login successful, user data:', data.user);
+        toast.success('Login successful! Redirecting...');
         
         // Establish session and get redirect target in one step (avoid duplicate setSession)
         const completeResp = await fetch('/api/auth/complete-login', {
@@ -119,6 +121,7 @@ export default function LoginPage() {
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
+      toast.error(message);
       setError(message);
     } finally {
       setLoading(false);

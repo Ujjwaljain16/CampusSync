@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
+import { toast } from '@/components/ui/toast';
 
 interface PendingCert {
   id: string;
@@ -297,11 +298,14 @@ export default function FacultyDashboardPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Batch approval failed');
       
+      toast.success('Batch Approved', `${selectedCerts.size} certificates approved successfully`);
       await fetchRows();
       await fetchAnalytics(); // Refresh analytics
       setSelectedCerts(new Set());
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Unexpected error');
+      const message = e instanceof Error ? e.message : 'Unexpected error';
+      setError(message);
+      toast.error('Batch Approval Failed', message);
     } finally {
       setBatchActioning(false);
     }
@@ -324,11 +328,14 @@ export default function FacultyDashboardPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Batch rejection failed');
       
+      toast.success('Batch Rejected', `${selectedCerts.size} certificates rejected`);
       await fetchRows();
       await fetchAnalytics(); // Refresh analytics
       setSelectedCerts(new Set());
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Unexpected error');
+      const message = e instanceof Error ? e.message : 'Unexpected error';
+      setError(message);
+      toast.error('Batch Rejection Failed', message);
     } finally {
       setBatchActioning(false);
     }

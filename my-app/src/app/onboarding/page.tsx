@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building, Calendar, GraduationCap, MapPin, Star, User2, ArrowRight } from "lucide-react";
+import { toast } from '@/components/ui/toast';
 
 export default function OnboardingPage() {
 	const router = useRouter();
@@ -35,9 +36,12 @@ export default function OnboardingPage() {
 				const js = await resp.json().catch(() => ({ error: undefined })) as { error?: string };
 				throw new Error(js?.error || 'Failed to save profile');
 			}
+			toast.success('Profile Complete!', 'Welcome to CampusSync');
 			router.replace('/dashboard');
 		} catch (e: unknown) {
-			setError(e instanceof Error ? e.message : 'Failed');
+			const message = e instanceof Error ? e.message : 'Failed';
+			setError(message);
+			toast.error('Profile Update Failed', message);
 		} finally {
 			setLoading(false);
 		}
