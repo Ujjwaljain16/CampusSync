@@ -1,0 +1,20 @@
+# Modern browsers that support ES6+ features
+# This reduces the need for legacy polyfills and transforms
+
+# Production browsers
+> 0.5%
+last 2 versions
+not dead
+not IE 11
+not op_mini all
+
+# Modern baseline - browsers that support:
+# - ES2020+ features
+# - Array.prototype.at, flat, flatMap
+# - Object.fromEntries, Object.hasOwn
+# - String.prototype.trimStart, trimEnd
+chrome >= 92
+edge >= 92
+firefox >= 90
+safari >= 15
+ios_saf >= 15
