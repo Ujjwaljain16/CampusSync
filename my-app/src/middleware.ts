@@ -7,7 +7,7 @@ export async function middleware(req: NextRequest) {
 	const isDev = process.env.NODE_ENV !== 'production';
 
 	// Perform runtime environment validation (only in production)
-	if (!isDev && !req.nextUrl.pathname.startsWith('/api/health')) {
+	if (!isDev && !req.nextUrl.pathname.startsWith('/api/health') && !req.nextUrl.pathname.startsWith('/api/ping-supabase')) {
 		try {
 			assertCriticalFeatures();
 		} catch (error) {
