@@ -128,7 +128,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
     const params = new URLSearchParams(window.location.search);
     const emailParam = params.get('email');
     const oauthParam = params.get('oauth');
-    
+
     if (emailParam && oauthParam === 'true') {
       const roleParam = params.get('role') as Role | null;
       // If role is present in query (e.g. role=recruiter) set it immediately
@@ -158,18 +158,18 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
   const selectRole = useCallback((role: Role) => {
     setData(prev => ({ ...prev, role }));
     setError(null);
-    
+
     // For OAuth users who came without a role, validate email now that role is selected
     const params = new URLSearchParams(window.location.search);
     const isOAuthUser = params.get('oauth') === 'true';
     const emailParam = params.get('email');
-    
+
     if (isOAuthUser && emailParam && (role === 'student' || role === 'faculty')) {
       // Validate email for student/faculty to check org match
       console.log('[selectRole] OAuth user selected student/faculty, validating email');
       validateEmail(emailParam, role);
     }
-    
+
     // Auto-advance to next step after brief delay
     setTimeout(() => setCurrentStep(2), 300);
   }, [validateEmail]);
@@ -191,7 +191,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
         validateEmail(data.email, data.role);
       }
     }
-    
+
     if (currentStep < 4) setCurrentStep((prev) => (prev + 1) as Step);
   }, [currentStep, data.role, data.email, organizations.length, validatingEmail, error, validateEmail]);
 
@@ -249,7 +249,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
       if (!res.ok) {
         // Format error messages for better UX
         let errorMessage = result.error || 'Signup failed';
-        
+
         // Handle duplicate email errors
         if (res.status === 409) {
           // Extract role from error message
@@ -257,7 +257,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
             errorMessage = `[WARNING] ${errorMessage}`;
           }
         }
-        
+
         // Handle validation errors
         if (res.status === 400) {
           if (errorMessage.includes('Missing required fields')) {
@@ -266,18 +266,18 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
             errorMessage = '[SECURITY] ' + errorMessage;
           }
         }
-        
+
         throw new Error(errorMessage);
       }
 
       // Account created successfully!
       setLoading(false);
-      
+
       // Check if this is an OAuth user or if account was already confirmed
       const isOAuthUser = new URLSearchParams(window.location.search).get('oauth') === 'true';
       const shouldSignInFromAPI = result.shouldSignIn === true;
       const shouldSignIn = shouldSignInFromAPI || isOAuthUser;
-      
+
       console.log('[MultiStepSignup] Response received:', {
         shouldSignIn: result.shouldSignIn,
         isNewUser: result.isNewUser,
@@ -286,19 +286,19 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
         shouldSignInFromAPI,
         finalShouldSignIn: shouldSignIn
       });
-      
+
       if (shouldSignIn) {
         // OAuth users or existing users - redirect to appropriate page
         toast.success('Account setup complete! Signing you in...');
         console.log('[MultiStepSignup] OAuth user or existing account, role:', data.role);
-        
+
         // If onComplete callback exists, call it with shouldSignIn flag
         if (onComplete) {
           console.log('[MultiStepSignup] Calling onComplete callback with shouldSignIn: true');
           onComplete({ ...data, shouldSignIn: true, requiresEmailVerification: false });
           return;
         }
-        
+
         // For recruiters, redirect to waiting page (pending approval)
         if (data.role === 'recruiter') {
           console.log('[MultiStepSignup] Recruiter OAuth signup, redirecting to waiting page');
@@ -317,14 +317,14 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
         // Regular email/password users - need email verification
         toast.success('Account created! Please check your email to verify.');
         console.log('[MultiStepSignup] New email/password user, redirecting to verify email page');
-        
+
         // If onComplete callback exists, call it with shouldSignIn flag
         if (onComplete) {
           console.log('[MultiStepSignup] Calling onComplete callback for email verification with shouldSignIn: false');
           onComplete({ ...data, shouldSignIn: false, requiresEmailVerification: true });
           return;
         }
-        
+
         console.log('[MultiStepSignup] Performing redirect to /signup/verify-email');
         setTimeout(() => {
           window.location.href = '/signup/verify-email?email=' + encodeURIComponent(data.email);
@@ -376,13 +376,12 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
             <React.Fragment key={step}>
               <div className="flex flex-col items-center">
                 <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 ${
-                    currentStep > step
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 ${currentStep > step
                       ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white'
                       : currentStep === step
-                      ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white'
-                      : 'bg-white/10 text-white/40 border border-white/20'
-                  }`}
+                        ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white'
+                        : 'bg-white/10 text-white/40 border border-white/20'
+                    }`}
                 >
                   {currentStep > step ? (
                     <CheckCircle className="w-5 h-5" />
@@ -399,9 +398,8 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
               </div>
               {step < 4 && (
                 <div
-                  className={`flex-1 h-0.5 mx-2 transition-all duration-300 ${
-                    currentStep > step ? 'bg-gradient-to-r from-emerald-500 to-teal-500' : 'bg-white/20'
-                  }`}
+                  className={`flex-1 h-0.5 mx-2 transition-all duration-300 ${currentStep > step ? 'bg-gradient-to-r from-emerald-500 to-teal-500' : 'bg-white/20'
+                    }`}
                 />
               )}
             </React.Fragment>
@@ -447,11 +445,10 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                 <button
                   key={role}
                   onClick={() => selectRole(role)}
-                  className={`group relative p-6 rounded-2xl border transition-all duration-300 hover:scale-105 ${
-                    data.role === role
+                  className={`group relative p-6 rounded-2xl border transition-all duration-300 hover:scale-105 ${data.role === role
                       ? 'bg-gradient-to-br ' + bgGradient + ' border-white/30'
                       : 'bg-white/5 border-white/10 hover:border-white/20'
-                  }`}
+                    }`}
                 >
                   <div
                     className={`w-14 h-14 mx-auto mb-4 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}
@@ -623,11 +620,10 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                           setData(prev => ({ ...prev, organization: org }));
                           setTimeout(nextStep, 300);
                         }}
-                        className={`w-full p-4 rounded-xl border transition-all duration-300 text-left ${
-                          data.organization?.id === org.id
+                        className={`w-full p-4 rounded-xl border transition-all duration-300 text-left ${data.organization?.id === org.id
                             ? 'bg-blue-500/10 border-blue-500/30'
                             : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-4">
                           <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-emerald-500 flex items-center justify-center flex-shrink-0">
@@ -703,7 +699,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                     </div>
                   </div>
                 </>
-              ) : (
+              ) : data.role === 'student' ? (
                 <>
                   {/* University */}
                   <div>
@@ -787,6 +783,12 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                     </div>
                   </div>
                 </>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-white/60">
+                    No additional details needed for your role. You can complete your profile later.
+                  </p>
+                </div>
               )}
             </div>
 

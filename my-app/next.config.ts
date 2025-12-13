@@ -20,17 +20,17 @@ const nextConfig: NextConfig = {
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
-          { 
-            key: 'Cross-Origin-Opener-Policy', 
-            value: 'same-origin' 
+          {
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin'
           },
-          { 
-            key: 'Cross-Origin-Embedder-Policy', 
-            value: 'require-corp' 
+          {
+            key: 'Cross-Origin-Embedder-Policy',
+            value: 'require-corp'
           },
-          { 
-            key: 'Cross-Origin-Resource-Policy', 
-            value: 'same-origin' 
+          {
+            key: 'Cross-Origin-Resource-Policy',
+            value: 'same-origin'
           },
           {
             key: 'Content-Security-Policy',
@@ -85,7 +85,7 @@ const nextConfig: NextConfig = {
   // MODERN JAVASCRIPT BUILD CONFIGURATION
   // =====================================================
   // Target modern browsers to reduce legacy polyfills
-  swcMinify: true,
+
   modularizeImports: {
     'lucide-react': {
       transform: 'lucide-react/dist/esm/icons/{{kebabCase member}}',
