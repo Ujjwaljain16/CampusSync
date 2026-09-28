@@ -1,6 +1,6 @@
 // Unified document revocation API
 import { NextRequest } from 'next/server';
-import { withAuth, success, apiError, parseAndValidateBody } from '@/lib/api';
+import { withAuth, withRole, success, apiError, parseAndValidateBody, isValidUUID, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 interface RevokeDocumentBody {
@@ -9,12 +9,28 @@ interface RevokeDocumentBody {
   revokedBy?: string;
 }
 
-export const POST = withAuth(async (req: NextRequest, { user }) => {
+export const POST = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], async (req: NextRequest, { user }) => {
   const result = await parseAndValidateBody<RevokeDocumentBody>(req, ['documentId', 'reason']);
   if (result.error) return result.error;
 
-  const { documentId, reason, revokedBy } = result.data;
+  const { documentId, reason } = result.data;
+  // Never trust a client-supplied "revokedBy"; attribute to the authenticated user
+  const revokedBy = user.id;
+  if (!isValidUUID(documentId) || typeof reason !== 'string' || reason.length > 1000) {
+    throw apiError.badRequest('Invalid documentId or reason');
+  }
   const supabase = await createSupabaseServerClient();
+
+  // Document must belong to the caller's organization
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+  const { data: target } = await supabase
+    .from('documents')
+    .select('id')
+    .eq('id', documentId)
+    .in('organization_id', targetOrgIds)
+    .maybeSingle();
+  if (!target) throw apiError.notFound('Document not found');
 
   // Update document verification status to revoked
   const { error: updateError } = await supabase
@@ -23,7 +39,8 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
       verification_status: 'revoked',
       updated_at: new Date().toISOString()
     })
-    .eq('id', documentId);
+    .eq('id', documentId)
+    .in('organization_id', targetOrgIds);
 
   if (updateError) {
     console.error('Document update error:', updateError);
@@ -68,31 +85,38 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
   }, 'Document revoked successfully');
 });
 
-export const GET = withAuth(async (req: NextRequest) => {
+export const GET = withAuth(async (req: NextRequest, { user }) => {
   const { searchParams } = new URL(req.url);
   const documentId = searchParams.get('documentId');
 
-  if (!documentId) {
-    throw apiError.badRequest('Document ID required');
+  if (!documentId || !isValidUUID(documentId)) {
+    throw apiError.badRequest('Valid document ID required');
   }
 
   const supabase = await createSupabaseServerClient();
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
 
   // Check if document is revoked
   const { data: document, error: docError } = await supabase
     .from('documents')
     .select(`
       id,
+      student_id,
       verification_status,
       document_metadata (
         verification_details
       )
     `)
     .eq('id', documentId)
+    .in('organization_id', targetOrgIds)
     .single();
 
   if (docError || !document) {
     throw apiError.notFound('Document not found');
+  }
+  if (orgContext.role === 'student' && document.student_id !== user.id) {
+    throw apiError.forbidden('You do not have permission to view this document');
   }
 
   const isRevoked = document.verification_status === 'revoked';

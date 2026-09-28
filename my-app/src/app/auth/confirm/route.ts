@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { safeRedirectPath } from '@/lib/safeRedirect';
 
 /**
  * Email Confirmation Handler
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const token_hash = searchParams.get('token_hash');
   const type = searchParams.get('type') as 'signup' | 'email_change' | null;
-  const next = searchParams.get('next') || '/login';
+  const next = safeRedirectPath(searchParams.get('next'), '/login');
 
   console.log('[AUTH_CONFIRM] Received confirmation request:', { type, hasToken: !!token_hash });
 

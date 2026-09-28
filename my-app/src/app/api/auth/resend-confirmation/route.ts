@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 /**
  * POST /api/auth/resend-confirmation
@@ -8,11 +9,15 @@ import { createSupabaseAdminClient } from '@/lib/supabaseServer';
  * Uses admin client to bypass authentication requirements.
  */
 export async function POST(request: NextRequest) {
+  // Sends email: prevent abuse as a mail-bomb / enumeration vector
+  const limited = enforceRateLimit(request, 'resend-confirmation', { interval: 10 * 60 * 1000, uniqueTokenPerInterval: 5 });
+  if (limited) return limited;
+
   try {
     const body = await request.json();
     const { email } = body;
 
-    if (!email) {
+    if (!email || typeof email !== 'string') {
       return NextResponse.json(
         { error: 'Email is required' },
         { status: 400 }
@@ -21,14 +26,14 @@ export async function POST(request: NextRequest) {
 
     const adminClient = await createSupabaseAdminClient();
 
-    console.log('[RESEND_CONFIRMATION] Attempting to resend confirmation email for:', email);
+    console.log('[RESEND_CONFIRMATION] Attempting to resend confirmation email for:');
 
     // Check if user exists
     const { data: existingUsers } = await adminClient.auth.admin.listUsers();
     const user = existingUsers?.users.find((u: { email?: string }) => u.email?.toLowerCase() === email.toLowerCase());
 
     if (!user) {
-      console.error('[RESEND_CONFIRMATION] User not found:', email);
+      console.error('[RESEND_CONFIRMATION] User not found:');
       return NextResponse.json(
         { error: 'No account found with this email address' },
         { status: 404 }
@@ -37,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     // Check if already confirmed
     if (user.email_confirmed_at) {
-      console.log('[RESEND_CONFIRMATION] User already confirmed:', email);
+      console.log('[RESEND_CONFIRMATION] User already confirmed:');
       return NextResponse.json(
         { 
           success: true,
@@ -73,12 +78,12 @@ export async function POST(request: NextRequest) {
       }
       
       return NextResponse.json(
-        { error: resendError.message || 'Failed to resend confirmation email' },
+        { error: 'Failed to resend confirmation email' },
         { status: 400 }
       );
     }
 
-    console.log('[RESEND_CONFIRMATION] ✅ Confirmation email resent successfully to:', email);
+    console.log('[RESEND_CONFIRMATION] ✅ Confirmation email resent successfully to:');
 
     return NextResponse.json({
       success: true,
@@ -88,7 +93,7 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     console.error('[RESEND_CONFIRMATION] Error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }

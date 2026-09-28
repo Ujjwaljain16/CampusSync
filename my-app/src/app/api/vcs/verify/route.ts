@@ -1,9 +1,13 @@
 import { NextRequest } from 'next/server';
 import { success, apiError } from '@/lib/api';
+import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { getIssuerJwk, verifyCredentialJws } from '@/lib/vc';
 
 export async function GET(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'vcs-verify', RateLimitPresets.relaxed);
+  if (limited) return limited;
+
   const { searchParams } = new URL(req.url);
   const vcId = searchParams.get('vcId');
   if (!vcId) {

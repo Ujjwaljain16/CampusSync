@@ -4,13 +4,27 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { withAuth, success, apiError } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { logger } from '@/lib/logger';
+import { enforceRateLimit } from '@/lib/rateLimit';
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 
 export const POST = withAuth(async (request: NextRequest, { user }) => {
-	const formData = await request.formData();
-	const file = formData.get('file') as File;
+	// Expensive (storage + paid LLM call): per-user limit
+	const limited = enforceRateLimit(request, 'ocr-gemini', { interval: 60 * 1000, uniqueTokenPerInterval: 6 }, user.id);
+	if (limited) return limited;
+
+	const formData = await request.formData().catch(() => null);
+	const file = formData?.get('file');
 	
-	if (!file) {
+	if (!file || typeof file === 'string') {
 		throw apiError.badRequest('No file uploaded');
+	}
+	if (file.size === 0 || file.size > MAX_FILE_BYTES) {
+		throw apiError.badRequest('File must be between 1 byte and 10 MB');
+	}
+	if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+		throw apiError.badRequest('Unsupported file type. Upload a JPEG, PNG, WebP or PDF.');
 	}
 
 	logger.debug('Using Gemini Vision API for certificate extraction', { 
@@ -39,7 +53,7 @@ export const POST = withAuth(async (request: NextRequest, { user }) => {
 	
 	if (uploadError) {
 		logger.error('Storage upload failed', uploadError);
-		throw apiError.internal(`Failed to upload file: ${uploadError.message}`);
+		throw apiError.internal('Failed to upload file');
 	}
 	
 	// 3. Get public URL

@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function GET() {
+  // Detailed diagnostics (memory, env var names, table health) are not for public consumption.
+  // Use /api/health in production.
+  if (process.env.NODE_ENV === 'production') {
+    return new NextResponse(null, { status: 404 });
+  }
+
   const startTime = Date.now();
   const health = {
     status: 'healthy',

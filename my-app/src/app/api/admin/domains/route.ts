@@ -1,6 +1,9 @@
 import { NextRequest } from 'next/server';
-import { withAuth, success, apiError, parseAndValidateBody, getOrganizationContext, getTargetOrganizationIds, isRecruiterContext } from '@/lib/api';
+import { withRole, success, apiError, parseAndValidateBody, getOrganizationContext, getTargetOrganizationIds, isRecruiterContext } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+
+// Allowed email domains control who can sign up into an organization: admins only
+const ADMIN_ROLES = ['admin', 'org_admin', 'super_admin'];
 
 interface AddDomainBody {
   domain: string;
@@ -8,7 +11,7 @@ interface AddDomainBody {
 }
 
 // GET - Fetch allowed domains (for user's organization)
-export const GET = withAuth(async (_req, { user }) => {
+export const GET = withRole(ADMIN_ROLES, async (_req, { user }) => {
   const supabase = await createSupabaseServerClient();
   const orgContext = await getOrganizationContext(user);
   const targetOrgIds = getTargetOrganizationIds(orgContext);
@@ -28,11 +31,14 @@ export const GET = withAuth(async (_req, { user }) => {
 });
 
 // POST - Add new domain (to user's organization)
-export const POST = withAuth(async (req: NextRequest, { user }) => {
+export const POST = withRole(ADMIN_ROLES, async (req: NextRequest, { user }) => {
   const result = await parseAndValidateBody<AddDomainBody>(req, ['domain']);
   if (result.error) return result.error;
 
   const { domain, description } = result.data;
+  if (typeof domain !== 'string' || !/^([*][.])?([a-z0-9-]+[.])+[a-z]{2,}$/i.test(domain.trim())) {
+    throw apiError.badRequest('Invalid domain');
+  }
   const supabase = await createSupabaseServerClient();
   const orgContext = await getOrganizationContext(user);
 
@@ -65,7 +71,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 });
 
 // DELETE - Remove domain (from user's organization)
-export const DELETE = withAuth(async (req: NextRequest, { user }) => {
+export const DELETE = withRole(ADMIN_ROLES, async (req: NextRequest, { user }) => {
   const { searchParams } = new URL(req.url);
   const domain = searchParams.get('domain');
 

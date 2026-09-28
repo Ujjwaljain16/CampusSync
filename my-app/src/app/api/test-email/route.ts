@@ -1,38 +1,30 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { withRole, success, apiError } from '@/lib/api';
 import { emailService } from '@/lib/emailService';
+import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { email } = body;
-
-    if (!email) {
-      return NextResponse.json({ error: 'Email address required' }, { status: 400 });
-    }
-
-    console.log('[Test Email] Sending test email to:', email);
-
-    // Send a simple test email
-    const result = await emailService.sendCertificateApproved(email, {
-      studentName: 'Test User',
-      certificateTitle: 'Test Certificate',
-      institution: 'Test Institution',
-      portfolioUrl: 'http://localhost:3000',
-    });
-
-    console.log('[Test Email] Email sent result:', result);
-
-    return NextResponse.json({ 
-      success: result,
-      message: result 
-        ? 'Test email sent successfully! Check your inbox (and spam folder).' 
-        : 'Failed to send email. Check server logs for details.',
-    });
-  } catch (error) {
-    console.error('[Test Email] Error:', error);
-    return NextResponse.json({ 
-      error: 'Failed to send test email',
-      details: error instanceof Error ? error.message : 'Unknown error',
-    }, { status: 500 });
+/**
+ * POST /api/test-email
+ *
+ * Development-only diagnostic. Disabled in production, restricted to admins,
+ * and can only send to the calling admin's own address (never a relay).
+ */
+export const POST = withRole(['admin', 'super_admin'], async (req: NextRequest, { user }) => {
+  if (process.env.NODE_ENV === 'production') {
+    return new Response(null, { status: 404 });
   }
-}
+
+  const limited = enforceRateLimit(req, 'test-email', RateLimitPresets.strict, user.id);
+  if (limited) return limited;
+
+  if (!user.email) throw apiError.badRequest('Your account has no email address');
+
+  const result = await emailService.sendCertificateApproved(user.email, {
+    studentName: 'Test User',
+    certificateTitle: 'Test Certificate',
+    institution: 'Test Institution',
+    portfolioUrl: 'http://localhost:3000',
+  });
+
+  return success({ sent: result }, result ? 'Test email sent' : 'Failed to send email. Check server logs.');
+});

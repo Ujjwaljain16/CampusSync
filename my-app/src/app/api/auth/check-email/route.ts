@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 /**
  * POST /api/auth/check-email
@@ -11,6 +12,9 @@ import { createSupabaseAdminClient } from '@/lib/supabaseServer';
  * - If they should use recruiter flow instead (no domain match)
  */
 export async function POST(request: NextRequest) {
+  const limited = enforceRateLimit(request, 'check-email', { interval: 60 * 1000, uniqueTokenPerInterval: 20 });
+  if (limited) return limited;
+
   try {
     const body = await request.json();
     const { email } = body;
@@ -117,21 +121,8 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     console.error('[CHECK_EMAIL] Uncaught error:', error);
     
-    // Log more details for fetch errors
-    if (error instanceof TypeError && error.message.includes('fetch')) {
-      console.error('[CHECK_EMAIL] Network/fetch error details:', {
-        message: error.message,
-        stack: error.stack,
-        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-        hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
-      });
-    }
-    
     return NextResponse.json(
-      { 
-        error: 'Internal server error',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }

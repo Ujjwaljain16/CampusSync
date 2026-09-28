@@ -11,15 +11,14 @@ const supabase = createClient(
 
 // Webhook signature verification
 function verifyWebhookSignature(payload: string, signature: string, secret: string): boolean {
-  const expectedSignature = crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex');
-  
-  return crypto.timingSafeEqual(
-    Buffer.from(signature, 'hex'),
-    Buffer.from(expectedSignature, 'hex')
+  const expected = Buffer.from(
+    crypto.createHmac('sha256', secret).update(payload).digest('hex'),
+    'hex'
   );
+  const provided = Buffer.from(signature, 'hex');
+  // timingSafeEqual throws on length mismatch
+  if (provided.length !== expected.length) return false;
+  return crypto.timingSafeEqual(provided, expected);
 }
 
 export async function POST(request: NextRequest) {
@@ -27,14 +26,14 @@ export async function POST(request: NextRequest) {
   const signature = request.headers.get('x-webhook-signature');
   const webhookSecret = process.env.WEBHOOK_SECRET;
 
-  // Skip signature verification in development/testing
-  if (process.env.NODE_ENV === 'production' && webhookSecret) {
-    if (!signature || !verifyWebhookSignature(body, signature, webhookSecret)) {
-      throw apiError.unauthorized('Invalid signature');
-    }
-  } else if (process.env.NODE_ENV === 'production' && !webhookSecret) {
+  // Signature verification is mandatory in every environment: this endpoint writes
+  // audit/verification records with the service-role key.
+  if (!webhookSecret) {
     console.error('WEBHOOK_SECRET not configured');
     throw apiError.internal('Webhook not configured');
+  }
+  if (!signature || !verifyWebhookSignature(body, signature, webhookSecret)) {
+    throw apiError.unauthorized('Invalid signature');
   }
 
   // Handle empty body gracefully
@@ -74,7 +73,7 @@ export async function POST(request: NextRequest) {
       break;
     
     default:
-      console.log(`Unknown webhook event: ${event}`);
+      console.warn('Unknown webhook event received');
       throw apiError.badRequest('Unknown event type');
   }
 

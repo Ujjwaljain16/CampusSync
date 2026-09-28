@@ -1,5 +1,7 @@
 # 🚀 CampusSync Tech Guide
 
+> **Accuracy note:** parts of this guide describe an earlier/aspirational design. The current code extracts certificate data with Google Gemini Vision only (no Tesseract.js), signs credentials with JWS via JOSE using the algorithm of the configured `VC_ISSUER_JWK` (not Ed25519), and RLS policy counts (for example "83") are unverified because the SQL is not in this repository. See the README "Security notes & known limitations".
+
 ## 📁 Project Structure
 
 ```

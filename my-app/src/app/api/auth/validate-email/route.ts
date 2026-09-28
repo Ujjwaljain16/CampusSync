@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 /**
  * POST /api/auth/validate-email
@@ -11,6 +12,9 @@ import { createSupabaseAdminClient } from '@/lib/supabaseServer';
  * This enables institution-specific email validation during signup
  */
 export async function POST(request: NextRequest) {
+  const limited = enforceRateLimit(request, 'validate-email', { interval: 60 * 1000, uniqueTokenPerInterval: 20 });
+  if (limited) return limited;
+
   try {
     const { email } = await request.json();
 
@@ -51,8 +55,7 @@ export async function POST(request: NextRequest) {
       dataIsArray: Array.isArray(allOrgs),
       dataLength: allOrgs?.length,
       hasError: !!orgError,
-      errorMessage: orgError?.message,
-      rawData: JSON.stringify(allOrgs)
+      errorMessage: orgError?.message
     });
 
     if (orgError) {
@@ -85,7 +88,6 @@ export async function POST(request: NextRequest) {
           domains: allowedDomains,
           domainType,
           isArray: Array.isArray(allowedDomains),
-          rawSettings: JSON.stringify(org.settings).substring(0, 200)
         });
         
         if (!Array.isArray(allowedDomains)) {

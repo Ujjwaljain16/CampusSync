@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { type Transporter } from 'nodemailer';
 import { features, config } from './envValidator';
 import { logger } from './logger';
 
@@ -33,7 +33,7 @@ interface NotificationData {
 }
 
 class EmailService {
-  private transporter: nodemailer.Transporter | null = null;
+  private transporter: Transporter | null = null;
   private isConfigured = false;
 
   constructor() {

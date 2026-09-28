@@ -119,3 +119,10 @@ Thumbs.db
 # Misc
 .eslintcache
 .stylelintcache
+
+# keep the committed template (contains placeholders only)
+!.env.example
+
+# Key material
+*.key
+*.jwk

@@ -9,6 +9,9 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const REVIEWER_ROLES = ['faculty', 'admin', 'org_admin', 'super_admin'];
+const ALLOWED_STATUSES = ['pending', 'verified', 'rejected'];
+
 interface VerifyDocumentBody {
   documentId: string;
   verificationStatus: string;
@@ -28,6 +31,11 @@ export async function POST(request: NextRequest) {
   const orgContext = await getOrganizationContext(user);
   const targetOrgIds = getTargetOrganizationIds(orgContext);
 
+  // Only reviewers may change verification status (students must not self-verify)
+  if (!REVIEWER_ROLES.includes(orgContext.role)) {
+    throw apiError.forbidden('Only faculty or admins can verify documents');
+  }
+
   const result = await parseAndValidateBody<VerifyDocumentBody>(
     request, 
     ['documentId', 'verificationStatus']
@@ -39,6 +47,12 @@ export async function POST(request: NextRequest) {
   // Validate UUID format for documentId
   if (!isValidUUID(documentId)) {
     throw apiError.badRequest('Invalid document ID format');
+  }
+  if (!ALLOWED_STATUSES.includes(verificationStatus)) {
+    throw apiError.badRequest('Invalid verification status');
+  }
+  if (confidence !== undefined && confidence !== null && (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 100)) {
+    throw apiError.badRequest('confidence must be a number between 0 and 100');
   }
 
   // Verify document belongs to user's organization before updating
@@ -88,7 +102,7 @@ export async function POST(request: NextRequest) {
   // Log audit entry
   try {
     await supabase.from('audit_logs').insert({
-      user_id: user.id,
+      actor_id: user.id,
       organization_id: 'organizationId' in orgContext ? orgContext.organizationId : null, // Multi-org support
       action: 'verify_document',
       target_id: documentId,
@@ -144,6 +158,11 @@ export async function GET(request: NextRequest) {
 
   if (docError || !document) {
     throw apiError.notFound('Document not found');
+  }
+
+  // Students may only view verification details of their own documents
+  if (orgContext.role === 'student' && document.student_id !== user.id) {
+    throw apiError.forbidden('You do not have permission to view this document');
   }
 
   return success({

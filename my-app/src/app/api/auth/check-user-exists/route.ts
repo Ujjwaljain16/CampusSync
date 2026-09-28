@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { createClient } from '@supabase/supabase-js';
 
 export async function POST(request: NextRequest) {
+  // Account-enumeration surface: keep it tightly rate limited
+  const limited = enforceRateLimit(request, 'check-user-exists', { interval: 60 * 1000, uniqueTokenPerInterval: 10 });
+  if (limited) return limited;
+
   try {
     const { email } = await request.json();
 
-    if (!email) {
+    if (!email || typeof email !== 'string') {
       return NextResponse.json(
         { error: 'Email is required' },
         { status: 400 }

@@ -1,22 +1,28 @@
 import { NextRequest } from 'next/server';
-import { success, apiError } from '@/lib/api';
+import { success, apiError, isValidUUID } from '@/lib/api';
+import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ userId: string }> }
 ) {
+  const limited = enforceRateLimit(request, 'public-portfolio', RateLimitPresets.relaxed);
+  if (limited) return limited;
+
   const { userId } = await params;
+  if (!isValidUUID(userId)) throw apiError.badRequest('Invalid user id');
   const supabase = await createSupabaseServerClient();
   
   // Get organization_id from query param (optional - for organization-scoped public portfolios)
   const { searchParams } = new URL(request.url);
   const organizationId = searchParams.get('organizationId');
+  if (organizationId && !isValidUUID(organizationId)) throw apiError.badRequest('Invalid organization id');
 
   // Build query for user's verified certificates
   let query = supabase
     .from('certificates')
-    .select('*')
+    .select('id, title, institution, date_issued, description, verification_status, confidence_score')
     .eq('student_id', userId)
     .eq('verification_status', 'verified');
   
@@ -28,7 +34,8 @@ export async function GET(
   const { data: certificates, error } = await query.order('created_at', { ascending: false });
 
   if (error) {
-    throw apiError.internal(error.message);
+    console.error('Public portfolio query failed:', error);
+    throw apiError.internal('Failed to load portfolio');
   }
 
   // Transform data for portfolio display

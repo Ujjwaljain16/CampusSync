@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { createSupabaseAdminClient, createSupabaseServerClient } from '@/lib/supabaseServer';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 /**
  * POST /api/auth/signup/student-faculty
@@ -14,6 +15,9 @@ import { createSupabaseAdminClient } from '@/lib/supabaseServer';
  * 5. Sends verification email
  */
 export async function POST(request: NextRequest) {
+  const limited = enforceRateLimit(request, 'signup', { interval: 15 * 60 * 1000, uniqueTokenPerInterval: 10 });
+  if (limited) return limited;
+
   try {
     const body = await request.json();
     const { 
@@ -88,6 +92,17 @@ export async function POST(request: NextRequest) {
     let isNewUser = false;
 
     if (existingUser) {
+      // SECURITY: an existing account may only be completed/modified by its own
+      // authenticated session. Without this, anyone could set the password of (or
+      // add roles to) another person's account just by knowing their email.
+      const sessionClient = await createSupabaseServerClient();
+      const { data: { user: sessionUser } } = await sessionClient.auth.getUser();
+      if (!sessionUser || sessionUser.id !== existingUser.id) {
+        return NextResponse.json(
+          { error: 'An account with this email already exists. Please sign in to continue.', shouldSignIn: true },
+          { status: 409 }
+        );
+      }
       userId = existingUser.id;
       const isOAuthUser = existingUser.app_metadata?.provider && existingUser.app_metadata.provider !== 'email';
       const isEmailConfirmed = existingUser.email_confirmed_at != null;
@@ -309,7 +324,7 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     console.error('[SIGNUP] Error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }

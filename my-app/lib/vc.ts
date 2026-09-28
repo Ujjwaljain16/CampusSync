@@ -28,6 +28,10 @@ export async function signCredential(params: CreateVcParams): Promise<Verifiable
 	const isDevelopmentJWK = jwk.n === 'placeholder-n-value-for-development';
 	
 	if (isDevelopmentJWK) {
+		// Never emit unsigned mock credentials outside local development
+		if (process.env.NODE_ENV === 'production') {
+			throw new Error('VC_ISSUER_JWK is a development placeholder; refusing to issue credentials in production');
+		}
 		console.warn('⚠️  Using development JWK - VCs will not be cryptographically valid');
 		// Return a mock VC for development
 		const issuanceDate = new Date().toISOString();

@@ -68,22 +68,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     throw apiError.forbidden('You do not have permission to update this document');
   }
   
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== 'object') throw apiError.badRequest('Invalid JSON body');
+
+  const updates: Record<string, unknown> = {
+    title: body.title,
+    institution: body.institution,
+    issue_date: body.issue_date,
+    metadata: body.metadata
+  };
+  // Only reviewers may change verification status (students must not self-verify)
+  if (body.verification_status !== undefined) {
+    if (!['faculty', 'admin', 'org_admin', 'super_admin'].includes(orgContext.role)) {
+      throw apiError.forbidden('You do not have permission to change verification status');
+    }
+    if (!['pending', 'verified', 'rejected'].includes(body.verification_status)) {
+      throw apiError.badRequest('Invalid verification status');
+    }
+    updates.verification_status = body.verification_status;
+  }
+
   const { data, error } = await supabase
     .from('documents')
-    .update({
-      title: body.title,
-      institution: body.institution,
-      issue_date: body.issue_date,
-      verification_status: body.verification_status,
-      metadata: body.metadata
-    })
+    .update(updates)
     .eq('id', id)
     .in('organization_id', targetOrgIds) // Ensure org match
     .select()
     .single();
     
-  if (error) throw apiError.internal(error.message);
+  if (error) {
+    console.error('Document update error:', error);
+    throw apiError.internal('Failed to update document');
+  }
   return success(data);
 }
 

@@ -13,7 +13,15 @@ import { success } from '@/lib/api';
 export async function GET() {
   try {
     const healthCheck = performHealthCheck();
-    
+
+    // In production expose only overall status; configuration details are not public
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json(
+        { healthy: healthCheck.healthy, timestamp: new Date().toISOString() },
+        { status: 200 }
+      );
+    }
+
     // Return success with health data
     return success({
       ...healthCheck,
@@ -25,7 +33,7 @@ export async function GET() {
         healthy: false,
         environment: process.env.NODE_ENV || 'unknown',
         timestamp: new Date().toISOString(),
-        error: error instanceof Error ? error.message : 'Health check failed',
+        error: process.env.NODE_ENV === 'production' ? 'Health check failed' : (error instanceof Error ? error.message : 'Health check failed'),
         version: '1.0.0',
       },
       { status: 503 }

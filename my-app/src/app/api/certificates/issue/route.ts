@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { withAuth, success, apiError } from '@/lib/api';
+import { withAuth, success, apiError, isValidUUID, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
 import { signCredential } from '@/lib/vc';
 interface CredentialSubject {
 	id: string;
@@ -39,25 +39,42 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 		const body = await req.json().catch(() => null) as IssueBody | null;
 		if (!body) throw apiError.badRequest('Invalid JSON');
 
-		let subject: CredentialSubject | undefined = body.credentialSubject;
+		// SECURITY: the credential subject is ALWAYS built from the stored, verified
+		// certificate record. Client-supplied subject fields are ignored so nobody
+		// can obtain an issuer-signed credential for arbitrary claims.
+		const certificateId = body.certificateId ?? body.credentialSubject?.certificateId;
+		if (!certificateId || !isValidUUID(certificateId)) {
+			throw apiError.badRequest('A valid certificateId is required');
+		}
 
-		// If called from auto-verify with certificateId, map it to credentialSubject
-		if (!subject && body.certificateId) {
-			const { data: cert, error: certErr } = await supabase
-				.from('certificates')
-				.select('*')
-				.eq('id', body.certificateId)
-				.single();
-			if (certErr || !cert) {
-				throw apiError.notFound('Certificate not found');
-			}
-			// Only allow issuing for own certificate unless faculty/admin
-			const isOwner = cert.student_id === user.id;
-			const canIssueOnBehalf = role === 'admin' || role === 'faculty';
-			if (!isOwner && !canIssueOnBehalf) {
+		const { data: cert, error: certErr } = await supabase
+			.from('certificates')
+			.select('*')
+			.eq('id', certificateId)
+			.single();
+		if (certErr || !cert) {
+			throw apiError.notFound('Certificate not found');
+		}
+
+		// Only verified certificates can be turned into credentials
+		if (cert.verification_status !== 'verified') {
+			throw apiError.forbidden('Only verified certificates can be issued as credentials');
+		}
+
+		// Owner, or a reviewer within the certificate's organization
+		const isOwner = cert.student_id === user.id;
+		const isReviewerRole = ['admin', 'org_admin', 'super_admin', 'faculty'].includes(role);
+		if (!isOwner) {
+			if (!isReviewerRole) {
 				throw apiError.forbidden('Forbidden to issue for another user');
 			}
-		subject = {
+			const orgContext = await getOrganizationContext(user);
+			if (!getTargetOrganizationIds(orgContext).includes(cert.organization_id)) {
+				throw apiError.forbidden('Certificate is outside your organization');
+			}
+		}
+
+		const subject: CredentialSubject = {
 			id: cert.student_id,
 			certificateId: cert.id,
 			title: cert.title,
@@ -65,17 +82,6 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 			dateIssued: cert.date_issued,
 			description: cert.description ?? undefined,
 		};
-	} else if (subject) {
-		const isSelfIssue = subject.id === user.id;
-		const canIssueOnBehalf = role === 'admin' || role === 'faculty';
-		if (!isSelfIssue && !canIssueOnBehalf) {
-			throw apiError.forbidden('Forbidden to issue for another user');
-		}
-	}
-
-	if (!subject) {
-		throw apiError.badRequest('Invalid credentialSubject or certificateId');
-	}
 
 	const issuerDid = process.env.NEXT_PUBLIC_ISSUER_DID || 'did:web:example.org';
 	const verificationMethod = process.env.NEXT_PUBLIC_ISSUER_VERIFICATION_METHOD || `${issuerDid}#keys-1`;
@@ -101,7 +107,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 	});
 	if (error) {
 		console.error('Database insert error:', error);
-		throw apiError.internal(`Failed to store credential: ${error.message}`);
+		throw apiError.internal('Failed to store credential');
 	}
 
 		// Audit log: issue_vc
@@ -127,7 +133,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 			return error;
 		}
 		// Otherwise, return a generic error
-		return apiError.internal(error instanceof Error ? error.message : 'Failed to issue verifiable credential');
+		return apiError.internal('Failed to issue verifiable credential');
 	}
 });
 

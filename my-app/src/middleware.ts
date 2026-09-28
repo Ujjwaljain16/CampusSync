@@ -6,6 +6,11 @@ import { assertCriticalFeatures } from '@/lib/runtimeEnvCheck';
 export async function middleware(req: NextRequest) {
 	const isDev = process.env.NODE_ENV !== 'production';
 
+	// Dev-only diagnostic pages must never be reachable in production
+	if (!isDev && (req.nextUrl.pathname.startsWith('/test-') || req.nextUrl.pathname.startsWith('/debug-'))) {
+		return new NextResponse(null, { status: 404 });
+	}
+
 	// Perform runtime environment validation (only in production)
 	if (!isDev && !req.nextUrl.pathname.startsWith('/api/health') && !req.nextUrl.pathname.startsWith('/api/ping-supabase')) {
 		try {
@@ -40,10 +45,9 @@ export async function middleware(req: NextRequest) {
 	const isPasswordResetRoute = req.nextUrl.pathname.startsWith('/reset-password');
 	const isAuthCallbackRoute = req.nextUrl.pathname.startsWith('/auth/confirm') || req.nextUrl.pathname.startsWith('/api/auth/callback');
 	const isSetupRoute = req.nextUrl.pathname.startsWith('/setup') || req.nextUrl.pathname.startsWith('/admin/setup');
-	const isDebugRoute = req.nextUrl.pathname.startsWith('/debug-') || req.nextUrl.pathname.startsWith('/test-');
 	const isWaitingRoute = req.nextUrl.pathname.startsWith('/waiting') || req.nextUrl.pathname.startsWith('/faculty/waiting') || req.nextUrl.pathname.startsWith('/recruiter/waiting');
 	const isHome = req.nextUrl.pathname === '/';
-	const isPublic = isAuthRoute || isPasswordResetRoute || isAuthCallbackRoute || isHome || req.nextUrl.pathname.startsWith('/public') || isSetupRoute || isDebugRoute || isWaitingRoute;
+	const isPublic = isAuthRoute || isPasswordResetRoute || isAuthCallbackRoute || isHome || req.nextUrl.pathname.startsWith('/public') || isSetupRoute || isWaitingRoute;
 
 	// Update session and get user
 	const { supabaseResponse, user, supabase } = await updateSession(req);

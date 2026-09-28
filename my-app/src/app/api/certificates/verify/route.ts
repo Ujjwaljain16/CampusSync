@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getIssuerJwk, verifyCredentialJws } from '@/lib/vc';
 import { success, apiError } from '@/lib/api';
+import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
 
 interface VerifyBody {
   jws?: string;
@@ -12,6 +13,9 @@ interface VerifyBody {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'cert-verify', RateLimitPresets.relaxed);
+  if (limited) return limited;
+
   const body = await req.json().catch(() => null) as VerifyBody | null;
   if (!body) throw apiError.badRequest('Invalid JSON');
 

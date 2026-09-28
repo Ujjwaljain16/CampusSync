@@ -109,35 +109,8 @@ export async function getServerUserWithRole() {
 			return { user, role: roleData.role } as const;
 		}
 
-		// Fallback to email-based role assignment for existing admins
-		const adminEmails = [
-			'jainujjwal1609@gmail.com',
-			'test@university.edu'
-			// Add more admin emails here as needed
-		];
-		
-		if (user.email && adminEmails.includes(user.email)) {
-			// Assign admin role in database
-			const { error: upsertError } = await supabase
-				.from('user_roles')
-				.upsert({
-					user_id: user.id,
-					role: 'admin',
-					assigned_by: user.id,
-					created_at: new Date().toISOString(),
-					updated_at: new Date().toISOString()
-				}, {
-					onConflict: 'user_id'
-				});
-			
-			if (upsertError) {
-				console.error('Error assigning admin role:', upsertError);
-			} else {
-				console.log(`Assigned admin role to ${user.email}`);
-			}
-			return { user, role: 'admin' } as const;
-		}
-
+		// SECURITY: no email-based auto-promotion. Admin roles are assigned only via
+		// scripts/setup-superadmin.mjs or the admin role-management APIs.
 		// Default to 'student' for all other users
 		// Do NOT auto-assign here; rely on complete-signup + role requests
 		return { user, role: 'student' } as const;

@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { withRole, success, apiError, parseAndValidateBody, getOrganizationContext, isRecruiterContext } from '@/lib/api';
+import { withRole, isValidEmail, success, apiError, parseAndValidateBody, getOrganizationContext, isRecruiterContext } from '@/lib/api';
 import { createSupabaseAdminClient, createSupabaseServerClient } from '@/lib/supabaseServer';
 
 interface InviteBody {
@@ -17,6 +17,9 @@ export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (req: 
 
   if (!['student', 'faculty', 'admin', 'org_admin', 'recruiter'].includes(role)) {
     throw apiError.badRequest('Invalid role');
+  }
+  if (typeof email !== 'string' || !isValidEmail(email)) {
+    throw apiError.badRequest('Invalid email');
   }
 
   // Get organization context for multi-tenancy
@@ -53,7 +56,7 @@ export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (req: 
     // User exists, check if they already have a role
     const { data: existingRole, error: roleCheckError } = await adminSupabase
       .from('user_roles')
-      .select('role')
+      .select('role, organization_id')
       .eq('user_id', existingUser.id)
       .single();
     
@@ -63,6 +66,11 @@ export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (req: 
     }
     
     if (existingRole) {
+      // Tenant isolation: never modify a user who belongs to a different organization
+      if (!orgContext.isSuperAdmin && existingRole.organization_id !== targetOrgId) {
+        throw apiError.forbidden('User belongs to a different organization');
+      }
+
       // User already has a role, update it
       const { error: updateError } = await adminSupabase
         .from('user_roles')

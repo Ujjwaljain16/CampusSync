@@ -13,22 +13,18 @@ interface CreateCertificateBody {
 export const POST = withAuth(async (req: NextRequest, { user: authUser }) => {
   const supabase = await createSupabaseServerClient();
   
-  // Handle test bypass for non-production environments
-  let user: User = authUser;
-  if (process.env.NODE_ENV !== 'production' && req.headers.get('x-test-bypass-auth') === '1') {
-    user = { id: process.env.TEST_STUDENT_USER_ID || 'test-user' } as User;
-  }
+  const user: User = authUser;
 
   const body = await req.json().catch(() => null) as CreateCertificateBody | null;
-  const bypassStorage = process.env.NODE_ENV !== 'production' && req.headers.get('x-test-bypass-storage') === '1';
   
-  if (!body || (!bypassStorage && !body.publicUrl)) {
+  if (!body || !body.publicUrl) {
     throw apiError.badRequest('Invalid payload: publicUrl is required');
   }
 
-  // Skip database operations in test bypass mode
-  if (bypassStorage) {
-    return success({ status: 'created' }, 'Certificate created (test bypass mode)');
+  // The file must be one the caller uploaded to our own storage (path is scoped by user id)
+  const storagePrefix = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/`;
+  if (typeof body.publicUrl !== 'string' || !body.publicUrl.startsWith(storagePrefix) || !body.publicUrl.includes(`/${user.id}/`)) {
+    throw apiError.badRequest('Invalid file URL');
   }
 
   // Get user's organization_id from their profile
@@ -58,18 +54,11 @@ export const POST = withAuth(async (req: NextRequest, { user: authUser }) => {
     updated_at: now,
   };
 
-  console.log('Inserting certificate with data:', certificateData);
-  
   const { error } = await supabase.from('certificates').insert(certificateData);
 
   if (error) {
     console.error('Certificate creation error:', error);
-    console.error('Certificate data that failed:', certificateData);
-    throw apiError.internal(error.message, {
-      details: error.details,
-      hint: error.hint,
-      code: error.code
-    });
+    throw apiError.internal('Failed to create certificate');
   }
 
   return success({ status: 'created' }, 'Certificate created successfully', 201);

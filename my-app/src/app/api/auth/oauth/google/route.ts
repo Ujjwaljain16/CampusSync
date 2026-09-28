@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { apiError } from '@/lib/api';
+import { safeRedirectPath } from '@/lib/safeRedirect';
 
 export async function GET(request: NextRequest) {
 	const { searchParams } = new URL(request.url);
-	const redirectTo = searchParams.get('redirectTo') || '/';
+	const redirectTo = safeRedirectPath(searchParams.get('redirectTo'));
 
 	// Prepare a response object to collect cookie writes
 	const url = new URL(request.url);
@@ -38,7 +39,8 @@ export async function GET(request: NextRequest) {
 	});
 
 	if (error || !data.url) {
-		throw apiError.internal(error?.message || 'Failed to initialize OAuth');
+		console.error('OAuth init failed:', error?.message);
+		throw apiError.internal('Failed to initialize OAuth');
 	}
 
 	// Convert the prepared response into a redirect so cookies are preserved

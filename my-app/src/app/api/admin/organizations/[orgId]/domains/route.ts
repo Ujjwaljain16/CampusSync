@@ -1,5 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+/**
+ * Non-super admins may only read/modify the organization they administer.
+ * (Do not rely on RLS alone for tenant isolation.)
+ */
+async function canManageOrg(supabase: SupabaseClient, userId: string, role: string, orgId: string): Promise<boolean> {
+  if (role === 'super_admin') return true;
+  const { data } = await supabase
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', userId)
+    .eq('organization_id', orgId)
+    .in('role', ['admin', 'org_admin'])
+    .limit(1);
+  return !!data && data.length > 0;
+}
 
 /**
  * GET /api/admin/organizations/[orgId]/domains
@@ -29,6 +46,10 @@ export async function GET(
 
     const supabase = await createSupabaseServerClient();
     const { orgId } = await params;
+
+    if (!(await canManageOrg(supabase, userWithRole.user.id, role, orgId))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const { data: org, error } = await supabase
       .from('organizations')
@@ -74,6 +95,11 @@ export async function PUT(
 
     const supabase = await createSupabaseServerClient();
     const { orgId } = await params;
+
+    if (!(await canManageOrg(supabase, userWithRole.user.id, role, orgId))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const { domains } = await request.json();
 
     if (!Array.isArray(domains)) {
@@ -81,7 +107,8 @@ export async function PUT(
     }
 
     // Validate domain format
-    const invalidDomains = domains.filter((d: string) => {
+    const invalidDomains = domains.filter((d: unknown) => {
+      if (typeof d !== 'string') return true;
       const trimmed = d.trim();
       // Should be a valid domain pattern (e.g., "university.edu" or "*.university.edu")
       return !trimmed || !/^(\*\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(trimmed);

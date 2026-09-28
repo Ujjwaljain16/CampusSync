@@ -1,78 +1,61 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
-import { success, apiError, parseAndValidateBody } from '@/lib/api';
+import { withRole, success, apiError, parseAndValidateBody, isValidUUID, getOrganizationContext } from '@/lib/api';
 
 interface AssignRoleBody {
   userId: string;
   role: string;
-  adminEmail: string;
-  organizationId?: string; // Optional: specify org, defaults to default org
+  organizationId?: string;
 }
 
-export async function POST(req: NextRequest) {
-  const result = await parseAndValidateBody<AssignRoleBody>(req, ['userId', 'role', 'adminEmail']);
+/**
+ * POST /api/auth/assign-role
+ *
+ * Assign a low-privilege role to a user. Caller must be an authenticated
+ * admin / org_admin / super_admin; authorization is derived from the session,
+ * never from client-supplied identity fields. Only super admins may target an
+ * organization other than their own.
+ */
+export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (req: NextRequest, { user }) => {
+  const result = await parseAndValidateBody<AssignRoleBody>(req, ['userId', 'role']);
   if (result.error) return result.error;
-  
-  const { userId, role, adminEmail, organizationId: requestedOrgId } = result.data;
 
-  if (!['student', 'faculty', 'admin'].includes(role)) {
+  const { userId, role, organizationId: requestedOrgId } = result.data;
+
+  if (!isValidUUID(userId)) throw apiError.badRequest('Invalid userId');
+  if (!['student', 'faculty'].includes(role)) {
     throw apiError.badRequest('Invalid role');
   }
 
-  // Verify admin email is authorized
-  const authorizedAdminEmails = [
-    'jainujjwal1609@gmail.com',
-    // Add more admin emails here
-  ];
-
-  if (!authorizedAdminEmails.includes(adminEmail)) {
-    throw apiError.forbidden('Unauthorized admin email');
-  }
+  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  const organizationId = 'organizationId' in orgContext ? orgContext.organizationId : undefined;
+  if (!organizationId) throw apiError.badRequest('organization_id is required');
 
   const supabase = await createSupabaseAdminClient();
 
-  // Get admin user ID by querying auth.users table
-  const { data: adminUser, error: adminError } = await supabase
-    .from('auth.users')
-    .select('id')
-    .eq('email', adminEmail)
-    .single();
-  
-  if (adminError || !adminUser) {
-    throw apiError.notFound('Admin user not found');
-  }
-
-  // Get admin's organization or use specified one
-  const { data: adminRole } = await supabase
+  // Do not overwrite roles of users in other organizations.
+  const { data: existing } = await supabase
     .from('user_roles')
     .select('organization_id')
-    .eq('user_id', adminUser.id)
-    .single();
-
-  const organizationId = requestedOrgId || adminRole?.organization_id;
-  
-  if (!organizationId) {
-    throw apiError.badRequest('organization_id is required. Admin has no organization or none was specified.');
+    .eq('user_id', userId);
+  if (existing?.some((r: { organization_id: string | null }) => r.organization_id !== organizationId)) {
+    throw apiError.forbidden('User belongs to another organization');
   }
 
-  // Assign role to user with organization
   const { error: roleError } = await supabase
     .from('user_roles')
     .upsert({
       user_id: userId,
-      role: role,
+      role,
       organization_id: organizationId,
-      assigned_by: adminUser.id,
+      assigned_by: user.id,
       updated_at: new Date().toISOString()
     });
 
   if (roleError) {
-    throw apiError.internal(roleError.message);
+    console.error('[assign-role] upsert failed:', roleError);
+    throw apiError.internal('Failed to assign role');
   }
 
-  return success({ 
-    success: true, 
-    message: `Role '${role}' assigned successfully to organization ${organizationId}` 
-  });
-}
-
+  return success({ success: true }, `Role '${role}' assigned successfully`);
+});

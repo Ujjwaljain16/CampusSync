@@ -20,8 +20,12 @@ import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { getIssuerJwk, verifyCredentialJws } from '@/lib/vc';
 import type { VerifiableCredential } from '@/types/index';
 import { success, apiError } from '@/lib/api';
+import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'verify-credential', RateLimitPresets.relaxed);
+  if (limited) return limited;
+
   const body = await req.json() as { 
     jws?: string; 
     vc?: VerifiableCredential;
@@ -132,6 +136,9 @@ export async function POST(req: NextRequest) {
 
 // GET endpoint for public credential verification (no auth required)
 export async function GET(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'verify-credential', RateLimitPresets.relaxed);
+  if (limited) return limited;
+
   const { searchParams } = new URL(req.url);
   const credentialId = searchParams.get('id');
   const jws = searchParams.get('jws');

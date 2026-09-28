@@ -145,6 +145,16 @@ export async function requireRole(allowedRoles: string[]): Promise<{
     }
   }
   
+  // A role that is still pending approval (or was denied) grants no privileges
+  if (result.approvalStatus === 'pending' || result.approvalStatus === 'denied') {
+    return {
+      user: result.user,
+      role: result.role,
+      authorized: false,
+      message: 'Your account is awaiting approval or access was denied'
+    }
+  }
+
   const isAuthorized = allowedRoles.includes(result.role)
   
   if (!isAuthorized) {

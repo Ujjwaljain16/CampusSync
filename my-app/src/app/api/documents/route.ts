@@ -44,7 +44,11 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
 // POST /api/documents - create a document (student creates own)
 export const POST = withAuth(async (req: NextRequest, { user }) => {
   const supabase = await createSupabaseServerClient();
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== 'object') throw apiError.badRequest('Invalid JSON body');
+  if (typeof body.document_type !== 'string' || typeof body.title !== 'string' || typeof body.file_url !== 'string') {
+    throw apiError.badRequest('document_type, title and file_url are required');
+  }
   
   // Get organization context for multi-tenancy
   const orgContext = await getOrganizationContext(user);
@@ -61,7 +65,8 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
     file_url: body.file_url,
     ocr_text: body.ocr_text || null,
     ocr_confidence: body.ocr_confidence || null,
-    verification_status: body.verification_status || 'pending',
+    // Students cannot choose their own verification status
+    verification_status: 'pending',
     metadata: body.metadata || null
   };
 
@@ -71,7 +76,10 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
     .select()
     .single();
 
-  if (error) throw apiError.internal(error.message);
+  if (error) {
+    console.error('Document create error:', error);
+    throw apiError.internal('Failed to create document');
+  }
   
   return success(data, 'Document created successfully', 201);
 });

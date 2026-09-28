@@ -1,16 +1,25 @@
 import { NextRequest } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { success, apiError } from '@/lib/api';
+import { withRole, success, apiError, isValidUUID, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-export async function GET(request: NextRequest) {
+// GET /api/documents/evidence?documentId=... - verification evidence for reviewers (org-scoped)
+export const GET = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], async (request: NextRequest, { user }) => {
   const { searchParams } = new URL(request.url);
   const documentId = searchParams.get('documentId');
-  if (!documentId) throw apiError.badRequest('documentId required');
+  if (!documentId || !isValidUUID(documentId)) throw apiError.badRequest('Valid documentId required');
+
+  const supabase = await createSupabaseServerClient();
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+
+  // Ensure the document belongs to the reviewer's organization(s)
+  const { data: doc } = await supabase
+    .from('documents')
+    .select('id')
+    .eq('id', documentId)
+    .in('organization_id', targetOrgIds)
+    .maybeSingle();
+  if (!doc) throw apiError.notFound('Document not found');
 
   const { data, error } = await supabase
     .from('document_metadata')
@@ -18,7 +27,7 @@ export async function GET(request: NextRequest) {
     .eq('document_id', documentId)
     .order('updated_at', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (error || !data) return success({});
 
@@ -32,6 +41,4 @@ export async function GET(request: NextRequest) {
     confidence: (data as Record<string, unknown>).ai_confidence_score ?? undefined
   };
   return success(out);
-}
-
-
+});

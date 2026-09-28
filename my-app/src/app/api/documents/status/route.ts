@@ -1,56 +1,62 @@
-// Unified document status API
+// Unified document status API (reviewer-facing, organization-scoped)
 import { NextRequest } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { success, apiError } from '@/lib/api';
+import { withRole, success, apiError, isValidUUID, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const REVIEWER_ROLES = ['faculty', 'admin', 'org_admin', 'super_admin'];
+const MAX_BATCH = 50;
 
-export async function GET(request: NextRequest) {
+const DOC_SELECT = `
+  id,
+  document_type,
+  title,
+  institution,
+  verification_status,
+  created_at,
+  updated_at,
+  document_metadata (
+    ai_confidence_score,
+    verification_details,
+    created_at,
+    updated_at
+  )
+`;
+
+export const GET = withRole(REVIEWER_ROLES, async (request: NextRequest, { user }) => {
   const { searchParams } = new URL(request.url);
   const documentId = searchParams.get('documentId');
-
-  // For testing, allow empty documentId
-  if (!documentId && process.env.NODE_ENV === 'production') {
-    throw apiError.badRequest('Document ID required');
+  if (!documentId || !isValidUUID(documentId)) {
+    throw apiError.badRequest('Valid document ID required');
   }
 
-    // Get document status and metadata
-    const { data: document, error: docError } = await supabase
-      .from('documents')
-      .select(`
-        id,
-        document_type,
-        title,
-        institution,
-        verification_status,
-        created_at,
-        updated_at,
-        document_metadata (
-          ai_confidence_score,
-          verification_details,
-          created_at,
-          updated_at
-        )
-      `)
-      .eq('id', documentId)
-      .single();
+  const supabase = await createSupabaseServerClient();
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+
+  const { data: document, error: docError } = await supabase
+    .from('documents')
+    .select(DOC_SELECT)
+    .eq('id', documentId)
+    .in('organization_id', targetOrgIds)
+    .single();
 
   if (docError || !document) {
     throw apiError.notFound('Document not found');
   }
 
-  // Get recent audit logs for this document
-  const { data: auditLogs, error: auditError } = await supabase
-    .from('audit_logs')
-    .select('action, details, created_at')
-    .eq('target_id', documentId)
-    .order('created_at', { ascending: false })
-    .limit(10);
-
-  if (auditError) {
+  // Authorization for this document is established above; audit_logs may be
+  // restricted by RLS, so read it with the service client for this document only.
+  let auditLogs: unknown[] = [];
+  try {
+    const admin = await createSupabaseAdminClient();
+    const { data } = await admin
+      .from('audit_logs')
+      .select('action, details, created_at')
+      .eq('target_id', documentId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    auditLogs = data || [];
+  } catch (auditError) {
     console.error('Audit logs fetch error:', auditError);
   }
 
@@ -64,18 +70,25 @@ export async function GET(request: NextRequest) {
     details: document.document_metadata?.[0]?.verification_details,
     createdAt: document.created_at,
     updatedAt: document.updated_at,
-    auditTrail: auditLogs || []
+    auditTrail: auditLogs
   });
-}
+});
 
-export async function POST(request: NextRequest) {
-  const { documentIds } = await request.json();
+export const POST = withRole(REVIEWER_ROLES, async (request: NextRequest, { user }) => {
+  const body = await request.json().catch(() => null) as { documentIds?: unknown } | null;
+  const documentIds = body?.documentIds;
 
-  if (!documentIds || !Array.isArray(documentIds)) {
+  if (!Array.isArray(documentIds) || documentIds.length === 0) {
     throw apiError.badRequest('Document IDs array required');
   }
+  if (documentIds.length > MAX_BATCH || !documentIds.every((id) => typeof id === 'string' && isValidUUID(id))) {
+    throw apiError.badRequest(`Provide up to ${MAX_BATCH} valid document IDs`);
+  }
 
-  // Get status for multiple documents
+  const supabase = await createSupabaseServerClient();
+  const orgContext = await getOrganizationContext(user);
+  const targetOrgIds = getTargetOrganizationIds(orgContext);
+
   const { data: documents, error: docError } = await supabase
     .from('documents')
     .select(`
@@ -91,14 +104,15 @@ export async function POST(request: NextRequest) {
         verification_details
       )
     `)
-    .in('id', documentIds);
+    .in('id', documentIds as string[])
+    .in('organization_id', targetOrgIds);
 
   if (docError) {
     console.error('Documents fetch error:', docError);
     throw apiError.internal('Failed to fetch documents');
   }
 
-  const statuses = documents.map(doc => ({
+  const statuses = (documents || []).map(doc => ({
     documentId: doc.id,
     type: doc.document_type,
     title: doc.title,
@@ -111,4 +125,4 @@ export async function POST(request: NextRequest) {
   }));
 
   return success({ documents: statuses });
-}
+});

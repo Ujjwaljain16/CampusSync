@@ -2,12 +2,12 @@ import { success } from '@/lib/api';
 import { createClient } from '@supabase/supabase-js';
 
 export async function GET() {
+  const isProd = process.env.NODE_ENV === 'production';
   const diagnostics = {
     environment: {
       hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
       hasKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      urlValue: process.env.NEXT_PUBLIC_SUPABASE_URL?.substring(0, 20) + '...',
       isPlaceholder: process.env.NEXT_PUBLIC_SUPABASE_URL === 'your_supabase_project_url'
     },
     supabase: {
@@ -74,6 +74,11 @@ export async function GET() {
 
   } catch (error) {
     diagnostics.supabase.error = `Connection error: ${error instanceof Error ? error.message : 'Unknown'}`;
+  }
+
+  // Never leak raw error text (which may include hostnames/policy names) in production
+  if (isProd && diagnostics.supabase.error) {
+    diagnostics.supabase.error = 'Supabase is not reachable or not fully configured';
   }
 
   return success(diagnostics);

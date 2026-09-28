@@ -11,7 +11,7 @@ interface RateLimitStore {
 const rateLimitStore = new Map<string, RateLimitStore>();
 
 // Cleanup old entries every 5 minutes
-setInterval(() => {
+const cleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, value] of rateLimitStore.entries()) {
     if (value.resetTime < now) {
@@ -19,6 +19,7 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+cleanupTimer.unref?.();
 
 export interface RateLimitConfig {
   interval: number; // Time window in milliseconds
@@ -148,3 +149,34 @@ export const RateLimitPresets = {
     uniqueTokenPerInterval: 5,
   },
 };
+
+/**
+ * Best-effort client IP extraction (behind Vercel/proxies).
+ */
+export function getClientIp(request: Request): string {
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return request.headers.get('x-real-ip') || 'unknown';
+}
+
+/**
+ * Enforce a rate limit for a route. Returns a 429 Response when the limit is
+ * exceeded, or null when the request may proceed.
+ *
+ * NOTE: the store is in-memory and per server instance, so on serverless
+ * platforms this is a best-effort brake, not a hard guarantee.
+ */
+export function enforceRateLimit(
+  request: Request,
+  scope: string,
+  config: RateLimitConfig = RateLimitPresets.standard,
+  identifier?: string
+): Response | null {
+  const result = rateLimit(`${scope}:${identifier ?? getClientIp(request)}`, config);
+  if (result.success) return null;
+  const retryAfter = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000));
+  return new Response(JSON.stringify({ error: 'Too many requests. Please try again later.' }), {
+    status: 429,
+    headers: { 'Content-Type': 'application/json', 'Retry-After': String(retryAfter) },
+  });
+}
