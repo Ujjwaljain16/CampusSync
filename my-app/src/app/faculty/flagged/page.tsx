@@ -29,6 +29,7 @@ export default function FacultyFlaggedPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [actioning, setActioning] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,6 +54,7 @@ export default function FacultyFlaggedPage() {
 
   const approveOne = useCallback(async (cert: FlaggedCert) => {
     setActioning(true);
+    setActionError(null);
     try {
       const res = await fetch('/api/certificates/approve', {
         method: 'POST',
@@ -61,6 +63,8 @@ export default function FacultyFlaggedPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Approve failed');
+    } catch (e: unknown) {
+      setActionError(e instanceof Error ? e.message : 'Approve failed');
     } finally {
       setActioning(false);
       load();
@@ -69,6 +73,7 @@ export default function FacultyFlaggedPage() {
 
   const rejectOne = useCallback(async (cert: FlaggedCert) => {
     setActioning(true);
+    setActionError(null);
     try {
       const res = await fetch('/api/certificates/approve', {
         method: 'POST',
@@ -77,6 +82,8 @@ export default function FacultyFlaggedPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Reject failed');
+    } catch (e: unknown) {
+      setActionError(e instanceof Error ? e.message : 'Reject failed');
     } finally {
       setActioning(false);
       load();
@@ -87,13 +94,26 @@ export default function FacultyFlaggedPage() {
     const ids = Object.keys(selected).filter(k => selected[k]);
     if (ids.length === 0) return;
     setActioning(true);
+    setActionError(null);
     try {
+      const failures: string[] = [];
       for (const id of ids) {
-        await fetch('/api/certificates/approve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ certificateId: id, status: 'approved', approveReason: 'batch manual approve' }),
-        });
+        try {
+          const res = await fetch('/api/certificates/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ certificateId: id, status: 'approved', approveReason: 'batch manual approve' }),
+          });
+          if (!res.ok) {
+            const json = await res.json().catch(() => ({}));
+            failures.push(`${id}: ${json.error || res.statusText || 'failed'}`);
+          }
+        } catch (e: unknown) {
+          failures.push(`${id}: ${e instanceof Error ? e.message : 'network error'}`);
+        }
+      }
+      if (failures.length > 0) {
+        setActionError(`${failures.length} of ${ids.length} failed - ${failures.slice(0, 3).join('; ')}${failures.length > 3 ? '; ...' : ''}`);
       }
     } finally {
       setActioning(false);
@@ -106,13 +126,26 @@ export default function FacultyFlaggedPage() {
     const ids = Object.keys(selected).filter(k => selected[k]);
     if (ids.length === 0) return;
     setActioning(true);
+    setActionError(null);
     try {
+      const failures: string[] = [];
       for (const id of ids) {
-        await fetch('/api/certificates/approve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ certificateId: id, status: 'rejected', rejectReason: 'batch manual reject' }),
-        });
+        try {
+          const res = await fetch('/api/certificates/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ certificateId: id, status: 'rejected', rejectReason: 'batch manual reject' }),
+          });
+          if (!res.ok) {
+            const json = await res.json().catch(() => ({}));
+            failures.push(`${id}: ${json.error || res.statusText || 'failed'}`);
+          }
+        } catch (e: unknown) {
+          failures.push(`${id}: ${e instanceof Error ? e.message : 'network error'}`);
+        }
+      }
+      if (failures.length > 0) {
+        setActionError(`${failures.length} of ${ids.length} failed - ${failures.slice(0, 3).join('; ')}${failures.length > 3 ? '; ...' : ''}`);
       }
     } finally {
       setActioning(false);
@@ -128,6 +161,7 @@ export default function FacultyFlaggedPage() {
 
     return (
       <div className="space-y-4">
+        {actionError && <p role="alert" className="text-rose-300">{actionError}</p>}
         <div className="flex gap-2">
           <button disabled={actioning} onClick={batchApprove} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-emerald-700 transition-all disabled:opacity-50">Batch Approve</button>
           <button disabled={actioning} onClick={batchReject} className="bg-rose-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-rose-700 transition-all disabled:opacity-50">Batch Reject</button>
@@ -195,7 +229,7 @@ export default function FacultyFlaggedPage() {
         </div>
       </div>
     );
-  }, [loading, error, rows, selected, actioning, toggle, batchApprove, batchReject, approveOne, rejectOne]);
+  }, [loading, error, actionError, rows, selected, actioning, toggle, batchApprove, batchReject, approveOne, rejectOne]);
 
   return (
     <div className="min-h-[calc(100vh-120px)] bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-10">
