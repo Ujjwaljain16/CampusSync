@@ -1,6 +1,7 @@
 # Database schema: target design and cleanup plan
 
-Status: **DRAFT migrations, verified against a model of the production schema, never run against the real database.**
+Status: steps 01 to 04 are applied to the production database; steps 05 to 08 wait for the code in this branch to be deployed.
+All steps are verified against a model of the production schema (`supabase/tests`).
 Source of truth for the *current* schema is the introspection of 2026-10-14; for *required* behaviour it is the
 application code (three independent read-only analyses of every `.from()`, `.rpc()`, storage and realtime use).
 

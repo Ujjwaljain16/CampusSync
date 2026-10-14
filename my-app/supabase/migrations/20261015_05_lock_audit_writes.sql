@@ -1,17 +1,14 @@
 -- Schema cleanup, step 5 of 8: LOCK AUDIT WRITES. *** APPLY ONLY AFTER the application change below is deployed. ***
 -- DRAFT. Idempotent; one transaction. Plain ASCII on purpose.
 --
--- Requires (application change): every audit_logs INSERT must go through the service-role client. Today a few
--- writers still use the signed-in user's session: certificateService (writeAudit(db, ...)), vcs/revoke,
--- certificates/delete, credentials/sd/issue and the documents routes. Their inserts only succeed because the table
--- currently lets any member of an organization insert audit rows (with a forged actor if they want to). Locking the
--- table before that change would silently drop those rows (the writers only log insert errors).
+-- Requires (application change): every audit_logs INSERT goes through the service-role client (writeAudit in
+-- src/lib/api/utils/audit.ts does this). Apply this file only after that code is deployed, otherwise audit rows from
+-- the older code paths would be refused.
 --
 -- What this does
---   * Nobody but the backend can write audit_logs; signed-in users can no longer forge or flood audit rows.
+--   * Only the backend writes audit_logs.
 --   * Reading: a user sees the rows they caused, an admin of an organization (admin or above) sees that organization's
 --     rows, a super admin sees everything including platform-level events (organization_id is NULL).
---     Before, EVERY member of an organization (students included) could read the organization's whole audit trail.
 
 begin;
 

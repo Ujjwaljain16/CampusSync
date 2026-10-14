@@ -2,8 +2,7 @@
 -- *** APPLY ONLY AFTER you have read the auth.users trigger body (20261015_00_preflight.sql, last query) and
 -- confirmed it sets approval_status EXPLICITLY. *** DRAFT. Idempotent. Plain ASCII on purpose.
 --
--- Why: the live default is 'approved'. Every application insert sets the value explicitly, but one forgotten value
--- (or any other writer) silently grants an approved role. A safe default costs nothing for code that is explicit.
+-- Why: a safe default costs nothing for code that always sets the value explicitly.
 --
 -- Risk: if the signup trigger on auth.users inserts a role row WITHOUT approval_status and relies on the old default,
 -- new students would become 'pending' and be locked out. That is why this is a separate step. If the trigger relies
