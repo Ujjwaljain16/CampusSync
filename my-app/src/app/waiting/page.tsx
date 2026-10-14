@@ -87,7 +87,7 @@ export default function WaitingPage() {
     // Create Supabase client
     const supabase = createClient();
     
-    // Subscribe to recruiter_org_access table changes
+    // Subscribe to changes of my own role rows (approval state lives in user_roles)
     const channel: RealtimeChannel = supabase
       .channel('recruiter-access-requests')
       .on(
@@ -95,8 +95,8 @@ export default function WaitingPage() {
         {
           event: '*', // INSERT, UPDATE, DELETE
           schema: 'public',
-          table: 'recruiter_org_access',
-          filter: `recruiter_user_id=eq.${userId}` // Only my requests
+          table: 'user_roles',
+          filter: `user_id=eq.${userId}` // Only my role rows
         },
         (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
           logger.debug('Realtime update received', { payload });

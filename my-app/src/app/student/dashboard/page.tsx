@@ -256,6 +256,12 @@ export default function StudentDashboard() {
                 <span className="hidden sm:inline relative z-10">Upload Certificate</span>
                 <span className="sm:hidden relative z-10">Upload</span>
               </a>
+              <a
+                href="/student/privacy"
+                className="text-white/90 hover:text-white underline underline-offset-4 text-sm font-medium"
+              >
+                Privacy
+              </a>
               <LogoutButton variant="minimal" />
             </div>
           </div>
