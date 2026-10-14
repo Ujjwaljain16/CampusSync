@@ -67,6 +67,24 @@ describe('GET /api/certificates/approval-history', () => {
     expect(res.status).toBe(403);
   });
 
+  it('is open to an org admin of the organization and to a super admin, but only for their own scope', async () => {
+    const ORG_ADMIN = uuid(14);
+    const SUPER = uuid(15);
+    harness.db.seed('user_roles', [role(ORG_ADMIN, 'org_admin', ORG_A), role(SUPER, 'super_admin', null)]);
+
+    harness.signIn(ORG_ADMIN);
+    const own = await approvalHistoryGET(req('/api/certificates/approval-history'));
+    expect(own.status).toBe(200);
+    expect(((await own.json()) as any).data.approvals).toHaveLength(1);
+
+    const foreign = await approvalHistoryGET(req('/api/certificates/approval-history', { headers: { 'X-Organization-ID': ORG_B } }));
+    expect(foreign.status).toBe(403);
+
+    harness.signIn(SUPER);
+    const asSuper = await approvalHistoryGET(req('/api/certificates/approval-history', { headers: { 'X-Organization-ID': ORG_A } }));
+    expect(asSuper.status).toBe(200);
+  });
+
   it('does not count a pending role row', async () => {
     harness.signIn(PENDING);
     const res = await approvalHistoryGET(req('/api/certificates/approval-history'));
