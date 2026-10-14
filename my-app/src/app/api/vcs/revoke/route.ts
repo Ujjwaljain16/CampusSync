@@ -9,6 +9,7 @@ import {
   getTargetOrganizationIds,
 } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { credentialIdCandidates, isInvalidInputSyntax } from '@/lib/vcId';
 
 interface RevokeBody {
   credentialId: string;
@@ -29,8 +30,9 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
 
   const body = result.data;
 
-  if (typeof body.credentialId !== 'string' || !isValidUUID(body.credentialId)) {
-    return apiError.badRequest('credentialId must be a valid UUID');
+  const candidates = credentialIdCandidates(body.credentialId);
+  if (candidates.length === 0) {
+    return apiError.badRequest('credentialId must be a credential id (urn:uuid:<uuid> or a UUID)');
   }
   if (body.reason !== undefined && body.reason !== null) {
     if (typeof body.reason !== 'string') return apiError.badRequest('reason must be a string');
@@ -42,17 +44,27 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
 
   const supabase = await createSupabaseServerClient();
 
-  // Load the credential so we can scope the caller to the right organization
-  const { data: vcRow, error: vcErr } = await supabase
-    .from('verifiable_credentials')
-    .select('id, status, credential')
-    .eq('id', body.credentialId)
-    .maybeSingle();
-  if (vcErr) {
-    console.error('[vcs/revoke] credential lookup failed:', vcErr.code);
-    return apiError.internal('Failed to revoke credential');
+  // Load the credential so we can scope the caller to the right organization.
+  // The id is stored as issued (urn:uuid:<uuid>); accept the bare UUID too.
+  let vcRow: { id: string; status: string; credential: unknown } | null = null;
+  for (const candidate of candidates) {
+    const { data, error: vcErr } = await supabase
+      .from('verifiable_credentials')
+      .select('id, status, credential')
+      .eq('id', candidate)
+      .maybeSingle();
+    if (vcErr) {
+      if (isInvalidInputSyntax(vcErr)) continue; // uuid-typed column: try the bare spelling
+      console.error('[vcs/revoke] credential lookup failed:', vcErr.code);
+      return apiError.internal('Failed to revoke credential');
+    }
+    if (data) {
+      vcRow = data as typeof vcRow;
+      break;
+    }
   }
   if (!vcRow) return apiError.notFound('Credential not found');
+  const credentialId = vcRow.id; // exactly as stored
 
   // Organization scoping (credentials have no organization column; use the certificate's)
   if (role !== 'super_admin') {
@@ -76,14 +88,14 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
 
   // Idempotent: already revoked
   if (vcRow.status === 'revoked') {
-    return success({ status: 'revoked', credentialId: body.credentialId, alreadyRevoked: true });
+    return success({ status: 'revoked', credentialId, alreadyRevoked: true });
   }
 
   const now = new Date().toISOString();
   let { data: updated, error: updateError } = await supabase
     .from('verifiable_credentials')
     .update({ status: 'revoked', revoked_at: now, revoked_reason: reason })
-    .eq('id', body.credentialId)
+    .eq('id', credentialId)
     .select('id');
 
   // revoked_at / revoked_reason may not exist in every deployment: fall back to status only
@@ -92,7 +104,7 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
     ({ data: updated, error: updateError } = await supabase
       .from('verifiable_credentials')
       .update({ status: 'revoked' })
-      .eq('id', body.credentialId)
+      .eq('id', credentialId)
       .select('id'));
   }
 
@@ -110,7 +122,7 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
       actor_id: user.id,
       action: 'revoke_vc',
       entity_type: 'verifiable_credential',
-      entity_id: body.credentialId,
+      entity_id: credentialId,
       details: { reason },
       created_at: now,
     });
@@ -119,5 +131,5 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
     console.error('[vcs/revoke] audit log error:', auditError);
   }
 
-  return success({ status: 'revoked', credentialId: body.credentialId });
+  return success({ status: 'revoked', credentialId });
 });
