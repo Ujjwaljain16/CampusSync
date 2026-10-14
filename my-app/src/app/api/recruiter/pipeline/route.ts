@@ -1,164 +1,89 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
-import { getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
-import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
+import { NextRequest } from 'next/server';
+import { success, apiError } from '@/lib/api/utils/response';
+import { RateLimitPresets } from '@/lib/rateLimit';
+import { recruiterRoute, readJsonObject, getApprovedStudentOrgs } from '@/lib/privacy/recruiterAccess';
+import { isUuid } from '@/lib/privacy/sanitize';
 
 type PipelineStage = 'shortlisted' | 'contacted' | 'interviewed' | 'offered' | 'rejected';
+const VALID_STAGES: PipelineStage[] = ['shortlisted', 'contacted', 'interviewed', 'offered', 'rejected'];
+const MAX_NOTES = 2000;
 
-// GET: Fetch all pipeline entries for current recruiter (org-scoped)
-export async function GET(req: NextRequest) {
-  try {
-    const userWithRole = await getServerUserWithRole();
-    
-    if (!userWithRole) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
-    const { user, role } = userWithRole;
-    
-    if (role !== 'recruiter' && role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+const RATE = { scope: 'recruiter-pipeline', rateLimit: RateLimitPresets.relaxed };
 
-    const supabase = await createSupabaseAdminClient();
-    const requestedOrgId = getRequestedOrgId(req);
-    const orgContext = await getOrganizationContext(user, requestedOrgId);
-    const targetOrgIds = getTargetOrganizationIds(orgContext);
-    
-    const { data, error } = await supabase
-      .from('recruiter_pipeline')
-      .select('student_id, stage, notes, updated_at')
-      .eq('recruiter_id', user.id)
-      .in('organization_id', targetOrgIds) // Multi-org filter
-      .order('updated_at', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching pipeline:', error);
-      return NextResponse.json({ error: 'Failed to fetch pipeline' }, { status: 500 });
-    }
-
-    // Return as map: { studentId: stage }
-    const pipeline: Record<string, PipelineStage> = {};
-    data?.forEach((entry: { student_id: string; stage: PipelineStage }) => {
-      pipeline[entry.student_id] = entry.stage as PipelineStage;
-    });
-
-    return NextResponse.json({ pipeline });
-
-  } catch (error) {
-    console.error('Pipeline GET error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+// GET: pipeline as a map { studentId: stage }. Response (envelope): { data: { pipeline } }
+export const GET = recruiterRoute(RATE, async (_req: NextRequest, access) => {
+  const { data, error } = await access.admin
+    .from('recruiter_pipeline')
+    .select('student_id, stage, notes, updated_at')
+    .eq('recruiter_id', access.user.id)
+    .in('organization_id', access.orgIds)
+    .order('updated_at', { ascending: false })
+    .limit(1000);
+  if (error) {
+    console.error('[recruiter-pipeline] fetch failed', error);
+    return apiError.internal('Failed to fetch pipeline');
   }
-}
 
-// POST: Update pipeline stage for a student
-export async function POST(req: NextRequest) {
-  try {
-    const userWithRole = await getServerUserWithRole();
-    
-    if (!userWithRole) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
-    const { user, role } = userWithRole;
-    
-    if (role !== 'recruiter' && role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const pipeline: Record<string, PipelineStage> = {};
+  for (const entry of (data ?? []) as Array<{ student_id: string; stage: PipelineStage }>) {
+    pipeline[entry.student_id] = entry.stage;
+  }
+  return success({ pipeline });
+});
 
-    const { studentId, stage, notes } = await req.json();
-    
-    if (!studentId || !stage) {
-      return NextResponse.json({ error: 'Student ID and stage required' }, { status: 400 });
-    }
+// POST: set the stage for a student (stored against the student's own organisation)
+export const POST = recruiterRoute(RATE, async (req: NextRequest, access) => {
+  const parsed = await readJsonObject(req);
+  if (!parsed.ok) return parsed.response;
+  const { studentId, stage, notes } = parsed.body;
 
-    const validStages: PipelineStage[] = ['shortlisted', 'contacted', 'interviewed', 'offered', 'rejected'];
-    if (!validStages.includes(stage)) {
-      return NextResponse.json({ error: 'Invalid stage' }, { status: 400 });
-    }
+  if (!isUuid(studentId)) return apiError.badRequest('A valid studentId is required');
+  if (typeof stage !== 'string' || !VALID_STAGES.includes(stage as PipelineStage)) {
+    return apiError.badRequest('Invalid stage');
+  }
+  if (notes !== undefined && notes !== null && (typeof notes !== 'string' || notes.length > MAX_NOTES)) {
+    return apiError.badRequest(`notes must be a string of at most ${MAX_NOTES} characters`);
+  }
 
-    const supabase = await createSupabaseAdminClient();
-    const requestedOrgId = getRequestedOrgId(req);
-    const orgContext = await getOrganizationContext(user, requestedOrgId);
-    const targetOrgIds = getTargetOrganizationIds(orgContext);
-    const targetOrgId = requestedOrgId || ('organizationId' in orgContext ? orgContext.organizationId : targetOrgIds[0]);
-    
-    // Upsert (insert or update) with organization
-    const { data, error } = await supabase
-      .from('recruiter_pipeline')
-      .upsert({
-        recruiter_id: user.id,
+  const studentOrgId = (await getApprovedStudentOrgs(access.admin, [studentId], access.orgIds)).get(studentId);
+  if (!studentOrgId) return apiError.notFound('Student not found');
+
+  const { data, error } = await access.admin
+    .from('recruiter_pipeline')
+    .upsert(
+      {
+        recruiter_id: access.user.id,
         student_id: studentId,
-        organization_id: targetOrgId, // Multi-org field
+        organization_id: studentOrgId,
         stage,
-        notes: notes || null,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'recruiter_id,student_id'
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error updating pipeline:', error);
-      return NextResponse.json({ error: 'Failed to update pipeline' }, { status: 500 });
-    }
-
-    return NextResponse.json({ 
-      message: 'Pipeline updated',
-      pipeline: data
-    });
-
-  } catch (error) {
-    console.error('Pipeline POST error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+        notes: typeof notes === 'string' && notes ? notes : null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'recruiter_id,student_id' }
+    )
+    .select()
+    .single();
+  if (error) {
+    console.error('[recruiter-pipeline] upsert failed', error);
+    return apiError.internal('Failed to update pipeline');
   }
-}
+  return success({ message: 'Pipeline updated', pipeline: data });
+});
 
-// DELETE: Remove a student from pipeline
-export async function DELETE(req: NextRequest) {
-  try {
-    const userWithRole = await getServerUserWithRole();
-    
-    if (!userWithRole) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
-    const { user, role } = userWithRole;
-    
-    if (role !== 'recruiter' && role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+// DELETE: remove a student from the pipeline (?studentId=)
+export const DELETE = recruiterRoute(RATE, async (req: NextRequest, access) => {
+  const studentId = new URL(req.url).searchParams.get('studentId');
+  if (!isUuid(studentId)) return apiError.badRequest('A valid studentId is required');
 
-    const { searchParams } = new URL(req.url);
-    const studentId = searchParams.get('studentId');
-    
-    if (!studentId) {
-      return NextResponse.json({ error: 'Student ID required' }, { status: 400 });
-    }
-
-    const supabase = await createSupabaseAdminClient();
-    const requestedOrgId = getRequestedOrgId(req);
-    const orgContext = await getOrganizationContext(user, requestedOrgId);
-    const targetOrgIds = getTargetOrganizationIds(orgContext);
-    
-    const { error } = await supabase
-      .from('recruiter_pipeline')
-      .delete()
-      .eq('recruiter_id', user.id)
-      .eq('student_id', studentId)
-      .in('organization_id', targetOrgIds); // Multi-org filter
-
-    if (error) {
-      console.error('Error removing from pipeline:', error);
-      return NextResponse.json({ error: 'Failed to remove from pipeline' }, { status: 500 });
-    }
-
-    return NextResponse.json({ message: 'Removed from pipeline' });
-
-  } catch (error) {
-    console.error('Pipeline DELETE error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  const { error } = await access.admin
+    .from('recruiter_pipeline')
+    .delete()
+    .eq('recruiter_id', access.user.id)
+    .eq('student_id', studentId)
+    .in('organization_id', access.orgIds);
+  if (error) {
+    console.error('[recruiter-pipeline] delete failed', error);
+    return apiError.internal('Failed to remove from pipeline');
   }
-}
-
+  return success({ message: 'Removed from pipeline' });
+});

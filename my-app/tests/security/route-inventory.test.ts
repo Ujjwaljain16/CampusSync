@@ -50,6 +50,7 @@ const GUARDS: RegExp[] = [
   /withRole\(/,
   /withErrorHandler\(/,
   /requireRole\(/,
+  /recruiterRoute\(/, // src/lib/privacy/recruiterAccess.ts: auth + approved recruiter + org access + rate limit
   /getServerUserWithRole\(/,
   /supabase\.auth\.getUser\(/i, // also matches authSupabase.auth.getUser(
   /WEBHOOK_SECRET/,

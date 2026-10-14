@@ -1,226 +1,59 @@
 import { NextRequest } from 'next/server';
-import { withRole, success, apiError, getOrganizationContext, type RecruiterContext } from '@/lib/api';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
+import { success } from '@/lib/api/utils/response';
+import { RateLimitPresets } from '@/lib/rateLimit';
+import { recruiterRoute } from '@/lib/privacy/recruiterAccess';
+import { clampInt, sanitizeFilterTerm, sanitizeTermList } from '@/lib/privacy/sanitize';
+import { searchStudents } from '@/lib/privacy/studentSearch';
+import { recordPiiRead } from '@/lib/privacy/audit';
 
-export const GET = withRole(['recruiter', 'admin'], async (request: NextRequest, { user }) => {
-
-  const { searchParams } = new URL(request.url);
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '10');
-  const search = searchParams.get('search') || '';
-  const skills = searchParams.get('skills')?.split(',') || [];
-  const verification_status = searchParams.get('verification_status')?.split(',') || [];
-  const confidence_min = parseFloat(searchParams.get('confidence_min') || '0');
-
-    const supabase = await createSupabaseServerClient();
+/**
+ * Paginated student list for recruiters.
+ *
+ * Query: page (>=1), limit (1..50, default 10), search, skills (comma separated).
+ * `verification_status` / `confidence_min` are no longer supported: recruiters only
+ * ever see VERIFIED certificates and confidence scores are not exposed.
+ * Response (envelope): { data: { students, pagination: { page, limit, total, totalPages, total_exact } } }
+ * Shares its privacy-filtered student shape with /api/recruiter/search-students.
+ */
+export const GET = recruiterRoute(
+  { scope: 'recruiter-students', rateLimit: RateLimitPresets.search },
+  async (req: NextRequest, access) => {
+    const { searchParams } = new URL(req.url);
+    const page = clampInt(searchParams.get('page'), 1, 10000, 1);
+    const limit = clampInt(searchParams.get('limit'), 1, 50, 10);
+    const search = sanitizeFilterTerm(searchParams.get('search') ?? '');
+    const skills = sanitizeTermList(searchParams.get('skills') ?? '');
     const offset = (page - 1) * limit;
 
-    // Get requested organization from header
-    const requestedOrgId = getRequestedOrgId(request);
-
-    // Get organization context for multi-tenancy (handles recruiter multi-org)
-    const orgContext = await getOrganizationContext(user, requestedOrgId);
-    
-    // Determine which organization IDs to query
-    let targetOrgIds: string[] = [];
-    
-    if ('isRecruiter' in orgContext && orgContext.isRecruiter) {
-      const recruiterContext = orgContext as RecruiterContext;
-      // Recruiter: use selected org or all accessible orgs
-      targetOrgIds = recruiterContext.selectedOrganization 
-        ? [recruiterContext.selectedOrganization]
-        : recruiterContext.accessibleOrganizations;
-    } else {
-      // Regular user: use their organization
-      targetOrgIds = [orgContext.organizationId];
-    }
-
-    // Fetch student user_ids from user_roles (filtered by accessible organizations)
-    const { data: studentRoleRows, error: roleErr } = await supabase
-      .from('user_roles')
-      .select('user_id')
-      .eq('role', 'student')
-      .in('organization_id', targetOrgIds);
-
-    if (roleErr) {
-      console.error('Error fetching student roles:', roleErr);
-      throw apiError.internal('Failed to fetch students');
-    }
-
-  const studentIds = (studentRoleRows || []).map((r: { user_id: string }) => r.user_id);
-    if (studentIds.length === 0) {
-      return success({ 
-        students: [], 
-        pagination: { page, limit, total: 0, totalPages: 0 } 
-      });
-    }
-
-    // First get certificates for students (filtered by accessible organizations)
-    let query = supabase
-      .from('certificates')
-      .select(`
-        id,
-        title,
-        issuer,
-        issue_date,
-        verification_status,
-        confidence_score,
-        verification_method,
-        student_id,
-        created_at,
-        organization_id
-      `)
-      .in('student_id', studentIds)
-      .in('organization_id', targetOrgIds); // Multi-org filter for recruiter access
-
-    // Apply filters
-    if (search) {
-      query = query.or(`title.ilike.%${search}%,issuer.ilike.%${search}%`);
-    }
-
-    if (verification_status.length > 0) {
-      query = query.in('verification_status', verification_status);
-    }
-
-    if (confidence_min > 0) {
-      query = query.gte('confidence_score', confidence_min);
-    }
-
-    // Add pagination
-    query = query.range(offset, offset + limit - 1);
-
-    const { data: certificates, error } = await query;
-
-    if (error) {
-      console.error('Error fetching certificates:', error);
-      throw apiError.internal('Failed to fetch students');
-    }
-
-    if (!certificates || certificates.length === 0) {
-      return success({ 
-        students: [], 
-        pagination: { page, limit, total: 0, totalPages: 0 } 
-      });
-    }
-
-    // Get unique student IDs from certificates
-    const uniqueStudentIds = [...new Set(certificates.map(cert => cert.student_id))];
-
-    // Fetch profiles for these students (using actual schema)
-    const { data: profiles, error: profilesError } = await supabase
-      .from('profiles')
-      .select('id, full_name, role, created_at')
-      .in('id', uniqueStudentIds);
-
-    if (profilesError) {
-      console.error('Error fetching profiles:', profilesError);
-      // Continue without profiles
-    }
-
-    // Create a map for quick profile lookup
-    const profileMap = new Map();
-    profiles?.forEach(profile => {
-      profileMap.set(profile.id, profile);
-    });
-
-    // Group certificates by student
-    const studentsMap = new Map();
-    
-  certificates.forEach((cert: Record<string, unknown>) => {
-      const studentId = cert.student_id;
-      const profile = profileMap.get(studentId) || {
-        id: studentId,
-        full_name: 'Unknown Student',
-        role: 'student',
-        created_at: new Date().toISOString()
-      };
-
-      if (!studentsMap.has(studentId)) {
-        let gradYear = new Date().getFullYear();
-        if (typeof cert.date_issued === 'string') {
-          const parsedDate = new Date(cert.date_issued);
-          if (!isNaN(parsedDate.getTime())) {
-            gradYear = parsedDate.getFullYear();
-          }
-        }
-        studentsMap.set(studentId, {
-          id: studentId,
-          name: profile.full_name || 'Unknown Student',
-          email: `${studentId}@example.com`, // Generate email from ID
-          university: cert.institution || 'Unknown University', // Use certificate institution
-          graduation_year: gradYear,
-          location: 'Unknown', // Not in profiles schema
-          gpa: 0, // Not in profiles schema
-          major: 'Unknown', // Not in profiles schema
-          skills: [],
-          certifications: [],
-          verified_count: 0,
-          total_certifications: 0,
-          last_activity: cert.created_at
-        });
-      }
-
-      const student = studentsMap.get(studentId);
-      
-      // Add certification
-      student.certifications.push({
-        id: cert.id,
-        title: cert.title,
-        issuer: cert.issuer,
-        issue_date: cert.issue_date,
-        verification_status: cert.verification_status,
-        confidence_score: cert.confidence_score,
-        skills: [],
-        verification_method: cert.verification_method
-      });
-
-      // Update counts
-      student.total_certifications++;
-      if (cert.verification_status === 'verified') {
-        student.verified_count++;
-      }
-
-      // Update last activity
-      if (typeof cert.created_at === 'string' && new Date(cert.created_at) > new Date(student.last_activity)) {
-        student.last_activity = cert.created_at;
-      }
-    });
-
-  // Convert to array and apply skills filter
-  let students: Record<string, unknown>[] = Array.from(studentsMap.values());
-
-  // Apply skills filter (basic implementation)
-  if (skills.length > 0) {
-    students = students.filter((student: Record<string, unknown>) =>
-      (student.certifications as Record<string, unknown>[]).some((cert: Record<string, unknown>) =>
-        skills.some((skill: string) => {
-          const title = typeof cert.title === 'string' ? cert.title : '';
-          const issuer = typeof cert.issuer === 'string' ? cert.issuer : '';
-          return (
-            title.toLowerCase().includes(skill.toLowerCase()) ||
-            issuer.toLowerCase().includes(skill.toLowerCase())
-          );
-        })
-      )
+    const result = await searchStudents(
+      access.admin,
+      access.orgIds,
+      { q: search, skills, hasCertificates: skills.length > 0 },
+      { offset, limit }
     );
+
+    await recordPiiRead(access.admin, {
+      userId: access.user.id,
+      organizationId: access.selectedOrgId ?? access.orgIds[0] ?? null,
+      action: 'recruiter_search_students',
+      details: {
+        source: 'students_list',
+        result_count: result.students.length,
+        student_ids: result.students.map((s) => s.id),
+        page,
+        limit,
+      },
+    });
+
+    return success({
+      students: result.students,
+      pagination: {
+        page,
+        limit,
+        total: result.total,
+        total_exact: result.totalExact,
+        totalPages: Math.max(1, Math.ceil(result.total / limit)),
+      },
+    });
   }
-
-    // Get total count for pagination (filtered by accessible organizations)
-  const { count } = await supabase
-    .from('certificates')
-    .select('*', { count: 'exact', head: true })
-    .in('student_id', studentIds)
-    .in('organization_id', targetOrgIds);
-
-  return success({
-    students,
-    pagination: {
-      page,
-      limit,
-      total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit)
-    }
-  });
-});
-
+);

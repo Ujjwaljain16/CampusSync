@@ -1,136 +1,162 @@
 import { NextRequest } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { withRole, success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
-import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
+import { success, apiError } from '@/lib/api/utils/response';
+import { RateLimitPresets } from '@/lib/rateLimit';
+import { recruiterRoute, readJsonObject, getApprovedStudentOrgs } from '@/lib/privacy/recruiterAccess';
+import { isPlainObject, isUuid } from '@/lib/privacy/sanitize';
+import { getVisibilityForStudents } from '@/lib/privacy/visibility';
+import { recordPiiRead } from '@/lib/privacy/audit';
 
-export const POST = withRole(['recruiter', 'admin'], async (req: NextRequest, { user }) => {
-  const body = await req.json() as {
-    studentIds: string[];
-    format: 'csv' | 'json' | 'excel';
-    includeCredentials: boolean;
-    filters?: {
-      verified_only?: boolean;
-      date_from?: string;
-      date_to?: string;
-    };
-  };
+const MAX_EXPORT_STUDENTS = 100;
+const FORMATS = ['csv', 'json', 'excel'] as const;
+type ExportFormat = (typeof FORMATS)[number];
 
-  if (!body.studentIds || !body.format) {
-    throw apiError.badRequest('Missing required fields: studentIds, format');
-  }
+type ProfileRow = { id: string; full_name: string | null; email: string | null; created_at: string | null };
+type CertRow = { id: string; title: string | null; institution: string | null; date_issued: string | null; student_id: string };
 
-  const supabase = await createSupabaseServerClient();
-  
-  // Get organization context for multi-tenancy
-  const requestedOrgId = getRequestedOrgId(req);
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-  
-  // Get student profiles (filtered by organization)
-  const { data: students, error: studentsError } = await supabase
-    .from('profiles')
-    .select('id, full_name, email, created_at')
-    .in('id', body.studentIds)
-    .in('organization_id', targetOrgIds); // Multi-org filter
+/**
+ * Export selected students (max 100, UUID-validated).
+ *
+ * Only approved students of the recruiter's organisations are exported; e-mail is
+ * included only for students with `recruiter_share_contact`; credentials are
+ * limited to VERIFIED certificates (id, title, institution, date_issued).
+ * Response (envelope): { data: { data: rows, format, total_records, ... } }
+ */
+export const POST = recruiterRoute(
+  { scope: 'recruiter-export', rateLimit: RateLimitPresets.strict },
+  async (req: NextRequest, access) => {
+    const parsed = await readJsonObject(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body;
 
-  if (studentsError) {
-    throw apiError.internal(studentsError.message);
-  }
-
-  let exportData = students || [];
-
-  // Include credentials if requested
-  if (body.includeCredentials) {
-    const { data: certificates, error: certError } = await supabase
-      .from('certificates')
-      .select(`
-        id, title, institution, date_issued, verification_status,
-        confidence_score, student_id, created_at
-      `)
-      .in('student_id', body.studentIds)
-      .in('organization_id', targetOrgIds); // Multi-org filter
-
-    if (certError) {
-      console.error('Error fetching certificates:', certError);
-    } else {
-      // Group certificates by student
-      const certsByStudent = new Map();
-      certificates?.forEach(cert => {
-        if (!certsByStudent.has(cert.student_id)) {
-          certsByStudent.set(cert.student_id, []);
-        }
-        certsByStudent.get(cert.student_id).push(cert);
-      });
-
-      // Add certificates to student data
-      exportData = exportData.map(student => ({
-        ...student,
-        certificates: certsByStudent.get(student.id) || [],
-        certificate_count: certsByStudent.get(student.id)?.length || 0,
-        verified_certificates: (certsByStudent.get(student.id)?.filter((c: { verification_status: string }) => c.verification_status === 'verified').length) || 0
-      }));
+    if (!Array.isArray(body.studentIds) || body.studentIds.length === 0) {
+      return apiError.badRequest('studentIds must be a non-empty array');
     }
-  }
+    if (body.studentIds.length > MAX_EXPORT_STUDENTS) {
+      return apiError.badRequest(`At most ${MAX_EXPORT_STUDENTS} students can be exported at once`);
+    }
+    if (!body.studentIds.every(isUuid)) {
+      return apiError.badRequest('studentIds must be UUIDs');
+    }
+    if (typeof body.format !== 'string' || !(FORMATS as readonly string[]).includes(body.format)) {
+      return apiError.badRequest(`format must be one of: ${FORMATS.join(', ')}`);
+    }
+    if (body.includeCredentials !== undefined && typeof body.includeCredentials !== 'boolean') {
+      return apiError.badRequest('includeCredentials must be a boolean');
+    }
+    if (body.filters !== undefined && !isPlainObject(body.filters)) {
+      return apiError.badRequest('filters must be an object');
+    }
+    const format = body.format as ExportFormat;
+    const includeCredentials = body.includeCredentials === true;
+    const verifiedOnly = isPlainObject(body.filters) && body.filters.verified_only === true;
+    const requestedIds = Array.from(new Set(body.studentIds as string[]));
 
-  // Apply filters
-  if (body.filters?.verified_only) {
-    exportData = exportData.filter(student => 
-      (student as Record<string, unknown>).verified_certificates as number > 0
-    );
-  }
+    const { admin, orgIds } = access;
 
-  // Log the export action
-  const targetOrgId = requestedOrgId || 
-    ('organizationId' in orgContext ? orgContext.organizationId : null) || 
-    ('organizationIds' in orgContext && Array.isArray(orgContext.organizationIds) ? orgContext.organizationIds[0] : null) || null;
-  await supabase.from('audit_logs').insert({
-    user_id: user.id,
-    organization_id: targetOrgId, // Multi-org field
-    action: 'data_export',
-    target_id: body.studentIds.join(','),
-    details: {
-      format: body.format,
-      student_count: body.studentIds.length,
-      include_credentials: body.includeCredentials,
-      filters: body.filters
-    },
-    created_at: new Date().toISOString()
-  });
+    const approved = await getApprovedStudentOrgs(admin, requestedIds, orgIds);
+    const eligibleIds = requestedIds.filter((id) => approved.has(id));
 
-  // Format response based on requested format
-  if (body.format === 'csv') {
-    // For CSV, flatten the data
-    const csvData = exportData.map(student => {
-      const base = {
-        student_id: student.id,
-        full_name: student.full_name,
-        email: student.email,
-        joined_date: student.created_at
-      };
+    let profiles: ProfileRow[] = [];
+    let visibility = new Map<string, { recruiterShareContact: boolean }>();
+    const certsByStudent = new Map<string, CertRow[]>();
 
-      if (body.includeCredentials) {
-        return {
-          ...base,
-          certificate_count: (student as Record<string, unknown>).certificate_count,
-          verified_certificates: (student as Record<string, unknown>).verified_certificates
-        };
+    if (eligibleIds.length > 0) {
+      const { data, error } = await admin
+        .from('profiles')
+        .select('id, full_name, email, created_at')
+        .in('id', eligibleIds)
+        .in('organization_id', orgIds);
+      if (error) {
+        console.error('[recruiter-export] profile lookup failed', error);
+        return apiError.internal('Failed to export students');
       }
+      profiles = (data ?? []) as ProfileRow[];
+      visibility = await getVisibilityForStudents(admin, eligibleIds);
 
-      return base;
+      if (includeCredentials || verifiedOnly) {
+        const { data: certs, error: certError } = await admin
+          .from('certificates')
+          .select('id, title, institution, date_issued, student_id')
+          .in('student_id', eligibleIds)
+          .in('organization_id', orgIds)
+          .eq('verification_status', 'verified')
+          .order('date_issued', { ascending: false })
+          .limit(1000);
+        if (certError) {
+          console.error('[recruiter-export] certificate lookup failed', certError);
+          return apiError.internal('Failed to export credentials');
+        }
+        for (const c of (certs ?? []) as CertRow[]) {
+          const list = certsByStudent.get(c.student_id) ?? [];
+          list.push(c);
+          certsByStudent.set(c.student_id, list);
+        }
+      }
+    }
+
+    let rows: Array<Record<string, unknown>> = profiles.map((p) => {
+      const shares = visibility.get(p.id)?.recruiterShareContact === true;
+      const row: Record<string, unknown> = {
+        id: p.id,
+        full_name: p.full_name,
+        created_at: p.created_at,
+        contact_shared: shares,
+      };
+      if (shares && p.email) row.email = p.email;
+      if (includeCredentials) {
+        const certs = certsByStudent.get(p.id) ?? [];
+        row.certificates = certs.map(({ id, title, institution, date_issued }) => ({ id, title, institution, date_issued }));
+        row.certificate_count = certs.length;
+        row.verified_certificates = certs.length;
+      }
+      return row;
     });
+
+    if (verifiedOnly) {
+      rows = rows.filter((r) => (certsByStudent.get(String(r.id)) ?? []).length > 0);
+    }
+
+    await recordPiiRead(admin, {
+      userId: access.user.id,
+      organizationId: access.selectedOrgId ?? orgIds[0] ?? null,
+      action: 'recruiter_export_students',
+      details: {
+        format,
+        requested_count: requestedIds.length,
+        exported_count: rows.length,
+        student_ids: rows.map((r) => r.id),
+        include_credentials: includeCredentials,
+        verified_only: verifiedOnly,
+      },
+    });
+
+    if (format === 'csv') {
+      const csvData = rows.map((r) => {
+        const base: Record<string, unknown> = {
+          student_id: r.id,
+          full_name: r.full_name,
+          email: r.email ?? '',
+          joined_date: r.created_at,
+        };
+        if (includeCredentials) {
+          base.certificate_count = r.certificate_count;
+          base.verified_certificates = r.verified_certificates;
+        }
+        return base;
+      });
+      return success({
+        data: csvData,
+        format: 'csv',
+        headers: Object.keys(csvData[0] ?? {}),
+        total_records: csvData.length,
+      });
+    }
 
     return success({
-      data: csvData,
-      format: 'csv',
-      headers: Object.keys(csvData[0] || {}),
-      total_records: csvData.length
+      data: rows,
+      format,
+      total_records: rows.length,
+      exported_at: new Date().toISOString(),
     });
   }
-
-  return success({
-    data: exportData,
-    format: body.format,
-    total_records: exportData.length,
-    exported_at: new Date().toISOString()
-  });
-});
+);

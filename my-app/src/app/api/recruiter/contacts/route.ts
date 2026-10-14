@@ -1,88 +1,58 @@
 import { NextRequest } from 'next/server';
-import { createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
-import { success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
-import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
+import { success, apiError } from '@/lib/api/utils/response';
+import { RateLimitPresets } from '@/lib/rateLimit';
+import { recruiterRoute, readJsonObject, getApprovedStudentOrgs } from '@/lib/privacy/recruiterAccess';
+import { isUuid } from '@/lib/privacy/sanitize';
 
-// GET: Fetch contact history for current recruiter
-export async function GET(req: NextRequest) {
-  const userWithRole = await getServerUserWithRole();
-  
-  if (!userWithRole) {
-    throw apiError.unauthorized();
-  }
-  
-  const { user, role } = userWithRole;
-  
-  if (role !== 'recruiter' && role !== 'admin') {
-    throw apiError.unauthorized();
-  }
+const RATE = { scope: 'recruiter-contacts', rateLimit: RateLimitPresets.relaxed };
+const VALID_METHODS = ['email', 'phone', 'linkedin', 'other'];
+const MAX_NOTES = 2000;
+const STAGE_ORDER = ['shortlisted', 'contacted', 'interviewed', 'offered', 'rejected'];
 
-    const { searchParams } = new URL(req.url);
-    const studentId = searchParams.get('studentId');
+// GET: contact history of the current recruiter. Response: { data: { contacts } }
+export const GET = recruiterRoute(RATE, async (req: NextRequest, access) => {
+  const studentId = new URL(req.url).searchParams.get('studentId');
+  if (studentId !== null && !isUuid(studentId)) return apiError.badRequest('Invalid student id');
 
-    const supabase = await createSupabaseAdminClient();
-    const requestedOrgId = getRequestedOrgId(req);
-    const orgContext = await getOrganizationContext(user, requestedOrgId);
-    const targetOrgIds = getTargetOrganizationIds(orgContext);
-    
-    let query = supabase
-      .from('recruiter_contacts')
-      .select('*')
-      .eq('recruiter_id', user.id)
-      .in('organization_id', targetOrgIds)
-      .order('contacted_at', { ascending: false });
-
-    // Filter by student if provided
-    if (studentId) {
-      query = query.eq('student_id', studentId);
-    }
+  let query = access.admin
+    .from('recruiter_contacts')
+    .select('*')
+    .eq('recruiter_id', access.user.id)
+    .in('organization_id', access.orgIds)
+    .order('contacted_at', { ascending: false })
+    .limit(500);
+  if (studentId) query = query.eq('student_id', studentId);
 
   const { data, error } = await query;
-
   if (error) {
-    console.error('Error fetching contacts:', error);
-    throw apiError.internal('Failed to fetch contacts');
+    console.error('[recruiter-contacts] fetch failed', error);
+    return apiError.internal('Failed to fetch contacts');
   }
+  return success({ contacts: data ?? [] });
+});
 
-  return success({ contacts: data || [] });
-}
+// POST: log a contact attempt. The log is recorded against the student's own organisation.
+export const POST = recruiterRoute(RATE, async (req: NextRequest, access) => {
+  const parsed = await readJsonObject(req);
+  if (!parsed.ok) return parsed.response;
+  const { studentId, method, notes } = parsed.body;
 
-// POST: Log a new contact attempt
-export async function POST(req: NextRequest) {
-  const userWithRole = await getServerUserWithRole();
-  
-  if (!userWithRole) {
-    throw apiError.unauthorized();
+  if (!isUuid(studentId)) return apiError.badRequest('A valid studentId is required');
+  if (method !== undefined && (typeof method !== 'string' || !VALID_METHODS.includes(method))) {
+    return apiError.badRequest(`method must be one of: ${VALID_METHODS.join(', ')}`);
   }
-  
-  const { user, role } = userWithRole;
-  
-  if (role !== 'recruiter' && role !== 'admin') {
-    throw apiError.unauthorized();
+  if (notes !== undefined && notes !== null && (typeof notes !== 'string' || notes.length > MAX_NOTES)) {
+    return apiError.badRequest(`notes must be a string of at most ${MAX_NOTES} characters`);
   }
+  const contactMethod = (method as string | undefined) ?? 'email';
 
-  const { studentId, method, notes } = await req.json();
-  
-  if (!studentId) {
-    throw apiError.badRequest('Student ID required');
-  }
+  const { admin, user, orgIds } = access;
+  const studentOrgId = (await getApprovedStudentOrgs(admin, [studentId], orgIds)).get(studentId);
+  if (!studentOrgId) return apiError.notFound('Student not found');
 
-  const validMethods = ['email', 'phone', 'linkedin', 'other'];
-  const contactMethod = method && validMethods.includes(method) ? method : 'email';
-
-  const supabase = await createSupabaseAdminClient();
-  const requestedOrgId = getRequestedOrgId(req);
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-  const targetOrgId = requestedOrgId || ('organizationId' in orgContext ? orgContext.organizationId : targetOrgIds[0]);
-    
-  // Prevent duplicate rapid clicks: if the same recruiter already logged a contact
-  // for the same student and method within the last 60 seconds, return that
-  // existing record instead of inserting a new one.
-  const recentThresholdMs = 60 * 1000; // 1 minute
-  const recentSince = new Date(Date.now() - recentThresholdMs).toISOString();
-
-  const { data: recent, error: recentErr } = await supabase
+  // Avoid duplicate rapid clicks: reuse a contact logged in the last 60 seconds.
+  const recentSince = new Date(Date.now() - 60 * 1000).toISOString();
+  const { data: recent, error: recentErr } = await admin
     .from('recruiter_contacts')
     .select('*')
     .eq('recruiter_id', user.id)
@@ -92,110 +62,90 @@ export async function POST(req: NextRequest) {
     .order('contacted_at', { ascending: false })
     .limit(1)
     .maybeSingle();
-
   if (recentErr) {
-    console.error('Error checking recent contacts:', recentErr);
-    throw apiError.internal('Failed to check recent contacts');
+    console.error('[recruiter-contacts] recent lookup failed', recentErr);
+    return apiError.internal('Failed to check recent contacts');
   }
 
-  let data = recent;
-
+  let contact = recent;
   if (!recent) {
-    // Insert contact log
-    const { data: inserted, error } = await supabase
+    const { data: inserted, error } = await admin
       .from('recruiter_contacts')
       .insert({
         recruiter_id: user.id,
         student_id: studentId,
-        organization_id: targetOrgId,
+        organization_id: studentOrgId,
         method: contactMethod,
-        notes: notes || null,
-        contacted_at: new Date().toISOString()
+        notes: typeof notes === 'string' && notes ? notes : null,
+        contacted_at: new Date().toISOString(),
       })
       .select()
       .single();
-
     if (error) {
-      console.error('Error logging contact:', error);
-      throw apiError.internal('Failed to log contact');
+      console.error('[recruiter-contacts] insert failed', error);
+      return apiError.internal('Failed to log contact');
     }
-
-    data = inserted;
+    contact = inserted;
   }
 
-  // Also update pipeline to 'contacted' if not already at a later stage
-  const { data: pipelineData } = await supabase
+  // Move the pipeline to 'contacted' unless it is already further along.
+  const { data: pipelineRow, error: pipelineReadErr } = await admin
     .from('recruiter_pipeline')
     .select('stage')
     .eq('recruiter_id', user.id)
     .eq('student_id', studentId)
-    .single();
-
-  const currentStage = pipelineData?.stage;
-  const stageOrder = ['shortlisted', 'contacted', 'interviewed', 'offered', 'rejected'];
-  
-  // Only update if current stage is earlier than 'contacted' or doesn't exist
-  if (!currentStage || stageOrder.indexOf(currentStage) < stageOrder.indexOf('contacted')) {
-    await supabase
-      .from('recruiter_pipeline')
-      .upsert({
-        recruiter_id: user.id,
-        student_id: studentId,
-        organization_id: targetOrgId,
-        stage: 'contacted',
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'recruiter_id,student_id'
-      });
+    .maybeSingle();
+  if (pipelineReadErr) {
+    console.error('[recruiter-contacts] pipeline lookup failed', pipelineReadErr);
+  } else {
+    const currentStage = (pipelineRow as { stage?: string } | null)?.stage;
+    if (!currentStage || STAGE_ORDER.indexOf(currentStage) < STAGE_ORDER.indexOf('contacted')) {
+      const { error: upsertErr } = await admin.from('recruiter_pipeline').upsert(
+        {
+          recruiter_id: user.id,
+          student_id: studentId,
+          organization_id: studentOrgId,
+          stage: 'contacted',
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'recruiter_id,student_id' }
+      );
+      if (upsertErr) console.error('[recruiter-contacts] pipeline update failed', upsertErr);
+    }
   }
 
-  return success({ 
-    message: 'Contact logged',
-    contact: data
-  });
-}
+  return success({ message: 'Contact logged', contact });
+});
 
-// PATCH: Mark contact as responded
-export async function PATCH(req: NextRequest) {
-  const userWithRole = await getServerUserWithRole();
-  
-  if (!userWithRole) {
-    throw apiError.unauthorized();
+// PATCH: mark a contact as responded (owner only)
+export const PATCH = recruiterRoute(RATE, async (req: NextRequest, access) => {
+  const parsed = await readJsonObject(req);
+  if (!parsed.ok) return parsed.response;
+  const { contactId, responseReceived } = parsed.body;
+
+  if (typeof contactId !== 'string' || contactId.length === 0 || contactId.length > 64) {
+    return apiError.badRequest('Contact ID required');
   }
-  
-  const { user, role } = userWithRole;
-  
-  if (role !== 'recruiter' && role !== 'admin') {
-    throw apiError.unauthorized();
+  if (typeof responseReceived !== 'boolean') {
+    return apiError.badRequest('responseReceived must be a boolean');
   }
 
-  const { contactId, responseReceived } = await req.json();
-  
-  if (!contactId) {
-    throw apiError.badRequest('Contact ID required');
-  }
-
-  const supabase = await createSupabaseAdminClient();
-  
-  const { data, error } = await supabase
+  const { data, error } = await access.admin
     .from('recruiter_contacts')
     .update({
       response_received: responseReceived,
-      response_at: responseReceived ? new Date().toISOString() : null
+      response_at: responseReceived ? new Date().toISOString() : null,
     })
     .eq('id', contactId)
-    .eq('recruiter_id', user.id) // Ensure only owner can update
+    .eq('recruiter_id', access.user.id)
+    .in('organization_id', access.orgIds)
     .select()
-    .single();
-
+    .maybeSingle();
   if (error) {
-    console.error('Error updating contact:', error);
-    throw apiError.internal('Failed to update contact');
+    console.error('[recruiter-contacts] update failed', error);
+    return apiError.internal('Failed to update contact');
   }
+  if (!data) return apiError.notFound('Contact not found');
 
-  return success({ 
-    message: 'Contact updated',
-    contact: data
-  });
-}
-
+  return success({ message: 'Contact updated', contact: data });
+});
