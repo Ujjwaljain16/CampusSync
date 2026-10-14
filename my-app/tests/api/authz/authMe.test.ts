@@ -1,6 +1,6 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { harness, req } from '../../helpers/supabaseHarness';
+import { harness } from '../../helpers/supabaseHarness';
 import { uuid } from '../../helpers/fakeSupabase';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { GET as meGET } from '@/app/api/auth/me/route';
@@ -14,7 +14,7 @@ beforeEach(() => {
   harness.db.seed('profiles', [{ id: USER, email: 'u@a.edu', full_name: 'U Ser', organization_id: ORG_A }]);
 });
 
-const me = async () => (await meGET(req('/api/auth/me') as any)) as Response;
+const me = async () => (await meGET()) as Response;
 
 describe('GET /api/auth/me', () => {
   it('is 401 when signed out', async () => {
