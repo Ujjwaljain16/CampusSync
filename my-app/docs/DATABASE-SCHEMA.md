@@ -158,7 +158,8 @@ do not apply both. `20261014_authz_05a/b/c` must be applied before step 08 (it r
 | `20261014_tlog_transparency_log` | **not applied (optional module off)** | needed only with `TRANSPARENCY_LOG_ENABLED=true` |
 | `20261014_sd_issuances` | **not applied (optional module off)** | accounting table for `SD_JWT_ENABLED=true` |
 | `20261015_00` to `08`, `03b` | applied | the cleanup described above |
-| `20261016_*` | see the hardening notes in `docs/RATE-LIMITING.md` and `docs/PRIVATE-STORAGE.md` | added after the cleanup; each states when to apply it |
+| `20261016_01_private_certificates_bucket` | **pending: apply after the code that serves signed URLs is deployed** | makes the `certificates` storage bucket private and adds owner-folder storage policies; see `docs/PRIVATE-STORAGE.md` (rollback included) |
+| `20261016_02_rate_limits` | **pending: apply after deploy** (the code runs without it, failing open) | `rate_limits` table and `rate_limit_hit` function for the global limiter; see `docs/RATE-LIMITING.md`; covered by the migration checks |
 
 ### Application changes that gate the later steps
 
