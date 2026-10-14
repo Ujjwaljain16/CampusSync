@@ -16,13 +16,13 @@
 ---
 
 ## 🚀 Overview
-CampusSync is a multi-tenant SaaS platform (under active development; see [Security notes & known limitations](#-security-notes--known-limitations)) designed specifically for universities, educational institutions, and recruiters. It enables streamlined certificate verification and credential management using Gemini Vision based extraction and issues credentials modelled on the W3C Verifiable Credentials data model (JWS-signed). The platform supports multi-organization workflows with dedicated dashboards for recruiters, faculty, and administrative users. Built with modern full-stack technologies, CampusSync prioritizes scalability, security, and performance to meet the evolving needs of academic credential verification and campus placement processes.
+CampusSync is a multi-tenant SaaS platform (under active development; see [Security notes & known limitations](#-security-notes--known-limitations)) designed specifically for universities, educational institutions, and recruiters. It enables streamlined certificate verification and credential management using Gemini Vision based extraction and issues credentials modelled on the W3C Verifiable Credentials data model (JWS-signed, with a `did:web` issuer and a public key set at `/.well-known/jwks.json`). The platform supports multi-organization workflows with dedicated dashboards for recruiters, faculty, and administrative users. Built with modern full-stack technologies, CampusSync prioritizes scalability, security, and performance to meet the evolving needs of academic credential verification and campus placement processes.
 ### 🎯 Problem Solved
 
 - **Certificate Fraud Prevention**: Faculty-approved certificates are issued as JWS-signed Verifiable Credentials (W3C VC Data Model style)
 - **Manual Verification Bottleneck**: Google Gemini Vision extracts certificate fields automatically; faculty review and approve
-- **Recruiter Trust Issues**: Rate-limited public endpoints to verify a credential's signature and revocation status
-- **Multi-Organization Complexity**: Organization-scoped API queries plus Supabase Row-Level Security (RLS) for multi-tenancy (RLS policies live in your Supabase project; see security notes)
+- **Recruiter Trust Issues**: Rate-limited public endpoints (and a standalone verifier in [`verifier/`](./verifier)) to check a credential's signature and revocation status
+- **Multi-Organization Complexity**: Organization-scoped API queries plus Supabase Row-Level Security (RLS) for multi-tenancy (the policies are in your Supabase project; the SQL patches are versioned in `my-app/supabase/migrations`, see [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md))
 
 
 ## 🏗️ System Architecture
@@ -52,7 +52,7 @@ CampusSync is a multi-tenant SaaS platform (under active development; see [Secur
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐│
 │  │ Certificate  │  │  Recruiter   │  │Organization  │  │   Admin     ││
 │  │   Routes     │  │   Routes     │  │   Routes     │  │   Routes    ││
-│  │ (13 routes)  │  │ (16 routes)  │  │ (13 routes)  │  │ (16 routes) ││
+│  │ (12 routes)  │  │ (14 routes)  │  │ (13 routes)  │  │ (16 routes) ││
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬──────┘│
 └─────────┼──────────────────┼──────────────────┼──────────────────┼──────┘
           │                  │                  │                  │
@@ -81,12 +81,12 @@ CampusSync is a multi-tenant SaaS platform (under active development; see [Secur
 │  │              │  │              │  │              │  │             ││
 │  └──────────────┘  └──────────────┘  └──────────────┘  └─────────────┘│
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐│
-│  │recruiter_org │  │ verifiable_  │  │ role_requests│  │super_admin  ││
-│  │   _access    │  │ credentials  │  │              │  │   _audit    ││
+│  │ audit_logs   │  │ verifiable_  │  │ role_requests│  │organization_││
+│  │ (append-only)│  │ credentials  │  │              │  │   domains   ││
 │  └──────────────┘  └──────────────┘  └──────────────┘  └─────────────┘│
 │  ┌──────────────────────────────────────────────────────────────────┐ │
-│  │ Original schema/RLS SQL is not in this repository; only draft    │ │
-│  │ migrations are in my-app/supabase/migrations (review first)      │ │
+│  │ The original baseline schema is not in this repository; SQL      │ │
+│  │ patches are versioned in my-app/supabase/migrations              │ │
 │  └──────────────────────────────────────────────────────────────────┘ │
 └───────────────────────────────────────────────────────────────────────-─┘
                                       │
@@ -113,6 +113,10 @@ Key internal documentation that explains the app flows, DB query patterns, error
 - [Password Reset (PKCE) Flow](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/Password-reset.md) — secure password reset and PKCE notes
 - [Security & Auth Flow](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/Security-Auth-flow.md) — auth flow diagrams and security considerations
 - [Architecture](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/ARCHITECTURE.md) — code-derived overview: directory map, request flow, auth model, certificate/credential lifecycle, tables, env vars, limitations
+- [Database schema](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/DATABASE-SCHEMA.md) — the target data model, index design, RLS matrix, migration status and how the migrations are tested
+- [Verifiable credentials](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/VERIFIABLE-CREDENTIALS.md) — did:web issuer, JWKS, key rotation, revocation status list (optional)
+- [Selective disclosure](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/SELECTIVE-DISCLOSURE.md) and [Transparency log](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/TRANSPARENCY-LOG.md) — optional modules (off by default)
+- [Audit closure report](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/AUDIT-CLOSURE.md) — what the security audit found and what is fixed
 - [Security policy](./SECURITY.md) — reporting, key rotation and the credential-exposure notice
 
 ---
@@ -145,10 +149,10 @@ Key internal documentation that explains the app flows, DB query patterns, error
 
 ### **Backend**
 - **Runtime**: Node.js >= 20.9 (CI uses the version in `my-app/.nvmrc`)
-- **API**: Next.js 15 route handlers (100 route files, about 138 HTTP handlers)
+- **API**: Next.js 15 route handlers (93 route files, 127 HTTP handlers)
 - **Authentication**: Supabase Auth + JWT (session cookies; Google OAuth implemented)
 - **Database**: PostgreSQL via Supabase
-- **Security**: Supabase Row-Level Security (policies managed in Supabase, not versioned in this repo)
+- **Security**: Supabase Row-Level Security (policy patches versioned in `my-app/supabase/migrations`; the original baseline dump is not in this repo)
 - **Data access**: `@supabase/supabase-js` client (no ORM)
 
 ### **AI & OCR**
@@ -157,8 +161,9 @@ Key internal documentation that explains the app flows, DB query patterns, error
 - **Image Processing**: Sharp (used by `next/image`)
 
 ### **Cryptography & Security**
-- **VC Signing**: JWS via the JOSE library; the algorithm is set by the `alg` of the `VC_ISSUER_JWK` key you provide (RS256/RSA-2048 in the key tooling), not Ed25519
-- **Key Management**: The issuer key is supplied through the `VC_ISSUER_JWK` environment variable; rotation is manual
+- **VC Signing**: JWS via the JOSE library; the algorithm is the `alg` of the `VC_ISSUER_JWK` key you provide (EdDSA, ES256 or RS256 are accepted; the hosted deployment uses RS256)
+- **Key Management**: The issuer key is supplied through the `VC_ISSUER_JWK` environment variable. Rotation is manual: put the old key's public JWK in `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` so earlier credentials keep verifying
+- **Issuer identity**: `did:web:<your host>`, with `/.well-known/did.json` and `/.well-known/jwks.json` published by the app
 
 ### **Storage & CDN**
 - **File Storage**: Supabase Storage
@@ -176,7 +181,7 @@ Key internal documentation that explains the app flows, DB query patterns, error
 ## ✨ Key Features
 
 ### 🔐 **Multi-Organization Management**
-- **Data Isolation**: `organization_id` filtering in API queries, backed by RLS in Supabase (verify your policies; see security notes)
+- **Data Isolation**: `organization_id` filtering in API queries, backed by RLS in Supabase (see the RLS matrix in [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md))
 - **Org Admin Controls**: Primary admin designation, role delegation, member management
 - **Recruiter Access Model**: Cross-org recruitment: one approved `user_roles` row per organization the recruiter may access
 
@@ -187,13 +192,22 @@ Key internal documentation that explains the app flows, DB query patterns, error
 ### 🎓 **W3C Verifiable Credentials (VC)**
 - **W3C VC-style**: Credentials follow the W3C VC Data Model 1.0 shape with a JWS proof; full conformance (JSON-LD proofs, DID resolution) has not been validated
 - **JWS Signatures**: Signed with the issuer key from `VC_ISSUER_JWK` (RS256 by default); credentials are issued only for faculty-verified certificates
-- **Revocation Support**: Revocation status is stored in the database and checked on verification
-- **Public Verification API**: Rate-limited endpoints that verify a credential's signature and revocation status
+- **Revocation Support**: Revocation status is stored on the credential row and checked on verification; an optional signed status list (`VC_STATUS_LIST_ENABLED`) is implemented but off by default
+- **One active credential per certificate**: enforced by the database; issuing and revoking are done by the backend only
+- **Public Verification API**: Rate-limited endpoints that verify a credential's signature and revocation status; the `/verify` page uses them. The standalone verifier in [`verifier/`](./verifier) checks a credential with only the issuer's public keys, without calling the CampusSync API or database
+
+### 🧪 **Optional modules (implemented and tested, off by default)**
+- **Selective disclosure** (SD-JWT style, `SD_JWT_ENABLED`): students share chosen fields of a credential. See [SELECTIVE-DISCLOSURE.md](./my-app/docs/SELECTIVE-DISCLOSURE.md)
+- **Transparency log** (`TRANSPARENCY_LOG_ENABLED`): an append-only Merkle log of issued credentials with signed tree heads. See [TRANSPARENCY-LOG.md](./my-app/docs/TRANSPARENCY-LOG.md)
+- **Revocation status list** (`VC_STATUS_LIST_ENABLED`): a signed bitstring list. See [VERIFIABLE-CREDENTIALS.md](./my-app/docs/VERIFIABLE-CREDENTIALS.md)
+
+These three are **not enabled in the hosted deployment** and need their own tables (see the migration status table in [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md)).
 
 ### 💼 **Recruiter Portal**
-- **Verified Talent Pool**: Browse students with cryptographically verified credentials
-- **Search**: Filter students by institution, skills and verification status
+- **Verified Talent Pool**: Browse students with cryptographically verified credentials, only in organizations where the recruiter has an approved access row
+- **Search**: Filter students by institution, skills and verification status; contact details and GPA are shown only to students who opted in (`/student/privacy`)
 - **Multi-Org Recruitment**: Access to multiple organization talent pools (permission-based, via per-organization `user_roles` rows)
+- **Public portfolio**: a student can opt in to a public, verified-credentials-only portfolio at `/public/portfolio/<id>` (default private)
 - **Real-time**: Supabase realtime is used for approval-status updates on the waiting pages (`/waiting`, `/faculty/waiting`, `/recruiter/waiting`) and in the faculty approval manager component
 
 ### 🛡️ **Enterprise Security**
@@ -202,7 +216,7 @@ Key internal documentation that explains the app flows, DB query patterns, error
 - **Row-Level Security**: Relies on Supabase RLS; the policy SQL is not in this repository
 - **Middleware Protection**: Page-route guards and session refresh. `/api/*` is excluded from the middleware matcher and each route performs its own checks
 - **Rate limiting**: In-memory, per-instance limiter on public/expensive endpoints (best effort on serverless)
-- **Audit Logging**: Actions are written to `audit_logs`
+- **Audit Logging**: Actions are written to `audit_logs` by the backend only; the table is append-only and signed-in users cannot write to it
 
 ---
 ## 🚀 Getting Started
@@ -245,7 +259,7 @@ NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
 A complete, commented template is in [`my-app/.env.example`](./my-app/.env.example). Never commit `.env.local`.
 
-The database schema, RLS policies and storage buckets must be created in your own Supabase project; the SQL is **not** included in this repository. Create the first super admin with `node --env-file=.env.local scripts/setup-superadmin.mjs` (see `my-app/scripts/README.md`).
+The database and storage bucket must exist in your own Supabase project. The original baseline schema SQL is **not** in this repository: `my-app/supabase/migrations` holds the patches (hardening, the 2026-10-15 schema cleanup) that were applied on top of it, in the order listed in [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md), so a brand-new project cannot be built from the repo alone. Create the first super admin with `node --env-file=.env.local scripts/setup-superadmin.mjs` (see `my-app/scripts/README.md`).
 
 ### **4. Start Development Server**
 ```bash
@@ -259,18 +273,22 @@ npm run typecheck   # tsc --noEmit
 npm run lint
 npm test            # vitest, all tests under tests/
 npm run test:coverage
+npm run audit:prod  # dependency audit gate with reviewed, expiring exceptions
+
+# migrations, tested against an in-process PostgreSQL model of the production schema
+cd supabase/tests && npm ci && npm test
 ```
-These run in CI (`.github/workflows/ci.yml`) together with `npm audit`, gitleaks secret scanning and CodeQL.
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, the app tests, the migration checks, the dependency audit gate and gitleaks secret scanning; CodeQL runs in its own workflow.
 
 ---
 
 ## 🔐 Security Notes & Known Limitations
 
-_Summary of known limitations: in-memory rate limiting, schema/RLS SQL not in the repo, no monitoring, global role checks, public storage bucket._
+_Summary of known limitations: in-memory rate limiting, baseline schema not in the repo, no monitoring, global role checks, public storage bucket, optional modules not enabled in the hosted deployment._
 
-- **Treat early-history credentials as compromised.** Commits early in this repository's history (notably around `2e9bc97`) contained real credentials (a Gemini API key, the Supabase service-role key and the Verifiable Credential issuer private key). History was not rewritten, so anyone with a clone can read them. Rotate every credential ever used with this project (Supabase service-role/anon keys and JWT secret, Gemini API key, VC issuer key, SMTP password, webhook secret) and generate a new VC issuer key. Credentials signed with the old issuer key should be considered untrustworthy.
+- **Treat early-history credentials as compromised.** Commits early in this repository's history (notably around `2e9bc97`) contained real credentials (a Gemini API key, the Supabase service-role key and the Verifiable Credential issuer private key). History was not rewritten, so anyone with a clone can read them. Rotate every credential ever used with this project (Supabase service-role/anon keys and JWT secret, Gemini API key, VC issuer key, SMTP password) and generate a new VC issuer key. Status in the hosted deployment: the Gemini key has been replaced; the VC issuer key rotation is still pending. Credentials signed with the old issuer key should be considered untrustworthy.
 - **Secrets**: only `my-app/.env.example` (placeholders) is committed; `.env*` files are git-ignored. `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS and must stay server-side.
-- **RLS is not verifiable from this repo.** Schema, RLS policies and indexes are not versioned here, so figures quoted in older documents (for example "83 policies") are unverified. Review your Supabase policies independently. API routes also filter by organization and role as a second layer but should not be your only control.
+- **RLS depends on your database.** The policies changed by the versioned patches are described in [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md), but the original baseline is not in this repo, so review the policies in your own Supabase project. API routes also filter by organization and role as a second layer but should not be your only control.
 - **Middleware does not cover `/api/*`.** Every API route performs its own authentication/authorization (`withAuth` / `withRole`); new routes must do the same.
 - **Rate limiting is in-memory and per instance.** It slows abuse on public, email and OCR endpoints but is not a distributed limit; use an edge/WAF or Redis-backed limiter for real protection.
 - **Diagnostic routes** (`/api/test-email`, `/api/debug/domains`, `/api/health/detailed`, `/test-email`) are disabled in production or require admin auth. `/api/auth/dev-upsert-user` only works in development. `/api/diagnose` and `/api/auth/check-env` are unauthenticated and report configuration booleans; consider deleting all of these before deploying.
@@ -279,7 +297,7 @@ _Summary of known limitations: in-memory rate limiting, schema/RLS SQL not in th
 - **Uploaded files** are stored in the `certificates` Supabase Storage bucket and referenced by public URL. In production this bucket is currently **public**: anyone with a file URL can read it. A private-bucket plan is drafted in `my-app/supabase/migrations/20261014_core_storage_policies_note.sql`.
 - **Dependencies**: `npm audit` runs in CI and Dependabot opens weekly update PRs.
 - **No monitoring or alerting.** Errors go to the console/host logs; the in-memory error monitor has no external sink.
-- **Database hardening is in draft.** `my-app/supabase/migrations/` contains draft migrations derived from the production database as observed on 2026-10-14. They are not applied automatically; review them against the live schema first.
+- **Migrations are applied by hand.** `my-app/supabase/migrations/` is applied through the Supabase SQL editor, one file at a time. [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md) has a status table (applied, optional, superseded). The checks in `my-app/supabase/tests` run the SQL on a model of the production schema; they do not prove behaviour on real data.
 - **`revocation_list` does not exist** in production; credential revocation is stored on `verifiable_credentials`.
 - **Session cookies are not HttpOnly** (`@supabase/ssr` browser client).
 - See also [SECURITY.md](./SECURITY.md) for reporting and key rotation.
@@ -300,8 +318,8 @@ _Summary of known limitations: in-memory rate limiting, schema/RLS SQL not in th
 
 
 ### 3️⃣
-- Portfolio Builder (Public student portfolios with verified credentials)
-- Shareable links, dynamic QR codes, and embeddable credential widgets
+- Portfolio Builder (an opt-in public portfolio with verified credentials exists; a richer builder does not)
+- Dynamic QR codes and embeddable credential widgets
 - Portfolio analytics (views, downloads, recruiter engagement metrics)
 - Social media integration and LinkedIn credential sharing
 ---
