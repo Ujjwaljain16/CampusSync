@@ -1,5 +1,5 @@
 -- Schema cleanup, step 2 of 5: INTEGRITY (foreign-key rules, constraints, trigger fixes).
--- DRAFT: apply after 20261015_01_expand.sql. Idempotent where possible; one transaction.
+-- APPLIED to production 2026-10-15; apply after 20261015_01_expand.sql. Idempotent where possible; one transaction.
 -- Plain ASCII on purpose.
 --
 -- What this does

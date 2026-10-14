@@ -1,4 +1,4 @@
--- DRAFT - review against live schema before applying
+-- APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent.
 --
 -- Fixed transfer_primary_admin.
 --

@@ -1,4 +1,4 @@
--- DRAFT - review against live schema before applying
+-- SUPERSEDED by 20261015_02 (guard_last_org_admin, protect_primary_admin); do not apply both.
 --
 -- Integrity trigger on user_roles:
 --   * an organization can never lose its LAST approved org_admin/admin

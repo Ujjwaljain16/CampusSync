@@ -1,4 +1,4 @@
--- DRAFT - review against live schema before applying
+-- APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent. Some functions were later removed by 20261015_08.
 --
 -- Function hardening.
 --

@@ -1,4 +1,4 @@
--- DRAFT - review against the live schema before applying; idempotent
+-- Note only; superseded by 20261016_01_private_certificates_bucket.sql. Idempotent.
 -- (everything below is commented out: inspect first, then decide)
 --
 -- OBSERVED (2026-10-14): the storage bucket `certificates` is PUBLIC. Anyone who knows or guesses an

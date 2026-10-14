@@ -1,4 +1,4 @@
--- DRAFT - review before applying; idempotent
+-- OPTIONAL module, NOT applied in production (feature is off by default). Idempotent. Needed only with TRANSPARENCY_LOG_ENABLED=true.
 --
 -- Transparency log for credential events (issue / revoke): an append-only list of
 -- entries plus signed tree heads (Merkle roots signed with the issuer key).

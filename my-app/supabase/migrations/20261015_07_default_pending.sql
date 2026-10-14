@@ -1,6 +1,6 @@
 -- Schema cleanup, step 7 of 8: user_roles.approval_status DEFAULTS TO 'pending' (fail-safe).
 -- *** APPLY ONLY AFTER you have read the auth.users trigger body (20261015_00_preflight.sql, last query) and
--- confirmed it sets approval_status EXPLICITLY. *** DRAFT. Idempotent. Plain ASCII on purpose.
+-- confirmed it sets approval_status EXPLICITLY. *** APPLIED to production 2026-10-15 (auth.users has no signup trigger). Idempotent. Plain ASCII on purpose.
 --
 -- Why: a safe default costs nothing for code that always sets the value explicitly.
 --

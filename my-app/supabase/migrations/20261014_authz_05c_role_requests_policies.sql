@@ -1,4 +1,4 @@
--- DRAFT - review against the live schema before applying. Idempotent; runs in one transaction.
+-- APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent. Runs in one transaction.
 -- Part c of 3 (split so each piece fits comfortably in the Supabase SQL editor). Run after 05a: role_requests policies.
 --
 -- Role hierarchy mirrored from the API (src/lib/api/utils/roles.ts):

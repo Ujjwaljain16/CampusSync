@@ -1,4 +1,4 @@
--- DRAFT - review against the live schema before applying; idempotent
+-- APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent.
 --
 -- PROPOSAL: normalize `audit_logs` so every insert in the app resolves.
 -- Routes currently write the actor under two different names (`user_id` in some, `actor_id` in others)

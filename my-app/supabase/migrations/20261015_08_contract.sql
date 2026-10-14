@@ -1,6 +1,6 @@
 -- Schema cleanup, step 8 of 8: CONTRACT (remove what is dead).
 -- *** APPLY ONLY AFTER the application cleanup PR is deployed (list in docs/DATABASE-SCHEMA.md, "Code changes"). ***
--- DRAFT. One transaction. Plain ASCII on purpose. Requires 20261015_01..04 and authz_05a/05b to be applied.
+-- APPLIED to production 2026-10-15. One transaction. Plain ASCII on purpose. Requires 20261015_01..04 and authz_05a/05b to be applied.
 --
 -- Every table drop refuses to run when the table holds data; every column drop that could lose data is guarded by a
 -- "all NULL" check. Policies and trigger functions that mention a column are rewritten BEFORE the column is dropped.

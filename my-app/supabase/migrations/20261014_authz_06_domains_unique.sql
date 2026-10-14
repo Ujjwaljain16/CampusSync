@@ -1,4 +1,4 @@
--- DRAFT - review against live schema before applying
+-- APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent.
 --
 -- Domain squatting: nothing prevented two organizations from claiming the same
 -- e-mail domain in allowed_domains. The API now rejects a domain that another

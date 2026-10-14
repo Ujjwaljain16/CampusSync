@@ -1,5 +1,5 @@
 -- Schema cleanup, step 4 of 8: POLICIES THAT ARE SAFE TO APPLY NOW (no application change needed).
--- DRAFT: apply after 20261015_03_indexes.sql. Idempotent; one transaction. Plain ASCII on purpose.
+-- APPLIED to production 2026-10-15; apply after 20261015_03_indexes.sql (and 03b). Idempotent; one transaction. Plain ASCII on purpose.
 --
 -- What this does
 --   * allowed_domains (the GLOBAL list of educational suffixes like ".edu"): only a super admin may change it.

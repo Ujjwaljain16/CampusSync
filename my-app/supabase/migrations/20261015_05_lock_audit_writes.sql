@@ -1,5 +1,5 @@
 -- Schema cleanup, step 5 of 8: LOCK AUDIT WRITES. *** APPLY ONLY AFTER the application change below is deployed. ***
--- DRAFT. Idempotent; one transaction. Plain ASCII on purpose.
+-- APPLIED to production 2026-10-15. Idempotent; one transaction. Plain ASCII on purpose.
 --
 -- Requires (application change): every audit_logs INSERT goes through the service-role client (writeAudit in
 -- src/lib/api/utils/audit.ts does this). Apply this file only after that code is deployed, otherwise audit rows from

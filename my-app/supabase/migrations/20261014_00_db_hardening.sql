@@ -1,4 +1,4 @@
--- Database hardening (DRAFT: review against the live schema before applying).
+-- Database hardening. APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent.
 -- Idempotent. Run in the Supabase SQL editor.
 --
 -- Contents: restrict EXECUTE on a SECURITY DEFINER helper to the service role; tighten the INSERT/UPDATE
