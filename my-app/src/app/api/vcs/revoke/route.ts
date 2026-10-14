@@ -10,6 +10,7 @@ import {
 } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { credentialIdCandidates, isInvalidInputSyntax } from '@/lib/vcId';
+import { markCredentialsRevoked } from '@/lib/statusList';
 
 interface RevokeBody {
   credentialId: string;
@@ -116,6 +117,10 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
   if (!updated || updated.length === 0) {
     return apiError.notFound('Credential not found');
   }
+
+  // Best effort: flip the credential's bit in the public revocation status list (only when it has
+  // a credentialStatus entry). Never fails the revocation; the status column stays authoritative.
+  await markCredentialsRevoked([{ id: credentialId, credential: vcRow.credential }]);
 
   // Audit log (same columns as the other audit inserts, e.g. certificates/issue)
   try {

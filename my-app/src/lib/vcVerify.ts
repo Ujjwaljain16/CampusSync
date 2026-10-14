@@ -3,17 +3,22 @@
  *
  * One code path for every public verification endpoint:
  *   1. obtain the JWS (directly, from a VC object, or by looking the VC up by id)
- *   2. verify the signature with the issuer's PUBLIC key (algorithm allow-list, pinned alg)
+ *   2. verify the signature with the issuer's PUBLIC keys: the key is selected by the JWS `kid`
+ *      from the current + previous (rotated-out) public keys; algorithm allow-list, pinned alg
  *   3. enforce exp / nbf when present (legacy credentials without exp still verify)
  *   4. look up revocation by the SIGNED credential id (`verifiable_credentials.status`)
  *      and FAIL CLOSED if the lookup errors or the credential is unknown
- *   5. return only fields taken from the signed payload
+ *   5. when the signed payload carries a `credentialStatus` entry, ALSO check its bit in the
+ *      database-held status list (can only turn a result into `revoked`; the status column
+ *      stays authoritative; see src/lib/statusList.ts)
+ *   6. return only fields taken from the signed payload
  *
  * Raw jose / database error text is never returned; failures map to stable `reason` codes.
  */
 import { errors as joseErrors, type JWK, type JWTPayload } from 'jose';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getIssuerPublicJwk, verifyCredentialJws } from '@/lib/vc';
+import { getIssuerPublicJwks, verifyCredentialJwsWithKeys } from '@/lib/vc';
+import { checkStatusBit, parseStatusEntry, type StatusListDb } from '@/lib/statusList';
 
 export type VerifyStatus = 'active' | 'revoked' | 'unknown';
 
@@ -23,6 +28,7 @@ export type VerifyReason =
 	| 'malformed_token'
 	| 'invalid_signature'
 	| 'alg_not_allowed'
+	| 'unknown_key'
 	| 'expired'
 	| 'not_yet_valid'
 	| 'invalid_claims'
@@ -53,6 +59,8 @@ export interface VerifyResult {
 	credentialSubject?: Record<string, unknown>;
 	revokedAt?: string | null;
 	revokedReason?: string | null;
+	/** Result of the status-list bit check; absent when the credential has no credentialStatus entry. */
+	statusList?: 'clear' | 'unavailable';
 }
 
 export type StoreClient = Pick<SupabaseClient, 'from'>;
@@ -60,8 +68,12 @@ export type StoreClient = Pick<SupabaseClient, 'from'>;
 export interface VerifyDeps {
 	/** Supabase client used for the revocation / lookup queries. Defaults to the service-role client. */
 	supabase?: StoreClient;
-	/** Public verification key. Defaults to the key derived from VC_ISSUER_JWK. */
+	/** Trusted public keys (current first). Defaults to VC_ISSUER_JWK + VC_ISSUER_PREVIOUS_PUBLIC_JWKS. */
+	getPublicJwks?: () => Promise<JWK[]>;
+	/** Single-key convenience (legacy); ignored when getPublicJwks is given. */
 	getPublicJwk?: () => Promise<JWK>;
+	/** Client for the status-list bit check. Defaults to the service-role client. */
+	statusDb?: StatusListDb;
 	/** Expected issuer DID. Defaults to NEXT_PUBLIC_ISSUER_DID when set. */
 	issuer?: string;
 	now?: Date;
@@ -79,6 +91,7 @@ function mapJoseError(err: unknown): VerifyReason {
 		return err.claim === 'nbf' ? 'not_yet_valid' : 'invalid_claims';
 	}
 	if (err instanceof joseErrors.JOSEAlgNotAllowed) return 'alg_not_allowed';
+	if (err instanceof joseErrors.JWKSNoMatchingKey) return 'unknown_key';
 	if (err instanceof joseErrors.JWSSignatureVerificationFailed) return 'invalid_signature';
 	if (err instanceof joseErrors.JWSInvalid || err instanceof joseErrors.JWTInvalid) return 'malformed_token';
 	if (err instanceof joseErrors.JOSEError) return 'invalid_signature';
@@ -153,9 +166,13 @@ export async function verifyCredential(input: VerifyInput, deps: VerifyDeps = {}
 		if (typeof jws !== 'string' || jws.length > MAX_JWS_LENGTH) return fail('malformed_token');
 
 		// (b)+(c) signature, algorithm allow-list, exp/nbf
-		let publicJwk: JWK;
+		let publicJwks: JWK[];
 		try {
-			publicJwk = await (deps.getPublicJwk ?? getIssuerPublicJwk)();
+			publicJwks = deps.getPublicJwks
+				? await deps.getPublicJwks()
+				: deps.getPublicJwk
+					? [await deps.getPublicJwk()]
+					: await getIssuerPublicJwks();
 		} catch (e) {
 			console.error('[verifyCredential] issuer key unavailable:', e instanceof Error ? e.message : 'unknown');
 			return fail('verifier_misconfigured');
@@ -163,7 +180,7 @@ export async function verifyCredential(input: VerifyInput, deps: VerifyDeps = {}
 
 		let payload: JWTPayload;
 		try {
-			({ payload } = await verifyCredentialJws(jws, publicJwk, {
+			({ payload } = await verifyCredentialJwsWithKeys(jws, publicJwks, {
 				issuer: expectedIssuer(deps),
 				currentDate: deps.now,
 			}));
@@ -206,8 +223,27 @@ export async function verifyCredential(input: VerifyInput, deps: VerifyDeps = {}
 		}
 		if (row.status !== 'active') return fail('inactive', base);
 
-		// (e) only signed-payload fields are returned
-		return { valid: true, status: 'active', ...base };
+		// (e) status-list bit (only when the SIGNED payload has a credentialStatus entry)
+		const statusEntry = parseStatusEntry(vc);
+		let statusList: VerifyResult['statusList'];
+		if (statusEntry) {
+			const bit = await checkStatusBit(statusEntry, deps.statusDb);
+			if (bit.state === 'revoked') {
+				return {
+					...fail('revoked', base),
+					status: 'revoked',
+					revokedAt: row.revoked_at ?? null,
+					revokedReason: row.revoked_reason ?? null,
+				};
+			}
+			// Missing list / out-of-range index / lookup error: fail closed.
+			if (bit.state === 'error') return fail('revocation_check_failed', base);
+			// Storage not installed: the status column above already decided; record that the bit was not consulted.
+			statusList = bit.state === 'unavailable' ? 'unavailable' : 'clear';
+		}
+
+		// (f) only signed-payload fields are returned
+		return { valid: true, status: 'active', ...base, ...(statusList ? { statusList } : {}) };
 	} catch (e) {
 		console.error('[verifyCredential] unexpected error:', e instanceof Error ? e.name : 'unknown');
 		return fail('revocation_check_failed');

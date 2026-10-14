@@ -16,6 +16,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { signCredential } from '@/lib/vc';
+import { allocateStatusEntry, markCredentialsRevoked, recordStatusColumns, type StatusListDb } from '@/lib/statusList';
 import { getIssuerDID } from '@/lib/envValidator';
 import { logger } from '@/lib/logger';
 
@@ -293,7 +294,7 @@ export async function revokeAllCredentialsForCertificate(
       .update(values)
       .eq('status', 'active')
       .contains('credential', { credentialSubject: { certificateId } })
-      .select('id');
+      .select('id, credential');
 
   let { data, error } = await run({ status: 'revoked', revoked_at: now, revoked_reason: reason });
   // The optional revoked_* columns may not exist in every deployment: retry with status only.
@@ -309,7 +310,11 @@ export async function revokeAllCredentialsForCertificate(
   }
   // verifiable_credentials.status is the single source of truth for revocation
   // (there is no revocation_list table).
-  const ids = ((data ?? []) as Array<{ id: string }>).map(r => r.id);
+  const revoked = (data ?? []) as Array<{ id: string; credential?: unknown }>;
+  const ids = revoked.map(r => r.id);
+  // Best effort: also flip the status-list bit of credentials that carry a credentialStatus entry.
+  // Never fails the revocation; the status column above stays authoritative.
+  await markCredentialsRevoked(revoked, db as unknown as StatusListDb);
   // --- transparency log (best-effort, no-op unless TRANSPARENCY_LOG_ENABLED=true) ---
   if (ids.length > 0 && process.env.TRANSPARENCY_LOG_ENABLED === 'true') {
     try {
@@ -563,11 +568,16 @@ export async function issueCredentialForCertificate(
   }
 
   const issuerDid = getIssuerDID();
-  const verificationMethod = process.env.NEXT_PUBLIC_ISSUER_VERIFICATION_METHOD || `${issuerDid}#keys-1`;
 
+  // Revocation status-list slot (only when VC_STATUS_LIST_ENABLED=true; null otherwise or when
+  // storage is unavailable, in which case the credential is issued without credentialStatus).
+  const statusSlot = await allocateStatusEntry();
+
+  // The proof's verificationMethod is `${issuerDid}#${kid}` of the key that actually signs,
+  // so it resolves to a key in /.well-known/did.json.
   const vc = await signCredential({
     issuerDid,
-    verificationMethod,
+    credentialStatus: statusSlot?.entry,
     credential: {
       credentialSubject: {
         id: cert.student_id,
@@ -594,6 +604,7 @@ export async function issueCredentialForCertificate(
     logger.error('[certificateService] Failed to store credential', insertErr);
     return { ok: false, status: 500, code: 'db_error', error: 'Failed to store credential' };
   }
+  if (statusSlot) await recordStatusColumns(vc.id!, statusSlot);
 
   // Concurrent-issue guard: the oldest active credential wins, losers revoke themselves.
   const after = await findActive();
@@ -610,6 +621,7 @@ export async function issueCredentialForCertificate(
         .eq('id', vc.id)
         .select('id');
       if (dupErr) logger.error('[certificateService] Failed to revoke duplicate credential', dupErr);
+      else await markCredentialsRevoked([{ id: vc.id, credential: vc }]);
       return { ok: true, vc: { ...winner.credential, id: winner.id }, reused: true };
     }
   }

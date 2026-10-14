@@ -35,7 +35,7 @@ export async function middleware(req: NextRequest) {
 	const isWaitingRoute = req.nextUrl.pathname.startsWith('/waiting') || req.nextUrl.pathname.startsWith('/faculty/waiting') || req.nextUrl.pathname.startsWith('/recruiter/waiting');
 	const isHome = req.nextUrl.pathname === '/';
 	const isWellKnown = req.nextUrl.pathname === '/.well-known' || req.nextUrl.pathname.startsWith('/.well-known/');
-	const isPublic = isWellKnown || isAuthRoute || isPasswordResetRoute || isAuthCallbackRoute || isHome || req.nextUrl.pathname.startsWith('/public') || isSetupRoute || isWaitingRoute || req.nextUrl.pathname === '/verify/sd';
+	const isPublic = isWellKnown || isAuthRoute || isPasswordResetRoute || isAuthCallbackRoute || isHome || req.nextUrl.pathname.startsWith('/public') || req.nextUrl.pathname === '/verify' || req.nextUrl.pathname === '/verify/sd' || isSetupRoute || isWaitingRoute;
 
 	if (req.nextUrl.pathname === '/transparency' || req.nextUrl.pathname.startsWith('/transparency/')) return NextResponse.next(); // public transparency log page
 	// Update session and get user

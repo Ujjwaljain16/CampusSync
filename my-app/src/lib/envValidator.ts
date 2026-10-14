@@ -24,6 +24,9 @@ export const optionalEnvVars = [
   'USE_DOCUMENTS_TABLE', // Has default: true
   'OCR_ENABLED', // Has default: true
   'OCR_SERVICE_URL', // Optional OCR service
+  'VC_ISSUER_PREVIOUS_PUBLIC_JWKS', // Optional: JSON array of rotated-out PUBLIC issuer keys
+  'VC_STATUS_LIST_ENABLED', // Optional: "true" enables the revocation status list (default off)
+  'VC_VALIDITY_DAYS', // Optional: credential validity (default 730)
   'SMTP_HOST', // Optional email service
   'SMTP_PORT',
   'SMTP_USER',
