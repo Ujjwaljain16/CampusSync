@@ -1,164 +1,66 @@
-# 🔐 Password Reset Flow (PKCE)
+# Password reset flow
 
-## Complete Flow Diagram
+How password reset works in the current code. The email template guidance lives in
+[`SUPABASE_EMAIL_TEMPLATES.md`](./SUPABASE_EMAIL_TEMPLATES.md).
+
+## Summary
+
+- The reset page (`src/app/reset-password/page.tsx`) is a **client component**. It exchanges the one-time
+  `token_hash` from the email link by calling `supabase.auth.verifyOtp({ token_hash, type: 'recovery' })`
+  **in the browser**. The middleware does not take part in the exchange.
+- The session is stored by `@supabase/ssr`'s browser client in cookies written from JavaScript. These cookies are
+  **not HttpOnly** (JavaScript on the page can read them), so XSS on the origin could read them. Treat XSS prevention
+  and a strict Content-Security-Policy as the mitigation, not cookie flags.
+- The middleware matcher covers `/reset-password`, but it only refreshes the session and treats that route as public.
+  It does not read `token_hash`.
+
+## Sequence
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant Frontend
-    participant Supabase
-    participant Email
-    participant Browser
-    participant Middleware
-    participant ResetPage
+    participant U as User
+    participant L as /login page (client)
+    participant S as Supabase Auth
+    participant M as Email
+    participant R as /reset-password page (client)
 
-    Note over User,ResetPage: PKCE Password Reset Flow ✅
-
-    User->>Frontend: Click "Forgot Password"
-    User->>Frontend: Enter email address
-    Frontend->>Supabase: resetPasswordForEmail(email)
-    Supabase->>Supabase: Generate token_hash<br/>Create PKCE code<br/>Store in database
-    Supabase->>Email: Send email with link<br/>?token_hash=ABC123&type=recovery
-    Email->>User: 📧 Password reset email
-    
-    User->>Browser: Click email link
-    Browser->>Middleware: GET /reset-password?token_hash=ABC123
-    
-    Note over Middleware: CRITICAL: Middleware intercepts
-    Middleware->>Middleware: Detect token_hash in URL<br/>Create Supabase client<br/>(detectSessionInUrl: true)
-    Middleware->>Supabase: Exchange token_hash<br/>for access_token
-    Supabase->>Middleware: Return access_token<br/>+ refresh_token
-    Middleware->>Browser: Set HTTP-Only cookies<br/>(sb-auth-token)
-    Middleware->>ResetPage: ✅ Session established<br/>Allow page access
-    
-    ResetPage->>ResetPage: useEffect() runs
-    ResetPage->>ResetPage: getSession() finds<br/>existing session in cookies
-    ResetPage->>User: Show password reset form
-    
-    User->>ResetPage: Enter new password<br/>Click submit
-    ResetPage->>Supabase: updateUser({ password })
-    Supabase->>Supabase: Update password in database
-    Supabase->>ResetPage: ✅ Success
-    ResetPage->>ResetPage: signOut()
-    ResetPage->>User: Success message<br/>Redirect to /login
-    
-    User->>Frontend: Login with new password
-    Frontend->>Supabase: signInWithPassword()
-    Supabase->>Frontend: ✅ Session created
-    Frontend->>User: Redirect to dashboard
+    U->>L: "Forgot password", enters email
+    L->>L: POST /api/auth/check-user-exists (rate limited)
+    L->>S: resetPasswordForEmail(email, redirectTo = SITE_URL/reset-password)
+    S->>M: email containing /reset-password?token_hash=...&type=recovery
+    M->>U: reset email
+    U->>R: opens link
+    R->>R: reads ?token_hash (and ?error / legacy #access_token)
+    R->>S: verifyOtp({ token_hash, type: recovery })  (from the browser)
+    S-->>R: session (stored by the SSR browser client in cookies)
+    U->>R: submits new password
+    R->>S: updateUser({ password })
+    R->>S: signOut()
+    R->>U: redirect to /login with a success message
 ```
 
-## Step-by-Step Breakdown
+## Steps
 
-### 1️⃣ User Requests Password Reset
-```
-User clicks "Forgot Password" → Enters email → Frontend calls:
-supabase.auth.resetPasswordForEmail(email)
-```
+1. **Request.** `src/app/login/page.tsx` first calls `/api/auth/check-user-exists` and then
+   `supabase.auth.resetPasswordForEmail(email, { redirectTo: <site>/reset-password })`.
+2. **Email.** Supabase sends the template configured in the dashboard. The template must link to
+   `{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery`.
+3. **Landing.** The page checks for an `error` query parameter, warns if it sees the legacy hash format
+   (`#access_token=`), reuses an existing session if there is one, and otherwise calls `verifyOtp` with the
+   `token_hash`.
+4. **Update.** `supabase.auth.updateUser({ password })`, then `signOut()` and a redirect to `/login`.
 
-### 2️⃣ Supabase Generates Token
-```
-- Creates token_hash (secure, one-time use)
-- Generates PKCE code verifier
-- Stores in database with expiry
-```
+## Configuration
 
-### 3️⃣ Email Sent with Link
-```
-Email contains:
-https://yourapp.com/reset-password?token_hash=ABC123&type=recovery
-                                   ↑
-                              Query parameter (server-visible)
-```
+- Supabase dashboard, Authentication, URL Configuration: set the Site URL and add `<site>/reset-password` to the
+  redirect allow-list.
+- Supabase dashboard, Email Templates: use `token_hash` links as above.
+- `NEXT_PUBLIC_SITE_URL` is used to build `redirectTo` (falls back to `window.location.origin`).
 
-### 4️⃣ Middleware Intercepts (CRITICAL!)
-```javascript
-// middleware.ts
-const supabase = createServerClient({
-  detectSessionInUrl: true,  // ← Enables PKCE exchange
-  flowType: 'pkce'
-});
+## Known limitations
 
-await supabase.auth.getUser(); // ← Automatically exchanges token_hash
-```
-
-**What happens:**
-- Middleware sees `?token_hash=ABC123` in URL
-- Exchanges token_hash with Supabase server
-- Receives access_token + refresh_token
-- Sets HTTP-Only cookies automatically
-- ✅ Session is established before page loads
-
-### 5️⃣ Reset Page Loads with Session
-```javascript
-// Page already has session from middleware
-const { data: { session } } = await supabase.auth.getSession();
-// session exists! Show form.
-```
-
-### 6️⃣ User Updates Password
-```javascript
-await supabase.auth.updateUser({
-  password: newPassword
-});
-// Password updated in database
-```
-
-### 7️⃣ Sign Out & Redirect
-```javascript
-await supabase.auth.signOut();
-router.push('/login');
-// User logs in with new password
-```
-
-## Key Points
-
-### ✅ Why PKCE Works
-- **Token in query params** (`?token_hash=`) → Server sees it
-- **Server-side exchange** → Secure, automatic
-- **HTTP-Only cookies** → Protected from XSS
-- **One-time use** → Cannot be replayed
-
-### 🔒 Security Features
-```
-1. Token Hash (not actual token)
-2. PKCE code verifier (prevents interception)
-3. HTTP-Only cookies (JavaScript can't access)
-4. Secure flag (HTTPS only in production)
-5. SameSite=Lax (CSRF protection)
-6. Short expiry (1 hour)
-```
-
-### 🎯 Critical Configuration
-
-**Supabase Dashboard:**
-```
-Authentication → URL Configuration:
-- Site URL: https://yourapp.com
-- Redirect URLs: https://yourapp.com/reset-password
-
-Authentication → Email Templates:
-- Confirm signup: {{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery
-```
-
-**Middleware:**
-```typescript
-createServerClient(supabaseUrl, supabaseKey, {
-  cookies: { /* cookie handlers */ },
-  detectSessionInUrl: true,  // Must be true!
-  flowType: 'pkce'           // Must be 'pkce'!
-})
-```
-
-## Timeline
-
-```
-0.0s  → User clicks email link
-0.1s  → Browser navigates to /reset-password?token_hash=...
-0.2s  → Server receives request WITH token_hash ✅
-0.3s  → Middleware intercepts, detects token_hash
-0.5s  → Middleware exchanges token → gets access_token
-0.7s  → HTTP-Only cookies set
-0.8s  → Page renders with valid session
-1.0s  → ✅ Form appears, ready for password reset
-```
+- The reset page currently logs diagnostic details (including URL parameters such as `token_hash`) to the browser
+  console. Those logs should be removed; a recovery token is a credential until it is used.
+- Token lifetime and reuse rules are Supabase settings (not enforced by this repository).
+- `/api/auth/check-user-exists` reveals whether an email is registered (user enumeration); it is rate limited
+  in-process only.

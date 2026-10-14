@@ -341,7 +341,7 @@ export default function EnhancedLandingPage() {
                 {/* Feature List */}
                 <div className="space-y-4">
                   {[
-                    { icon: Shield, text: "Cryptographically-signed with Ed25519 keys" },
+                    { icon: Shield, text: "JWS-signed (JOSE) credentials" },
                     { icon: Sparkles, text: "AI-powered OCR for instant data extraction" },
                     { icon: Lock, text: "End-to-end encryption for sensitive data" },
                     { icon: Globe, text: "W3C Verifiable Credentials standard" }

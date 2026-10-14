@@ -1,0 +1,17 @@
+title = "CampusSync gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders and documentation that intentionally look like secrets"
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/)package-lock\.json$''',
+]
+regexes = [
+  # Obvious placeholder values used in docs / templates
+  '''your[-_](supabase|gemini|openai|anthropic|smtp|api)[-_a-z]*''',
+  '''replace-me''',
+  '''generate-a-long-random-string''',
+]
