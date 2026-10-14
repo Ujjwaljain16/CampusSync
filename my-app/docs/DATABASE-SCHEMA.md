@@ -1,7 +1,7 @@
 # Database schema: target design and cleanup plan
 
-Status: steps 01 to 04 are applied to the production database; steps 05 to 08 wait for the code in this branch to be deployed.
-All steps are verified against a model of the production schema (`supabase/tests`).
+Status: the whole cleanup (`20261015_00` to `08`, plus `03b`) is applied to the production database (2026-10-15) and the matching code is deployed.
+The migrations are verified against a model of the production schema (`supabase/tests`, run in CI) and were smoke-tested on the live application; see "Migration status" below for every file in the folder.
 Source of truth for the *current* schema is the introspection of 2026-10-14; for *required* behaviour it is the
 application code (three independent read-only analyses of every `.from()`, `.rpc()`, storage and realtime use).
 
@@ -136,20 +136,36 @@ read the notices. Every file is idempotent and can be re-run at any point (teste
 `20261014_authz_03` (last-admin trigger) is superseded by step 02 (`guard_last_org_admin` + `protect_primary_admin`);
 do not apply both. `20261014_authz_05a/b/c` must be applied before step 08 (it rewrites three of their policies).
 
+### Migration status (checked against the production database on 2026-10-15)
+
+`supabase/migrations/20261015_99_status_check.sql` is a read-only query that reports this table's "present" column from the live database.
+
+| file | status | note |
+|---|---|---|
+| `20261014_00_db_hardening` | applied | |
+| `20261014_authz_01_function_hardening`, `authz_04_function_hardening` | applied or superseded | the functions they harden were later removed or redefined by `20261015_08` |
+| `20261014_authz_02_transfer_primary_admin` | applied | |
+| `20261014_authz_03_last_admin_trigger` | superseded | replaced by `guard_last_org_admin` and `protect_primary_admin` in `20261015_02`; do not apply both |
+| `20261014_authz_05a`, `05b`, `05c` | applied | helpers and the `user_roles` / `role_requests` policies |
+| `20261014_authz_06_domains_unique` | applied or covered | `allowed_domains` has a unique `domain` key |
+| `20261014_core_audit_logs_normalize` | applied | `audit_logs` has `target_type` / `target_id` (finished by `20261015_01` and `02`) |
+| `20261014_core_revocation_list_note`, `core_storage_policies_note` | notes | no SQL effect; the storage note is superseded by `20261016_01` |
+| `20261014_core_vc_one_active_per_certificate` | superseded | by `vc_one_active_per_certificate` in `20261015_03` |
+| `20261014_core_vc_status_columns`, `vc_status_list_columns` | applied | the status list columns exist on `verifiable_credentials` |
+| `20261014_privacy_profile_visibility` | applied | `profiles.public_portfolio_enabled`, `recruiter_share_contact` |
+| `20261014_privacy_profiles_rls` | **not applied, on hold** | stricter `profiles` read policies; apply only after a week of watching the application with the current policies, because every role reads profiles through user sessions |
+| `20261014_vc_status_lists` | **not applied (optional module off)** | needed only with `VC_STATUS_LIST_ENABLED=true` |
+| `20261014_tlog_transparency_log` | **not applied (optional module off)** | needed only with `TRANSPARENCY_LOG_ENABLED=true` |
+| `20261014_sd_issuances` | **not applied (optional module off)** | accounting table for `SD_JWT_ENABLED=true` |
+| `20261015_00` to `08`, `03b` | applied | the cleanup described above |
+| `20261016_*` | see the hardening notes in `docs/RATE-LIMITING.md` and `docs/PRIVATE-STORAGE.md` | added after the cleanup; each states when to apply it |
+
 ### Application changes that gate the later steps
 
-**Status: A, B and D are implemented in code on this branch** (tsc, eslint and 1094 app tests green; 93 migration checks
-green). **C is still open** (needs the `auth.users` trigger body). What that means for deploy order:
+**Status: A, B and D are implemented, deployed and verified; C was checked** (the `auth.users` table has no signup trigger, so step 07 was safe).
+The order that was used: steps 01 to 04, then the code deploy, then steps 05, 06, 07 and 08. The lists below record what each gate required.
 
-1. Apply steps 01 to 04 **before** deploying this code. The new code reads `certificates.verification_details`, writes
-   `organization_domains`, and embeds `verifiable_credentials` through the `certificate_id` foreign key (created in step 02).
-   Without them the analytics routes, the org domain routes and the public portfolio return 500.
-2. Deploy the code.
-3. Then apply 05, 06 and 08 (07 after C).
-
-Two behaviour changes to expect after step 05: faculty see only their own rows in `/api/certificates/approval-history`
-(the audit read policy is "own rows, or organization admin and above"), and the recruiter dashboard's "recent
-verifications" list is always empty (the route that wrote those audit rows was removed).
+Two behaviour changes that came with step 05: faculty see only their own rows in `/api/certificates/approval-history` (the audit read policy is "own rows, or organization admin and above"), and the recruiter dashboard's "recent verifications" list is always empty (the route that wrote those audit rows was removed).
 
 **A. Before 05 (audit writes only through the service role, one shape)**
 - `src/lib/services/certificateService.ts` `writeAudit(db, ...)`, `src/app/api/vcs/revoke/route.ts` (also uses `entity_type` / `entity_id`),
