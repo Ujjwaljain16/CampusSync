@@ -57,7 +57,7 @@ async function pingDatabase(): Promise<boolean> {
   }
 }
 
-export async function GET(request?: Request) {
+export async function GET(request: Request) {
   const isProd = process.env.NODE_ENV === 'production';
   const timestamp = new Date().toISOString();
 

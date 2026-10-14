@@ -133,7 +133,7 @@ describe('GET /api/health', () => {
   it('also works when called without a request object', async () => {
     setEnv(GOOD_ENV);
     const { GET } = await import('@/app/api/health/route');
-    expect((await GET()).status).toBe(200);
+    expect((await GET(new Request('http://localhost/api/health'))).status).toBe(200);
   });
 
   it('does not expose configuration details in production', async () => {
