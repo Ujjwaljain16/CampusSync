@@ -130,6 +130,19 @@ describe('API route inventory', () => {
     ).toEqual([]);
   });
 
+  // Routes that must stay behind a SPECIFIC guard (the generic check above only needs any guard).
+  const STRICT_GUARDS: Record<string, RegExp> = {
+    'admin/vcs/resign': /withSuperAdmin(?:<[^>]*>)?\(/, // key rotation: platform-level, super admin only
+  };
+
+  it('routes with a required specific guard still use it', () => {
+    for (const [key, guard] of Object.entries(STRICT_GUARDS)) {
+      const route = routes.find((r) => r.key === key);
+      expect(route, `route ${key} not found`).toBeDefined();
+      expect(guard.test(route!.src), `${key} must use ${guard}`).toBe(true);
+    }
+  });
+
   it('no route file uses dangerouslySetInnerHTML', () => {
     const offenders = routes.filter((r) => r.src.includes('dangerouslySetInnerHTML')).map((r) => r.key);
     expect(offenders, `dangerouslySetInnerHTML in routes:\n  ${offenders.join('\n  ')}`).toEqual([]);
