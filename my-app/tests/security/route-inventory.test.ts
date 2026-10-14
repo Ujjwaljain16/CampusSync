@@ -35,6 +35,7 @@ const PUBLIC_ROUTES: Record<string, string> = {
   'auth/signup/student-faculty': 'Public sign-up for students/faculty.',
   'auth/validate-email': 'Pre-signup email format/domain validation; no data access.',
   'certificates/verify': 'Public verification of a credential JWS (rate limited); returns validity only.',
+  'credentials/sd/verify': 'Public SD-JWT presentation verification for recruiters (rate limited, feature-flagged); returns only claims the holder disclosed, fails closed on revocation lookup errors.',
   'diagnose': 'Connectivity diagnostics; public (review: consider restricting in production).',
   'health': 'Liveness probe for uptime monitors.',
   'recruiter/bulk-verify': 'Retired: returns 410 Gone and never touches the database (recruiters must not change verification status).',

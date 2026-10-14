@@ -575,6 +575,9 @@ export default function StudentDashboard() {
                               <Eye className="w-4 h-4" />
                             </a>
                           )}
+                          {row.verification_status === 'verified' && (
+                            <a href={`/student/share?cert=${encodeURIComponent(row.id)}`} className="px-2 py-1 text-xs text-emerald-300 hover:text-emerald-200 underline" title="Share selected claims of this credential">Share</a>
+                          )}
                           <button
                             onClick={() => showDeleteConfirmation(row.id, row.title)}
                             disabled={deleting === row.id}
