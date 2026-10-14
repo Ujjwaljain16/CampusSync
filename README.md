@@ -43,7 +43,7 @@ CampusSync is a multi-tenant SaaS platform (under active development; see [Secur
 │  ┌──────────────────────────────────────────────────────────────────┐  │
 │  │ • Session refresh/check  • Role checks in each API route (RBAC) │  │
 │  │ • Page route guards      • Org context resolved per API request  │  │
-│  │ • SSR Cookie Handling    • /api/* enforces its own authN/authZ   │  │
+│  │ • HttpOnly cookies       • /api/* enforces its own authN/authZ   │  │
 │  └──────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────┬───────────────────────────────────┘
                                       │
@@ -52,7 +52,7 @@ CampusSync is a multi-tenant SaaS platform (under active development; see [Secur
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐│
 │  │ Certificate  │  │  Recruiter   │  │Organization  │  │   Admin     ││
 │  │   Routes     │  │   Routes     │  │   Routes     │  │   Routes    ││
-│  │ (12 routes)  │  │ (14 routes)  │  │ (13 routes)  │  │ (16 routes) ││
+│  │ (13 routes)  │  │ (14 routes)  │  │ (13 routes)  │  │ (17 routes) ││
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬──────┘│
 └─────────┼──────────────────┼──────────────────┼──────────────────┼──────┘
           │                  │                  │                  │
@@ -62,7 +62,7 @@ CampusSync is a multi-tenant SaaS platform (under active development; see [Secur
 │                    BUSINESS LOGIC LAYER (TypeScript)                    │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐│
 │  │  Gemini OCR  │  │ VC signing   │  │Org/role ctx  │  │ Rate limiter││
-│  │   Vision)    │  │ (JWS via     │  │  resolution) │  │ (in-memory) ││
+│  │   Vision)    │  │ (JWS via     │  │  resolution) │  │(memory + DB)││
 │  │              │  │    JOSE)     │  │              │  │             ││
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬──────┘│
 └─────────┼──────────────────┼──────────────────┼──────────────────┼──────┘
@@ -94,7 +94,7 @@ CampusSync is a multi-tenant SaaS platform (under active development; see [Secur
 │                      EXTERNAL SERVICES LAYER                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐│
 │  │Google Gemini │  │ SMTP (email) │  │Supabase Auth │  │   Storage   ││
-│  │ Vision (OCR) │  │ (nodemailer) │  │   (JWT)      │  │  (S3-like)  ││
+│  │ Vision (OCR) │  │ (nodemailer) │  │   (JWT)      │  │(signed URLs)││
 │  └──────────────┘  └──────────────┘  └──────────────┘  └─────────────┘│
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -110,8 +110,13 @@ Key internal documentation that explains the app flows, DB query patterns, error
 - [DB Query Flow](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/DB-Query-flow.md) — database access patterns and query examples used across services
 - [Error Handling Architecture](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/ERROR-HANDLING-ARCHITECTURE.md) — global error handling, boundaries, and toast UX
 - [Multi-Org Architecture](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/Multi-Org-Arch.md) — multi-tenancy design and RLS strategy
-- [Password Reset (PKCE) Flow](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/Password-reset.md) — secure password reset and PKCE notes
+- [Password Reset Flow](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/Password-reset.md) — the server-side reset flow and the Supabase redirect allow-list entry it needs
 - [Security & Auth Flow](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/Security-Auth-flow.md) — auth flow diagrams and security considerations
+- [Session cookies](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/SESSION-COOKIES.md) — HttpOnly server-managed sessions, polling instead of realtime, post-deploy smoke checklist
+- [Private storage](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/PRIVATE-STORAGE.md) — signed-URL access to certificate files and the private-bucket migration (owner step)
+- [Rate limiting](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/RATE-LIMITING.md) — in-memory and Postgres-backed limiters, what is limited where, fail-open behaviour
+- [Monitoring](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/MONITORING.md) — optional webhook alerts, the deep health probe, logs
+- [Key rotation](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/KEY-ROTATION.md) — issuer key and Supabase key rotation runbook, including the credential re-sign tool
 - [Architecture](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/ARCHITECTURE.md) — code-derived overview: directory map, request flow, auth model, certificate/credential lifecycle, tables, env vars, limitations
 - [Database schema](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/DATABASE-SCHEMA.md) — the target data model, index design, RLS matrix, migration status and how the migrations are tested
 - [Verifiable credentials](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/VERIFIABLE-CREDENTIALS.md) — did:web issuer, JWKS, key rotation, revocation status list (optional)
@@ -149,8 +154,8 @@ Key internal documentation that explains the app flows, DB query patterns, error
 
 ### **Backend**
 - **Runtime**: Node.js >= 20.9 (CI uses the version in `my-app/.nvmrc`)
-- **API**: Next.js 15 route handlers (93 route files, 127 HTTP handlers)
-- **Authentication**: Supabase Auth + JWT (session cookies; Google OAuth implemented)
+- **API**: Next.js 15 route handlers (100 route files, 134 HTTP handlers)
+- **Authentication**: Supabase Auth; the session lives only in HttpOnly cookies written by the server (email/password through `POST /api/auth/login`, Google OAuth implemented); the browser has no Supabase client
 - **Database**: PostgreSQL via Supabase
 - **Security**: Supabase Row-Level Security (policy patches versioned in `my-app/supabase/migrations`; the original baseline dump is not in this repo)
 - **Data access**: `@supabase/supabase-js` client (no ORM)
@@ -162,11 +167,11 @@ Key internal documentation that explains the app flows, DB query patterns, error
 
 ### **Cryptography & Security**
 - **VC Signing**: JWS via the JOSE library; the algorithm is the `alg` of the `VC_ISSUER_JWK` key you provide (EdDSA, ES256 or RS256 are accepted; the hosted deployment uses RS256)
-- **Key Management**: The issuer key is supplied through the `VC_ISSUER_JWK` environment variable. Rotation is manual: put the old key's public JWK in `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` so earlier credentials keep verifying
+- **Key Management**: The issuer key is supplied through the `VC_ISSUER_JWK` environment variable. Rotation is manual: put the old key's public JWK in `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` so earlier credentials keep verifying, and optionally re-sign the stored credentials with the new key (`POST /api/admin/vcs/resign`, super admin; runbook in [KEY-ROTATION.md](./my-app/docs/KEY-ROTATION.md))
 - **Issuer identity**: `did:web:<your host>`, with `/.well-known/did.json` and `/.well-known/jwks.json` published by the app
 
 ### **Storage & CDN**
-- **File Storage**: Supabase Storage
+- **File Storage**: Supabase Storage (`certificates` bucket); files are opened only through short-lived signed URLs issued after an authorization check
 - **Image Optimization**: Next.js Image
 - **PDF Generation**: jsPDF, PDF-lib
 
@@ -208,14 +213,16 @@ These three are **not enabled in the hosted deployment** and need their own tabl
 - **Search**: Filter students by institution, skills and verification status; contact details and GPA are shown only to students who opted in (`/student/privacy`)
 - **Multi-Org Recruitment**: Access to multiple organization talent pools (permission-based, via per-organization `user_roles` rows)
 - **Public portfolio**: a student can opt in to a public, verified-credentials-only portfolio at `/public/portfolio/<id>` (default private)
-- **Real-time**: Supabase realtime is used for approval-status updates on the waiting pages (`/waiting`, `/faculty/waiting`, `/recruiter/waiting`) and in the faculty approval manager component
+- **Approval status**: the waiting pages (`/waiting`, `/faculty/waiting`, `/recruiter/waiting`) poll the server (about every 10 seconds while visible); there is no realtime subscription in the browser
 
 ### 🛡️ **Enterprise Security**
-- **Authentication**: Supabase Auth with JWT; email/password and Google OAuth
+- **Authentication**: Supabase Auth; email/password (server-side login) and Google OAuth. **HttpOnly session cookies** (SameSite=Lax, Secure in production) set by the server, so page script cannot read the session; logout and password reset are server routes too ([SESSION-COOKIES.md](./my-app/docs/SESSION-COOKIES.md))
 - **Authorization**: RBAC with 6 roles (super_admin, org_admin, admin, faculty, student, recruiter), enforced per API route; role checks are global and organization scoping is a separate per-route step
 - **Row-Level Security**: Relies on Supabase RLS; the policy SQL is not in this repository
 - **Middleware Protection**: Page-route guards and session refresh. `/api/*` is excluded from the middleware matcher and each route performs its own checks
-- **Rate limiting**: In-memory, per-instance limiter on public/expensive endpoints (best effort on serverless)
+- **Private certificate files**: `GET /api/certificates/[id]/file` returns a 300-second signed URL after an authorization check (owner, reviewers of the same organization, super admin; never recruiters). Making the bucket itself private is an owner migration applied after the deploy ([PRIVATE-STORAGE.md](./my-app/docs/PRIVATE-STORAGE.md))
+- **Rate limiting**: an in-memory per-instance limiter on many endpoints, plus a Postgres-backed global limiter (`rate_limit_hit`) on login completion, signup, the email checks, OCR, public verification, the public portfolio and the SD routes. It needs the `20261016_02_rate_limits` migration (owner step) and fails open to the in-memory limiter without it ([RATE-LIMITING.md](./my-app/docs/RATE-LIMITING.md))
+- **Alerting**: an optional `ALERT_WEBHOOK_URL` (Slack, Discord or any HTTPS JSON endpoint) receives throttled, redacted alerts for unexpected server errors; `GET /api/health?deep=1` is the probe for an external uptime monitor ([MONITORING.md](./my-app/docs/MONITORING.md)). There is no tracing, metrics or dashboard
 - **Audit Logging**: Actions are written to `audit_logs` by the backend only; the table is append-only and signed-in users cannot write to it
 
 ---
@@ -244,8 +251,8 @@ Create `.env.local` file:
 ```env
 # Supabase Configuration
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key   # server only, bypasses RLS
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-publishable-key   # the project's publishable (anon) key
+SUPABASE_SERVICE_ROLE_KEY=your-secret-key         # server only, bypasses RLS
 
 # Google Gemini (required for certificate extraction)
 GEMINI_API_KEY=your-gemini-api-key
@@ -256,10 +263,13 @@ NEXT_PUBLIC_ISSUER_DID=did:web:your-domain.example
 
 # Application
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
+
+# Optional: https incoming-webhook URL for error alerts (Slack, Discord, ...). Unset = no alerts. Treat it as a secret.
+# ALERT_WEBHOOK_URL=
 ```
 A complete, commented template is in [`my-app/.env.example`](./my-app/.env.example). Never commit `.env.local`.
 
-The database and storage bucket must exist in your own Supabase project. The original baseline schema SQL is **not** in this repository: `my-app/supabase/migrations` holds the patches (hardening, the 2026-10-15 schema cleanup) that were applied on top of it, in the order listed in [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md), so a brand-new project cannot be built from the repo alone. Create the first super admin with `node --env-file=.env.local scripts/setup-superadmin.mjs` (see `my-app/scripts/README.md`).
+The database and storage bucket must exist in your own Supabase project. The original baseline schema SQL is **not** in this repository: `my-app/supabase/migrations` holds the patches (hardening, the 2026-10-15 schema cleanup, and the 2026-10-16 private-bucket and rate-limit migrations) that are applied on top of it, in the order listed in [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md), so a brand-new project cannot be built from the repo alone. Create the first super admin with `node --env-file=.env.local scripts/setup-superadmin.mjs` (see `my-app/scripts/README.md`).
 
 ### **4. Start Development Server**
 ```bash
@@ -273,33 +283,38 @@ npm run typecheck   # tsc --noEmit
 npm run lint
 npm test            # vitest, all tests under tests/
 npm run test:coverage
+npm run build       # production build (also run in CI)
 npm run audit:prod  # dependency audit gate with reviewed, expiring exceptions
 
 # migrations, tested against an in-process PostgreSQL model of the production schema
 cd supabase/tests && npm ci && npm test
 ```
-CI (`.github/workflows/ci.yml`) runs typecheck, lint, the app tests, the migration checks, the dependency audit gate and gitleaks secret scanning; CodeQL runs in its own workflow.
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, the app tests, a production build (`next build`), the migration checks, the dependency audit gate and gitleaks secret scanning; CodeQL runs in its own workflow.
+
+For local sign-in use `npm run dev` (or https): the session cookies are `Secure` outside `next dev`, and some browsers (Safari) drop them on a production build served over plain `http://localhost`. In your Supabase project, add `<site>/api/auth/callback**` to the Authentication redirect allow-list (password reset and Google sign-in use it); see [Password-reset.md](./my-app/docs/Password-reset.md) and [SESSION-COOKIES.md](./my-app/docs/SESSION-COOKIES.md).
 
 ---
 
 ## 🔐 Security Notes & Known Limitations
 
-_Summary of known limitations: in-memory rate limiting, baseline schema not in the repo, no monitoring, global role checks, public storage bucket, optional modules not enabled in the hosted deployment._
+_Summary of known limitations: early-history credentials (issuer key rotation pending), baseline schema not in the repo, global role checks, owner migrations still to apply (private bucket, rate limits), no tracing or metrics, no end-to-end browser tests, Next.js major upgrade pending, optional modules not enabled in the hosted deployment._
 
-- **Treat early-history credentials as compromised.** Commits early in this repository's history (notably around `2e9bc97`) contained real credentials (a Gemini API key, the Supabase service-role key and the Verifiable Credential issuer private key). History was not rewritten, so anyone with a clone can read them. Rotate every credential ever used with this project (Supabase service-role/anon keys and JWT secret, Gemini API key, VC issuer key, SMTP password) and generate a new VC issuer key. Status in the hosted deployment: the Gemini key has been replaced; the VC issuer key rotation is still pending. Credentials signed with the old issuer key should be considered untrustworthy.
+- **Treat early-history credentials as compromised.** Commits early in this repository's history (notably around `2e9bc97`) contained real credentials (a Gemini API key, the Supabase service-role key and the Verifiable Credential issuer private key). History was not rewritten, so anyone with a clone can read them. Rotate every credential ever used with this project (Supabase keys, Gemini API key, VC issuer key, SMTP password) and generate a new VC issuer key. Status in the hosted deployment: the Gemini key was replaced and the Supabase API keys were migrated to the new publishable/secret keys (legacy keys disabled) on 2026-10-15; the **VC issuer key has not been rotated yet** (owner action pending; a re-sign tool and runbook exist, see [KEY-ROTATION.md](./my-app/docs/KEY-ROTATION.md)). Credentials signed with the old issuer key should be considered untrustworthy.
+- **Owner steps after deploying the hardening changes.** Two migrations are applied by hand, in this order relative to the code: `20261016_01_private_certificates_bucket.sql` (makes the `certificates` bucket private; apply **after** the code that serves signed URLs is deployed, until then the bucket is still public) and `20261016_02_rate_limits.sql` (the global limiter; the code works without it, failing open to the in-memory limiter). Production status of every migration is tracked in the "Migration status" section of [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md). Also set `ALERT_WEBHOOK_URL` and an uptime monitor if you want alerts, and check the Supabase redirect allow-list entry `<site>/api/auth/callback**`.
 - **Secrets**: only `my-app/.env.example` (placeholders) is committed; `.env*` files are git-ignored. `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS and must stay server-side.
 - **RLS depends on your database.** The policies changed by the versioned patches are described in [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md), but the original baseline is not in this repo, so review the policies in your own Supabase project. API routes also filter by organization and role as a second layer but should not be your only control.
 - **Middleware does not cover `/api/*`.** Every API route performs its own authentication/authorization (`withAuth` / `withRole`); new routes must do the same.
-- **Rate limiting is in-memory and per instance.** It slows abuse on public, email and OCR endpoints but is not a distributed limit; use an edge/WAF or Redis-backed limiter for real protection.
+- **Rate limiting is only partly global.** A Postgres-backed limiter covers login completion, signup, the email checks, OCR, public verification, the public portfolio and the SD routes (after its migration is applied); every other endpoint, including login and password reset, uses the per-instance in-memory limiter, a best-effort brake on serverless hosting. Windows are fixed (a burst of up to twice the limit across a boundary is possible) and the global limiter fails open on database errors. Put an edge/WAF limit in front for stronger protection. The limiter keys are SHA-256 hashes of client identifiers without a salt, stored in a table only the service role can access; treat that table as sensitive.
 - **Diagnostic routes** (`/api/test-email`, `/api/debug/domains`, `/api/health/detailed`, `/test-email`) are disabled in production or require admin auth. `/api/auth/dev-upsert-user` only works in development. `/api/diagnose` and `/api/auth/check-env` are unauthenticated and report configuration booleans; consider deleting all of these before deploying.
 - **AI extraction is advisory.** Gemini output can be wrong and certificates must be reviewed by faculty. Uploaded documents are sent to Google's Gemini API.
 - **Verifiable Credentials**: signing uses JWS via JOSE with the configured issuer key. JSON-LD proof suites, DID document publishing and third-party conformance are not implemented or validated.
-- **Uploaded files** are stored in the `certificates` Supabase Storage bucket and referenced by public URL. In production this bucket is currently **public**: anyone with a file URL can read it. A private-bucket plan is drafted in `my-app/supabase/migrations/20261014_core_storage_policies_note.sql`.
-- **Dependencies**: `npm audit` runs in CI and Dependabot opens weekly update PRs.
-- **No monitoring or alerting.** Errors go to the console/host logs; the in-memory error monitor has no external sink.
+- **Uploaded files** are stored in the `certificates` Supabase Storage bucket. The application opens them only through 300-second signed URLs issued after an authorization check, but until the owner applies `20261016_01_private_certificates_bucket.sql` (after deploying the code) the bucket is still **public**, so anyone holding an old object URL can read the file. A signed URL is a bearer link for up to five minutes. See [PRIVATE-STORAGE.md](./my-app/docs/PRIVATE-STORAGE.md).
+- **Dependencies**: `npm audit` runs in CI and Dependabot opens weekly update PRs. The Next.js major-version upgrade is pending (accepted advisories are listed with reasons and review dates in `my-app/audit-allowlist.json`).
+- **Monitoring is minimal.** There is an optional throttled, redacted webhook alert for unexpected server errors and a deep health probe, but no tracing, metrics, dashboards or browser-side error reporting; alert throttling is per instance, and errors a route catches and answers without logging an error are not alerted ([MONITORING.md](./my-app/docs/MONITORING.md)).
+- **No end-to-end browser tests.** The test suite uses in-memory fakes for the database; the migrations are checked against a model of the production schema, not the production database.
 - **Migrations are applied by hand.** `my-app/supabase/migrations/` is applied through the Supabase SQL editor, one file at a time. [DATABASE-SCHEMA.md](./my-app/docs/DATABASE-SCHEMA.md) has a status table (applied, optional, superseded). The checks in `my-app/supabase/tests` run the SQL on a model of the production schema; they do not prove behaviour on real data.
 - **`revocation_list` does not exist** in production; credential revocation is stored on `verifiable_credentials`.
-- **Session cookies are not HttpOnly** (`@supabase/ssr` browser client).
+- **Sessions**: HttpOnly cookies stop script from copying the session, but script running on a page can still make same-origin requests as the user while the page is open, and the Content-Security-Policy still allows inline scripts. Waiting pages poll, so an approval appears within about 10 seconds rather than instantly.
 - See also [SECURITY.md](./SECURITY.md) for reporting and key rotation.
 
 ---

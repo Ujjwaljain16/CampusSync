@@ -94,6 +94,21 @@ How it works:
 7. **If the old key was compromised**, do the opposite of step 6: do **not** list it. Every credential it signed will fail with
    `unknown_key`, so re-issue the ones that must survive. Rotation cannot make a stolen key harmless while it stays listed.
 
+### Re-signing stored credentials
+
+Instead of waiting for old credentials to expire, a super admin can re-sign them with the current key and then remove the
+previous public key: `POST /api/admin/vcs/resign` (body `{ "dryRun": true | false, "limit": n }`; implemented in
+`src/lib/vcResign.ts`). It rebuilds each stored **active** credential unchanged (same id, subject and dates) and replaces
+only the proof; revoked and expired credentials are skipped, a second run changes nothing, and one audit row with counts
+is written. The full runbook (new key, previous key listed, dry run, real run, check, remove the previous key, plus the
+Supabase keys checklist) is in [KEY-ROTATION.md](./KEY-ROTATION.md). It re-signs the stored W3C credentials only, not
+SD-JWT credentials or earlier signed tree heads.
+
+> **Status:** the tool is implemented, but the production issuer key has **not been rotated yet** (owner action
+> pending; the Supabase API keys and the Gemini key were already replaced on 2026-10-15). Until it is, credentials in
+> production are still signed with the original key, which appears in the early git history (see
+> [SECURITY.md](../../SECURITY.md)).
+
 ## did:web
 
 `GET /.well-known/did.json` serves a DID document for `NEXT_PUBLIC_ISSUER_DID` when it is a **host-only**
@@ -237,7 +252,9 @@ What this is **not**, stated plainly:
 * **Key compromise.** Rotation preserves old credentials by design; if a key is compromised, keeping it in
   `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` keeps its forgeries valid. Removing it invalidates everything it signed.
 * **Clocks.** Offline expiry checks use the verifier's clock (30 s tolerance).
-* **Operational:** the in-process rate limiter and status-list signature cache are per server instance. The optional
+* **Operational:** the in-memory rate limiter and the status-list signature cache are per server instance (the public
+  verify endpoint additionally uses the Postgres-backed global limiter once its migration is applied, see
+  [RATE-LIMITING.md](./RATE-LIMITING.md); it fails open to the in-memory one). The optional
   status-list SQL needs a test against a real database before it is enabled. The development placeholder key never
   produces verifiable credentials (and is refused in production).
 * **Legacy field:** `NEXT_PUBLIC_ISSUER_VERIFICATION_METHOD` is ignored for new credentials; credentials issued before this

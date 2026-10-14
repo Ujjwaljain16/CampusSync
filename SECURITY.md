@@ -21,24 +21,32 @@ treated as compromised and rotated (see below). Credentials signed with the old 
 untrustworthy. CI runs gitleaks over the full history; findings from the old commits are expected until the keys
 are rotated (and, optionally, the history is rewritten).
 
-Rotation status: the Gemini API key was rotated on 2026-10-15. Rotation of the credential-signing key is still
-pending. For the Supabase keys, follow the instructions below if they have not been rotated since those commits.
+Rotation status: on 2026-10-15 the Gemini API key was replaced and the Supabase API keys were migrated to the new
+publishable / secret keys, with the legacy JWT-based keys disabled. **Rotation of the credential-signing key
+(`VC_ISSUER_JWK`) has not been done yet** (owner action pending); until it is, treat credentials signed with the current
+key as exposed. The SMTP password and any other secret ever used with the project should be rotated too if that has not
+been done.
 
 ## Key rotation
 
-Rotate on suspicion of exposure, when someone with access leaves, and at least yearly.
+Rotate on suspicion of exposure, when someone with access leaves, and at least yearly. The full runbook (new key,
+re-sign stored credentials, remove the old public key, Supabase keys checklist) is
+[`my-app/docs/KEY-ROTATION.md`](my-app/docs/KEY-ROTATION.md).
 
 ### VC issuer key (`VC_ISSUER_JWK`)
 
-The step-by-step runbook, including how to check the result, is in
-[`my-app/docs/VERIFIABLE-CREDENTIALS.md`](my-app/docs/VERIFIABLE-CREDENTIALS.md#key-rotation). In short:
+Background and verification details are in
+[`my-app/docs/VERIFIABLE-CREDENTIALS.md`](my-app/docs/VERIFIABLE-CREDENTIALS.md#key-rotation). A super admin can
+re-sign the stored active credentials with the new key through `POST /api/admin/vcs/resign` (dry run available), after
+which the old public key can be removed from `VC_ISSUER_PREVIOUS_PUBLIC_JWKS`. In short:
 
 1. Generate a new key for the environment with `node scripts/generate-issuer-key.mjs` (run in `my-app/`; do not reuse
    any key that was ever committed). The algorithm is taken from the JWK's `alg` (EdDSA, ES256 or RS256).
 2. Set `VC_ISSUER_JWK` (single-line JSON JWK including the private fields) in your host's secret store, never in git.
 3. Redeploy. New credentials are signed with the new key.
 4. **Routine rotation:** put the old key's *public* JWK into `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` (a JSON array of public
-   keys only) so credentials it signed keep verifying; keep it listed until those credentials have expired.
+   keys only) so credentials it signed keep verifying; re-sign the stored credentials with the tool above and then
+   empty the list, or keep it listed until those credentials have expired.
    **If the old key was compromised:** do not list it. Credentials it signed then stop verifying (`unknown_key`);
    re-issue the ones that must survive, or revoke them (`verifiable_credentials.status = 'revoked'`). Listing a
    compromised key would keep anything signed with it valid.
@@ -46,9 +54,12 @@ The step-by-step runbook, including how to check the result, is in
 
 ### Supabase
 
-1. Rotate the JWT secret / API keys in the Supabase dashboard (this issues new anon and service-role keys and
-   invalidates sessions).
-2. Update `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` in the host and in local `.env.local`.
+The production project already uses the new publishable / secret API keys (migrated 2026-10-15, legacy keys disabled).
+To rotate again:
+
+1. Rotate the API keys (and the JWT signing key if needed) in the Supabase dashboard; sessions may be invalidated.
+2. Update `NEXT_PUBLIC_SUPABASE_ANON_KEY` (publishable key) and `SUPABASE_SERVICE_ROLE_KEY` (secret key) in the host and
+   in local `.env.local`.
 3. Check the database for unexpected users, `user_roles` rows with elevated roles, and recent `audit_logs`.
 
 ### Other API keys and secrets
@@ -70,15 +81,27 @@ The step-by-step runbook, including how to check the result, is in
   repository). Run a migration on a staging copy first, and keep the applied SQL in version control.
 - Authorization comes only from `user_roles`. `audit_logs` is append-only and written only by the backend; credentials
   (`verifiable_credentials`) are issued and revoked only by the backend after authorization checks.
-- The `certificates` storage bucket is public.
+- Certificate files: the code serves them only through short-lived (300 s) signed URLs after an authorization check
+  ([`PRIVATE-STORAGE.md`](my-app/docs/PRIVATE-STORAGE.md)). The migration that makes the `certificates` bucket private
+  (`20261016_01_private_certificates_bucket.sql`) is an owner step to apply **after** the code is deployed; until then the
+  bucket is still public. Production status: "Migration status" in
+  [`DATABASE-SCHEMA.md`](my-app/docs/DATABASE-SCHEMA.md).
 - Specifics of individual policies are intentionally not described in this public repository.
 
 ## Security-relevant design notes
 
 - `/api/*` is not covered by the middleware; each route authenticates itself. `my-app/tests/security/route-inventory.test.ts`
   fails CI when a route has no recognised guard and is not on its reviewed public allow-list.
-- Session cookies are managed by `@supabase/ssr` in the browser and are not HttpOnly.
-- Rate limiting is in-memory per instance.
+- Session cookies are HttpOnly, SameSite=Lax and Secure in production, written only by the server; there is no browser
+  Supabase client ([`SESSION-COOKIES.md`](my-app/docs/SESSION-COOKIES.md)). Script running on a page can still make
+  same-origin requests as the user while the page is open, and the Content-Security-Policy still allows inline scripts.
+- Rate limiting: an in-memory per-instance limiter on many endpoints, plus a Postgres-backed global limiter on login
+  completion, signup, the email checks, OCR, public verification, the public portfolio and the SD routes. The global
+  limiter needs migration `20261016_02_rate_limits.sql` (owner step) and fails open to the in-memory one
+  ([`RATE-LIMITING.md`](my-app/docs/RATE-LIMITING.md)).
+- Monitoring: an optional webhook (`ALERT_WEBHOOK_URL`) receives throttled, redacted alerts for unexpected server errors,
+  and `GET /api/health?deep=1` is meant for an external uptime monitor ([`MONITORING.md`](my-app/docs/MONITORING.md)).
+  There is no tracing or metrics. Treat the webhook URL as a secret.
 - The service-role key bypasses RLS; it must remain server-side (a test checks it is not read in pages/components).
 - Uploaded certificates are sent to Google's Gemini API for extraction.
 - The revocation status list, the transparency log and SD-JWT selective disclosure are implemented but switched off by
@@ -86,6 +109,6 @@ The step-by-step runbook, including how to check the result, is in
 
 ## Automated checks
 
-GitHub Actions run typecheck, lint, tests, a dependency audit gate (`node scripts/audit-check.mjs`: fails on high or
+GitHub Actions run typecheck, lint, tests, a production build, the migration checks (PGlite model), a dependency audit gate (`node scripts/audit-check.mjs`: fails on high or
 critical advisories in production dependencies unless listed with a reason and review date in
 `my-app/audit-allowlist.json`), gitleaks (full history) and CodeQL; Dependabot proposes weekly dependency updates.

@@ -1,7 +1,8 @@
 # Database access flow
 
 How API routes reach Postgres. There are two kinds of Supabase client, and they behave very differently with respect
-to Row-Level Security (RLS).
+to Row-Level Security (RLS). Both are created on the server: the browser has no Supabase client and never queries the
+database (or storage) directly; it only calls `/api/*` with its HttpOnly session cookies.
 
 ```mermaid
 graph TB
@@ -23,9 +24,10 @@ graph TB
    (`getTargetOrganizationIds(context)` returns the list; recruiters may have several).
 3. **User-bound client** (`createSupabaseServerClient`): queries run as the signed-in user, so RLS policies are the
    second line of defence.
-4. **Admin client** (41 route files call `createSupabaseAdminClient()`; shared helpers such as `writeAudit` and
-   `recruiterRoute` use it too): used for operations that RLS would block (creating users, role changes,
-   cross-organization admin views, storage cleanup, credential issue/revoke, audit writes). Nothing but the route's own
+4. **Admin client** (44 route files call `createSupabaseAdminClient()`; shared helpers such as `writeAudit`,
+   `recruiterRoute` and the global rate limiter use it too): used for operations that RLS would block (creating users,
+   role changes, cross-organization admin views, storage cleanup, signed URLs for certificate files, credential
+   issue/revoke/re-sign, audit writes, rate-limit counters). Nothing but the route's own
    checks protects these queries, so each such route must verify the caller's role and the target's organization itself.
 5. Prefer small, explicit `select(...)` column lists over `select('*')` for responses that reach other users.
 
@@ -57,3 +59,13 @@ which tables have RLS enabled in a given database:
 
 See the list in [ARCHITECTURE.md](./ARCHITECTURE.md#data-stores). There is no `revocation_list` table: revocation
 state lives on `verifiable_credentials`.
+
+The one table the application does not query with `.from()` is `public.rate_limits` (migration
+`20261016_02_rate_limits.sql`): the global rate limiter calls the `rate_limit_hit` function through the service-role
+client, and nothing else reads or writes the table. It is created by an owner-applied migration; until then the limiter
+fails open to the in-memory one. See [RATE-LIMITING.md](./RATE-LIMITING.md) and the "Migration status" section of
+[DATABASE-SCHEMA.md](./DATABASE-SCHEMA.md).
+
+Storage is reached the same way: uploads use the student's own session (owner-folder policy), reads of certificate files
+go through a signed URL that the server creates with the service-role client after an authorization check
+([PRIVATE-STORAGE.md](./PRIVATE-STORAGE.md)).

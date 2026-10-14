@@ -56,15 +56,27 @@ primary admin to be an `org_admin` and refuses to remove the last admin of an or
    is described in [DATABASE-SCHEMA.md](./DATABASE-SCHEMA.md) (section 6); see also
    [Security-Auth-flow.md](./Security-Auth-flow.md).
 
-Because step 1 is global, a route that stops after `withRole` is not tenant-scoped. 41 route files also use the
+Because step 1 is global, a route that stops after `withRole` is not tenant-scoped. 44 route files also use the
 service-role client, where steps 1 to 3 are the only protection.
+
+The same applies to certificate files: `GET /api/certificates/[id]/file` hands out a 300-second signed URL only after
+checking that the caller owns the certificate or holds an approved reviewer role in the certificate's organization (or is
+a super admin); every other caller gets the same 404 ([PRIVATE-STORAGE.md](./PRIVATE-STORAGE.md)). Likewise
+`/api/certificates/approval-history` (faculty, admin, org_admin, super_admin) is scoped to the organization the caller
+holds an approved role in.
+
+Platform infrastructure is not tenant data: the rate-limit counters (`public.rate_limits`, written only through the
+`rate_limit_hit` function with the service role; see [RATE-LIMITING.md](./RATE-LIMITING.md)) are keyed by hashed client
+identity and carry no `organization_id`.
 
 ## Super-admin management
 
 `/api/v2/admin/super/**` (10 route files) creates organizations, manages admins and the primary admin
 (`transfer_primary_admin`, `check_and_reserve_slug`, `generate_organization_slug` RPCs) and reports platform stats.
 `/api/v2/user/organization-context` returns the caller's organizations for the client-side
-`OrganizationContext`/`OrganizationSwitcher`.
+`OrganizationContext`/`OrganizationSwitcher`. The client talks only to these API routes (there is no Supabase client in
+the browser), and the selected organization is sent as the `X-Organization-ID` header and re-verified on the server
+for every request.
 
 ## Known limitations
 
