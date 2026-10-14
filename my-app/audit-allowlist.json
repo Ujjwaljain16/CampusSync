@@ -1,0 +1,41 @@
+{
+  "_comment": "Advisories knowingly accepted for production dependencies. Each entry needs a reason and a review-by date (YYYY-MM-DD); after that date the exception is ignored and CI fails again.",
+  "accepted": [
+    {
+      "id": "GHSA-qx2v-qp2m-jg93",
+      "package": "postcss (bundled inside next@15.5.x)",
+      "reason": "PostCSS stringify XSS applies when untrusted CSS is processed. PostCSS runs here only at build time on this repository's own stylesheets, never on user-supplied CSS. The bundled copy is only replaced by Next 16.",
+      "reviewBy": "2027-01-31"
+    },
+    {
+      "id": "GHSA-6g55-p6wh-862q",
+      "package": "postcss (bundled inside next@15.5.x)",
+      "reason": "sourceMappingURL file read needs attacker-controlled CSS comments; PostCSS only processes this repository's own CSS at build time. Fixed upstream only in Next 16.",
+      "reviewBy": "2027-01-31"
+    },
+    {
+      "id": "GHSA-fxqj-rqcc-2cmp",
+      "package": "postcss (bundled inside next@15.5.x)",
+      "reason": "Incomplete fix of GHSA-6g55-p6wh-862q; same exposure (attacker-controlled CSS), not reachable at runtime here. Fixed upstream only in Next 16.",
+      "reviewBy": "2027-01-31"
+    },
+    {
+      "id": "GHSA-r28c-9q8g-f849",
+      "package": "postcss (bundled inside next@15.5.x)",
+      "reason": "Path traversal via previous-source-map auto-loading needs attacker-controlled CSS; build-time only on own CSS. Fixed upstream only in Next 16.",
+      "reviewBy": "2027-01-31"
+    },
+    {
+      "id": "GHSA-4jqv-mc3x-m676",
+      "package": "next",
+      "reason": "Cache poisoning of SSG/ISR pages in SELF-HOSTED deployments (moderate). Listed for visibility; re-check if the app is ever self-hosted. Fixed upstream in Next 16.",
+      "reviewBy": "2027-01-31"
+    },
+    {
+      "id": "GHSA-mcj8-r9mp-w47p",
+      "package": "next",
+      "reason": "Cache poisoning in SSG/ISR rendering for self-hosted deployments (moderate). Same reasoning as GHSA-4jqv-mc3x-m676. Fixed upstream in Next 16.",
+      "reviewBy": "2027-01-31"
+    }
+  ]
+}
