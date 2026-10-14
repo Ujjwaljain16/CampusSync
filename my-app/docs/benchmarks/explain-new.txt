@@ -1,0 +1,27 @@
+=== review queue (pending, one organization)
+                                                                           QUERY PLAN                                                                            
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.42..200.54 rows=50 width=184) (actual time=0.098..0.322 rows=50 loops=1)
+   Buffers: shared hit=1 read=52
+   ->  Index Scan using certificates_org_status_created_idx on certificates  (cost=0.42..4975.33 rows=1243 width=184) (actual time=0.097..0.317 rows=50 loops=1)
+         Index Cond: ((organization_id = '1fefd209-144c-4ec2-bda8-f556305d5c6a'::uuid) AND (verification_status = 'pending'::text))
+         Buffers: shared hit=1 read=52
+ Planning:
+   Buffers: shared hit=190 dirtied=6
+ Planning Time: 0.320 ms
+ Execution Time: 0.338 ms
+(9 rows)
+
+=== credential lookup by certificate (certificate_id column)
+                                                                           QUERY PLAN                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Index Scan using verifiable_credentials_certificate_idx on verifiable_credentials  (cost=0.42..8.44 rows=1 width=53) (actual time=0.030..0.030 rows=1 loops=1)
+   Index Cond: (certificate_id = 'f2a82088-63b7-43e0-9fd0-ccd059f46ee0'::uuid)
+   Filter: (status = 'active'::text)
+   Buffers: shared hit=1 read=3
+ Planning:
+   Buffers: shared hit=94 dirtied=1
+ Planning Time: 0.170 ms
+ Execution Time: 0.035 ms
+(8 rows)
+
