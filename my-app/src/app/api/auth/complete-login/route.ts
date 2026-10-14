@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { apiError, parseAndValidateBody } from '@/lib/api';
 import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
+import { authCookieOptions } from '@/lib/supabase/cookieOptions';
 
 function getRedirectForRole(role: string | null | undefined): string {
 	if (role === 'student') return '/student/dashboard';
@@ -33,6 +34,7 @@ async function handlePost(request: NextRequest) {
 		process.env.NEXT_PUBLIC_SUPABASE_URL!,
 		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 		{
+			cookieOptions: authCookieOptions(),
 			cookies: {
 				getAll() {
 					return request.cookies.getAll();

@@ -2,7 +2,7 @@
 
 import { LogOut } from 'lucide-react';
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import { emitAuthEvent } from '@/lib/authEvents';
 
 interface LogoutButtonProps {
   className?: string;
@@ -17,10 +17,7 @@ export default function LogoutButton({ className = '', variant = 'default' }: Lo
     
     setLoggingOut(true);
     try {
-      // Clear client session first to avoid refresh token errors
-      try { await supabase.auth.signOut(); } catch { /* ignore error */ }
-
-      // Call the logout API to clear server cookies/session
+      // The server ends the session and clears the (HttpOnly) cookies
       const response = await fetch('/api/auth/signout', {
         method: 'POST',
         headers: {
@@ -31,11 +28,22 @@ export default function LogoutButton({ className = '', variant = 'default' }: Lo
       if (!response.ok) {
         throw new Error('Logout failed');
       }
-
-      // Force a full page reload to clear all client-side state
-      window.location.href = '/login';
     } catch {
-      // Even if the API call fails, redirect to login
+      // Even if the API call fails, still go to the login page
+    }
+
+    try {
+      // Per-user selections must not leak to the next person on this browser
+      localStorage.removeItem('currentOrganizationId');
+      localStorage.removeItem('selectedOrganizationId');
+    } catch {
+      // storage unavailable
+    }
+    // Tell other tabs (and listeners in this one) the session is gone
+    emitAuthEvent('logout');
+
+    try {
+      // Force a full page reload to clear all client-side state
       window.location.href = '/login';
     } finally {
       setLoggingOut(false);

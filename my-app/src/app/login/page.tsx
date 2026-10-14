@@ -4,7 +4,8 @@ import React, { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { supabase } from "../../../lib/supabaseClient";
+import { emitAuthEvent } from "@/lib/authEvents";
+import { safeRedirectPath } from "@/lib/safeRedirect";
 import { Shield, Mail, Lock, Eye, EyeOff, ArrowRight, Check, Sparkles, Zap, Award } from "lucide-react";
 import {
   FormField,
@@ -52,35 +53,21 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // First, check if the user exists in the database
-      const checkResponse = await fetch('/api/auth/check-user-exists', {
+      // The server answers the same way whether or not the address has an account
+      const response = await fetch('/api/auth/password-reset/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim() }),
       });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
 
-      const checkData = await checkResponse.json();
-
-      if (!checkResponse.ok) {
-        throw new Error(checkData.error || 'Failed to verify email');
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to send reset email');
       }
-
-      if (!checkData.exists) {
-        toast.error("No account found with this email address");
-        setLoading(false);
-        return;
-      }
-
-      // User exists, send reset email
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || window.location.origin}/reset-password`,
-      });
-
-      if (resetError) throw resetError;
 
       setResetEmailSent(true);
       setError(null);
-      toast.success('Password reset email sent successfully!');
+      toast.success('If an account exists for that email, a reset link is on its way.');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to send reset email";
       toast.error(message);
@@ -95,35 +82,22 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+      // The server signs in and sets the session as HttpOnly cookies on this response
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
       });
-      if (signInError) throw signInError;
-      
-      // Check if user was successfully authenticated
-      if (data.user && data.session) {
-        toast.success('Login successful! Redirecting...');
-        
-        // Establish session and get redirect target in one step (avoid duplicate setSession)
-        const completeResp = await fetch('/api/auth/complete-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            access_token: data.session.access_token,
-            refresh_token: data.session.refresh_token,
-          })
-        });
-        const completeJson = await completeResp.json().catch(() => ({ redirectTo: undefined })) as { redirectTo?: string };
-        if (!completeResp.ok || !completeJson?.redirectTo) {
-          console.error('Complete-login failed, falling back to /dashboard', completeJson);
-          window.location.href = '/dashboard';
-        } else {
-          window.location.href = completeJson.redirectTo;
-        }
-      } else {
-        throw new Error('Authentication failed');
+      const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; redirectTo?: string };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || 'Authentication failed');
       }
+
+      toast.success('Login successful! Redirecting...');
+      emitAuthEvent('login');
+      // A full page load so every part of the app starts from the new session
+      window.location.href = safeRedirectPath(result.redirectTo, '/dashboard');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       toast.error(message);

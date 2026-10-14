@@ -12,7 +12,6 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { Mail, CheckCircle, XCircle, AlertCircle, Send, Loader2 } from 'lucide-react';
 
 interface EmailTest {
@@ -36,7 +35,16 @@ export default function EmailTestPage() {
     email?: string;
   }>({ loading: false });
 
-  const supabase = createClient();
+  // All calls go through the server's API routes (the session is in HttpOnly cookies; there is no browser auth client)
+  const postJson = async (url: string, body: Record<string, unknown>) => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const result = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+  };
 
   // Test 1: Trigger signup verification email (resend)
   const testSignupEmail = async () => {
@@ -55,12 +63,7 @@ export default function EmailTestPage() {
 
     try {
       // Resend confirmation email for existing unconfirmed user
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: testEmail
-      });
-
-      if (error) throw error;
+      await postJson('/api/auth/resend-confirmation', { email: testEmail });
 
       setTests(prev => ({
         ...prev,
@@ -98,11 +101,7 @@ export default function EmailTestPage() {
     }));
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-        redirectTo: `${window.location.origin}/reset-password`
-      });
-
-      if (error) throw error;
+      await postJson('/api/auth/password-reset/request', { email: resetEmail });
 
       setTests(prev => ({
         ...prev,
@@ -129,15 +128,16 @@ export default function EmailTestPage() {
     setUserStatus({ loading: true });
 
     try {
-      const { data: { user }, error } = await supabase.auth.getUser();
+      const response = await fetch('/api/auth/me', { cache: 'no-store' });
+      if (response.status !== 401 && !response.ok) throw new Error(`Request failed (${response.status})`);
 
-      if (error) throw error;
-
-      if (user) {
+      if (response.ok) {
+        // A session cookie only exists for a confirmed email, so a session means "verified"
+        const user = (await response.json()) as { email?: string };
         setUserStatus({
           loading: false,
           exists: true,
-          confirmed: !!user.email_confirmed_at,
+          confirmed: true,
           email: user.email
         });
       } else {

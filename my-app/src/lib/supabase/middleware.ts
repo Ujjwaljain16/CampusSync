@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { authCookieOptions } from '@/lib/supabase/cookieOptions'
 
 export async function updateSession(request: NextRequest) {
   const supabaseResponse = NextResponse.next({
@@ -10,6 +11,8 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // Refreshed session cookies are rewritten HttpOnly (this also upgrades cookies an older browser client wrote)
+      cookieOptions: authCookieOptions(),
       cookies: {
         getAll() {
           return request.cookies.getAll()

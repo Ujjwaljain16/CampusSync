@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { safeRedirectPath } from '@/lib/safeRedirect';
+import { authCookieOptions } from '@/lib/supabase/cookieOptions';
 
 /**
  * OAuth Callback Handler
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
 		process.env.NEXT_PUBLIC_SUPABASE_URL!,
 		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 		{
+			cookieOptions: authCookieOptions(),
 			cookies: {
 				getAll() {
 					return request.cookies.getAll();
@@ -54,6 +56,16 @@ export async function GET(request: NextRequest) {
 		console.error('OAuth code exchange failed:', error.message);
 		const errorUrl = `${base}/login?error=${encodeURIComponent('Authentication failed')}`;
 		return NextResponse.redirect(errorUrl);
+	}
+
+	// Password recovery: the session only exists so /reset-password can set a new password, so skip the
+	// profile / approval routing below (a pending recruiter must still be able to reset a password).
+	if (redirectTo === '/reset-password') {
+		const recoveryResponse = NextResponse.redirect(`${base}/reset-password`);
+		cookieStore.forEach(({ name, value, options }) => {
+			recoveryResponse.cookies.set(name, value, options);
+		});
+		return recoveryResponse;
 	}
 
 	// Get the authenticated user
