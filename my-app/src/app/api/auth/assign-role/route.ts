@@ -48,12 +48,14 @@ export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (req: 
       user_id: userId,
       role,
       organization_id: organizationId,
+      // Explicit: an admin assigning the role is the approval
+      approval_status: 'approved',
       assigned_by: user.id,
       updated_at: new Date().toISOString()
-    });
+    }, { onConflict: 'user_id,organization_id' });
 
   if (roleError) {
-    console.error('[assign-role] upsert failed:', roleError);
+    console.error('[assign-role] upsert failed:', roleError.code, roleError.message);
     throw apiError.internal('Failed to assign role');
   }
 

@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
   console.log('[AUTH_CONFIRM] Received confirmation request:', { type, hasToken: !!token_hash });
 
-  if (!token_hash || !type) {
+  if (!token_hash || !type || (type !== 'signup' && type !== 'email_change')) {
     console.error('[AUTH_CONFIRM] Missing token_hash or type parameter');
     return NextResponse.redirect(
       new URL('/login?error=Invalid+confirmation+link', request.url)
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     });
 
     if (error) {
-      console.error('[AUTH_CONFIRM] Verification failed:', error);
+      console.error('[AUTH_CONFIRM] Verification failed:', error.message);
       return NextResponse.redirect(
         new URL(`/login?error=${encodeURIComponent(error.message)}`, request.url)
       );
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    console.log('[AUTH_CONFIRM] Email confirmed successfully for:', data.user.email);
+    console.log('[AUTH_CONFIRM] Email confirmed successfully for user:', data.user.id);
 
     // Create response with cookies
     const redirectUrl = new URL(next, request.url);

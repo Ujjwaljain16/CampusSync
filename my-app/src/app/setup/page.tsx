@@ -28,20 +28,33 @@ export default function SetupPage() {
   useEffect(() => {
     // Check system diagnostics
     const checkDiagnostics = async () => {
+      // NEXT_PUBLIC_* values are inlined at build time, so this works even when
+      // the diagnostic endpoints are disabled (they return 404 in production).
+      const buildTimeConfigured = !!(
+        process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      );
+
       try {
         const [envResponse, diagResponse] = await Promise.all([
           fetch('/api/auth/check-env'),
           fetch('/api/diagnose')
         ]);
-        
+
+        if (!envResponse.ok || !diagResponse.ok) {
+          // Diagnostics are dev-only: degrade gracefully without them
+          setEnvConfigured(buildTimeConfigured);
+          setDiagnostics(null);
+          return;
+        }
+
         const envData = await envResponse.json();
         const diagData = await diagResponse.json();
-        
-        setEnvConfigured(envData.data.configured);
-        setDiagnostics(diagData.data);
-      } catch (error) {
-        console.error('Error checking diagnostics:', error);
-        setEnvConfigured(false);
+
+        setEnvConfigured(!!envData?.data?.configured);
+        setDiagnostics(diagData?.data ?? null);
+      } catch {
+        setEnvConfigured(buildTimeConfigured);
+        setDiagnostics(null);
       } finally {
         setLoading(false);
       }

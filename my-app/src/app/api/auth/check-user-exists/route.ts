@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { createClient } from '@supabase/supabase-js';
+import { findAuthUserByEmail } from '@/lib/auth/findUserByEmail';
 
 export async function POST(request: NextRequest) {
   // Account-enumeration surface: keep it tightly rate limited
@@ -29,19 +30,17 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // Use admin API to get user by email
-    const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();
-
-    if (error) {
-      console.error('Error checking user:', error);
+    // Paginated lookup (listUsers() alone only returns the first page)
+    let userExists: boolean;
+    try {
+      userExists = !!(await findAuthUserByEmail(supabaseAdmin, email));
+    } catch (lookupError) {
+      console.error('Error checking user:', lookupError);
       return NextResponse.json(
         { error: 'Failed to check user' },
         { status: 500 }
       );
     }
-
-    // Check if email exists in users list
-    const userExists = users.some(user => user.email?.toLowerCase() === email.toLowerCase());
 
     return NextResponse.json({ exists: userExists });
 

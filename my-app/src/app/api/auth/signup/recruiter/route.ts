@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, createSupabaseServerClient } from '@/lib/supabaseServer';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { findAuthUserByEmail } from '@/lib/auth/findUserByEmail';
 
 /**
  * POST /api/auth/signup/recruiter
@@ -39,11 +40,8 @@ export async function POST(request: NextRequest) {
 
     const adminClient = await createSupabaseAdminClient();
 
-    console.log('[RECRUITER_SIGNUP] Creating recruiter account:', { email, company_name });
-
     // Check if user already exists
-    const { data: existingUsers } = await adminClient.auth.admin.listUsers();
-    const existingUser = existingUsers?.users.find((u: { email?: string }) => u.email?.toLowerCase() === email.toLowerCase());
+    const existingUser = await findAuthUserByEmail(adminClient, email);
 
     let userId: string;
     let isNewUser = false;
@@ -61,8 +59,6 @@ export async function POST(request: NextRequest) {
         );
       }
       userId = existingUser.id;
-      console.log('[RECRUITER_SIGNUP] User already exists:', userId);
-      
       const isOAuthUser = existingUser.app_metadata?.provider && existingUser.app_metadata.provider !== 'email';
       
       // Check ALL roles for this user (both with and without organization_id)
@@ -71,15 +67,11 @@ export async function POST(request: NextRequest) {
         .select('id, role, organization_id, approval_status')
         .eq('user_id', userId);
 
-      console.log('[RECRUITER_SIGNUP] Existing roles:', existingRoles);
-      console.log('[RECRUITER_SIGNUP] Is OAuth user:', isOAuthUser);
-
       // Check if user already has a recruiter role
       const recruiterRole = existingRoles?.find(r => r.role === 'recruiter' && r.organization_id === null);
       
       if (recruiterRole) {
         // User already has recruiter account
-        console.log('[RECRUITER_SIGNUP] User already has recruiter role, returning success');
         return NextResponse.json({
           success: true,
           userId,
@@ -91,12 +83,7 @@ export async function POST(request: NextRequest) {
       // Check if user has ANY other role (student, faculty, admin, etc.)
       const otherRoles = existingRoles?.filter(r => r.role !== 'recruiter');
       
-      console.log('[RECRUITER_SIGNUP] Other roles (non-recruiter):', otherRoles);
-      
       if (otherRoles && otherRoles.length > 0) {
-        const rolesList = otherRoles.map(r => `${r.role}${r.organization_id ? ' (org: ' + r.organization_id + ')' : ''}`).join(', ');
-        console.log('[RECRUITER_SIGNUP] User already has other roles:', rolesList);
-        
         // User already registered with different role - REJECT with user-friendly message
         const roleNames = otherRoles.map(r => {
           if (r.role === 'student') return 'Student';
@@ -113,7 +100,6 @@ export async function POST(request: NextRequest) {
       // IMPORTANT: For OAuth users completing signup, set the password they entered
       // This allows them to login with email/password in addition to OAuth
       if (isOAuthUser && password) {
-        console.log('[RECRUITER_SIGNUP] Setting password for OAuth user:', email);
         try {
           const { error: passwordError } = await adminClient.auth.admin.updateUserById(
             userId,
@@ -121,10 +107,8 @@ export async function POST(request: NextRequest) {
           );
           
           if (passwordError) {
-            console.error('[RECRUITER_SIGNUP] Failed to set password for OAuth user:', passwordError);
+            console.error('[RECRUITER_SIGNUP] Failed to set password for OAuth user:', passwordError.message);
             // Don't fail the signup - they can still use OAuth
-          } else {
-            console.log('[RECRUITER_SIGNUP] ✅ Password set successfully for OAuth user');
           }
         } catch (err) {
           console.error('[RECRUITER_SIGNUP] Error setting password:', err);
@@ -133,7 +117,6 @@ export async function POST(request: NextRequest) {
       }
 
       // User exists but has no roles at all - this shouldn't happen but we'll allow it
-      console.log('[RECRUITER_SIGNUP] User exists but has no roles, adding recruiter role');
     } else {
       // Create new auth user
       const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
@@ -149,7 +132,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (authError) {
-        console.error('[RECRUITER_SIGNUP] Auth user creation failed:', authError);
+        console.error('[RECRUITER_SIGNUP] Auth user creation failed:', authError.message);
         return NextResponse.json(
           { error: authError.message || 'Failed to create account' },
           { status: 400 }
@@ -165,7 +148,6 @@ export async function POST(request: NextRequest) {
 
       userId = authData.user.id;
       isNewUser = true;
-      console.log('[RECRUITER_SIGNUP] Auth user created:', userId);
 
       // IMPORTANT: When using admin.createUser() with email_confirm: false,
       // Supabase creates the user but does NOT automatically send confirmation email.
@@ -184,13 +166,10 @@ export async function POST(request: NextRequest) {
         });
 
         if (resendError) {
-          console.error('[RECRUITER_SIGNUP] Failed to send confirmation email:', resendError);
-          console.log('[RECRUITER_SIGNUP] Note: User created but confirmation email not sent.');
-        } else {
-          console.log('[RECRUITER_SIGNUP] ✅ Confirmation email sent successfully to:', email);
+          console.error('[RECRUITER_SIGNUP] Failed to send confirmation email for user', userId, resendError.message);
         }
       } catch (emailError) {
-        console.error('[RECRUITER_SIGNUP] Error sending confirmation email:', emailError);
+        console.error('[RECRUITER_SIGNUP] Error sending confirmation email for user', userId, emailError instanceof Error ? emailError.message : 'unknown');
       }
     }
 
@@ -208,7 +187,7 @@ export async function POST(request: NextRequest) {
         });
 
       if (roleError) {
-        console.error('[RECRUITER_SIGNUP] Role assignment failed:', roleError);
+        console.error('[RECRUITER_SIGNUP] Role assignment failed:', roleError.code, roleError.message);
         // Rollback: delete auth user
         await adminClient.auth.admin.deleteUser(userId);
         return NextResponse.json(
@@ -229,12 +208,10 @@ export async function POST(request: NextRequest) {
         });
 
       if (profileError) {
-        console.error('[RECRUITER_SIGNUP] Profile creation failed:', profileError);
+        console.error('[RECRUITER_SIGNUP] Profile creation failed:', profileError.message);
         // Don't rollback - profile creation is not critical
       }
     }
-
-    console.log('[RECRUITER_SIGNUP] Recruiter account created successfully');
 
     const successMessage = isNewUser 
       ? 'Recruiter account created! Please check your email to verify your account.'
@@ -252,7 +229,7 @@ export async function POST(request: NextRequest) {
     }, { status: isNewUser ? 201 : 200 });
 
   } catch (error: unknown) {
-    console.error('[RECRUITER_SIGNUP] Error:', error);
+    console.error('[RECRUITER_SIGNUP] Error:', error instanceof Error ? error.message : 'unknown');
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

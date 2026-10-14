@@ -15,12 +15,12 @@ export const requiredEnvVars = [
 export const requiredServerEnvVars = [
   'SUPABASE_SERVICE_ROLE_KEY',
   'VC_ISSUER_JWK',
-  'GEMINI_API_KEY',
 ] as const;
 
 export const optionalEnvVars = [
   'NEXT_PUBLIC_BASE_URL', // Can fallback to NEXT_PUBLIC_SITE_URL
-  'GEMINI_MODEL', // Has default: gemini-2.5-flash
+  'GEMINI_API_KEY', // Optional: OCR is disabled (degraded) without it
+  'GEMINI_MODEL', // Has default: gemini-2.0-flash
   'USE_DOCUMENTS_TABLE', // Has default: true
   'OCR_ENABLED', // Has default: true
   'OCR_SERVICE_URL', // Optional OCR service
@@ -286,7 +286,7 @@ export const config = {
    * Get Gemini model name
    */
   getGeminiModel(): string {
-    return process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp';
+    return process.env.GEMINI_MODEL?.trim() || 'gemini-2.0-flash';
   },
 
   /**
@@ -407,10 +407,7 @@ export function assertProductionReady(): void {
     errors.push('NEXT_PUBLIC_ISSUER_DID cannot contain localhost in production');
   }
 
-  // Check critical features
-  if (!features.hasGeminiApi()) {
-    errors.push('GEMINI_API_KEY is required for OCR functionality');
-  }
+  // GEMINI_API_KEY is deliberately not required here: a missing key degrades OCR only.
 
   if (errors.length > 0) {
     throw new Error(

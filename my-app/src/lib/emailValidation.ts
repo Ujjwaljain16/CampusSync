@@ -6,22 +6,17 @@ export interface ValidationResult {
   isEducational?: boolean;
 }
 
-// Common educational domain patterns (fallback when database is unavailable)
+// Common educational domain patterns (fallback when the database is unavailable).
+// Anchored to the END of the domain on a label boundary, so 'x.edu.evil.com' or
+// 'university.evil.com' can never match. Matched against the domain only.
 const FALLBACK_EDUCATIONAL_PATTERNS = [
-  /\.edu$/,                    // .edu domains
-  /\.ac\.uk$/,                 // UK universities
-  /\.ac\.in$/,                 // Indian universities
-  /\.ac\.jp$/,                 // Japanese universities
-  /\.ac\.au$/,                 // Australian universities
-  /\.ac\.nz$/,                 // New Zealand universities
-  /\.ac\.za$/,                 // South African universities
-  /university\./,              // Contains "university"
-  /college\./,                 // Contains "college"
-  /institute\./,               // Contains "institute"
-  /school\./,                  // Contains "school"
-  /campus\./,                  // Contains "campus"
-  /\.edu\./,                   // .edu subdomains
+  /^(?:[a-z0-9-]+\.)+edu$/,                       // .edu domains
+  /^(?:[a-z0-9-]+\.)+edu\.[a-z]{2}$/,             // edu.<cc> (edu.au, edu.in, ...)
+  /^(?:[a-z0-9-]+\.)+ac\.(?:uk|in|jp|au|nz|za)$/, // academic second-level domains
 ];
+
+// Syntactically plausible hostname (labels of [a-z0-9-], at least two labels)
+const DOMAIN_SHAPE = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 
 // Common non-educational domains to block
 const BLOCKED_DOMAINS = [
@@ -45,8 +40,46 @@ export function isBlockedDomain(email: string): boolean {
 
 // Check if domain matches educational patterns (fallback)
 export function matchesEducationalPattern(email: string): boolean {
-  const trimmedEmail = email.trim().toLowerCase();
-  return FALLBACK_EDUCATIONAL_PATTERNS.some(pattern => pattern.test(trimmedEmail));
+  const domain = extractDomain(email);
+  if (!domain || !DOMAIN_SHAPE.test(domain)) return false;
+  return FALLBACK_EDUCATIONAL_PATTERNS.some(pattern => pattern.test(domain));
+}
+
+/**
+ * Does `domain` match an organization's allowed_email_domains entry?
+ * - exact match:  'scaler.com'   allows 'scaler.com' only
+ * - wildcard:     '*.scaler.com' allows 'sub.scaler.com' (not the apex, not 'evilscaler.com')
+ * This is the ONE implementation used by signup, check-email and validate-email.
+ */
+export function domainMatchesAllowedEntry(domain: string, allowedEntry: string): boolean {
+  const d = (domain ?? '').trim().toLowerCase();
+  const p = (allowedEntry ?? '').trim().toLowerCase();
+  if (!d || !p) return false;
+  if (p.startsWith('*.')) {
+    const base = p.slice(2);
+    return !!base && d.length > base.length + 1 && d.endsWith('.' + base);
+  }
+  return d === p;
+}
+
+/** True if the domain matches ANY entry in an organization's allowed_email_domains. */
+export function domainMatchesAllowedList(domain: string, allowedList: unknown): boolean {
+  if (!Array.isArray(allowedList)) return false;
+  return allowedList.some(
+    (entry) => typeof entry === 'string' && domainMatchesAllowedEntry(domain, entry)
+  );
+}
+
+/**
+ * Match against a GLOBAL allowed_domains table entry (e.g. '.edu', 'ac.in').
+ * Proper suffix match on a label boundary: 'x.edu' matches '.edu', but
+ * 'x.edu.evil.com', 'notedu' and 'myedu' do not.
+ */
+export function domainMatchesGlobalPattern(domain: string, pattern: string): boolean {
+  const d = (domain ?? '').trim().toLowerCase();
+  const p = (pattern ?? '').trim().toLowerCase().replace(/^\*?\./, '');
+  if (!d || !p) return false;
+  return d === p || d.endsWith('.' + p);
 }
 
 // Validate email using database domains (preferred method)

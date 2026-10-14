@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { findAuthUserByEmail } from '@/lib/auth/findUserByEmail';
 
 /**
  * POST /api/auth/resend-confirmation
@@ -24,16 +25,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Per-address brake so a single mailbox cannot be mail-bombed from many IPs
+    const perEmailLimited = enforceRateLimit(
+      request,
+      'resend-confirmation-email',
+      { interval: 10 * 60 * 1000, uniqueTokenPerInterval: 3 },
+      email.trim().toLowerCase()
+    );
+    if (perEmailLimited) return perEmailLimited;
+
     const adminClient = await createSupabaseAdminClient();
 
-    console.log('[RESEND_CONFIRMATION] Attempting to resend confirmation email for:');
-
-    // Check if user exists
-    const { data: existingUsers } = await adminClient.auth.admin.listUsers();
-    const user = existingUsers?.users.find((u: { email?: string }) => u.email?.toLowerCase() === email.toLowerCase());
+    // Check if user exists (paginated lookup)
+    const user = await findAuthUserByEmail(adminClient, email);
 
     if (!user) {
-      console.error('[RESEND_CONFIRMATION] User not found:');
       return NextResponse.json(
         { error: 'No account found with this email address' },
         { status: 404 }
@@ -42,7 +48,6 @@ export async function POST(request: NextRequest) {
 
     // Check if already confirmed
     if (user.email_confirmed_at) {
-      console.log('[RESEND_CONFIRMATION] User already confirmed:');
       return NextResponse.json(
         { 
           success: true,
@@ -67,7 +72,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (resendError) {
-      console.error('[RESEND_CONFIRMATION] Failed to resend:', resendError);
+      console.error('[RESEND_CONFIRMATION] Failed to resend:', resendError.message);
       
       // Check for rate limit error
       if (resendError.message?.includes('rate limit') || resendError.message?.includes('too many')) {
@@ -82,8 +87,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    console.log('[RESEND_CONFIRMATION] ✅ Confirmation email resent successfully to:');
 
     return NextResponse.json({
       success: true,

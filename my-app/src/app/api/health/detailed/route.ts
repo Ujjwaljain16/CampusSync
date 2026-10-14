@@ -1,13 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { withRole } from '@/lib/api';
 
-export async function GET() {
-  // Detailed diagnostics (memory, env var names, table health) are not for public consumption.
-  // Use /api/health in production.
-  if (process.env.NODE_ENV === 'production') {
-    return new NextResponse(null, { status: 404 });
-  }
-
+/**
+ * Detailed diagnostics (memory, env var names, table health). Not available in
+ * production (use /api/health), and in other environments restricted to
+ * super admins.
+ */
+const detailedHealth = withRole(['super_admin'], async () => {
   const startTime = Date.now();
   const health = {
     status: 'healthy',
@@ -132,7 +132,11 @@ export async function GET() {
       }
     }, { status: 503 });
   }
+});
+
+export async function GET(request: NextRequest) {
+  if (process.env.NODE_ENV === 'production') {
+    return new NextResponse(null, { status: 404 });
+  }
+  return detailedHealth(request);
 }
-
-
-

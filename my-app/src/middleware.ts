@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
 import { logger } from '@/lib/logger';
-import { assertCriticalFeatures } from '@/lib/runtimeEnvCheck';
 
 export async function middleware(req: NextRequest) {
 	const isDev = process.env.NODE_ENV !== 'production';
@@ -11,22 +10,10 @@ export async function middleware(req: NextRequest) {
 		return new NextResponse(null, { status: 404 });
 	}
 
-	// Perform runtime environment validation (only in production)
-	if (!isDev && !req.nextUrl.pathname.startsWith('/api/health') && !req.nextUrl.pathname.startsWith('/api/ping-supabase')) {
-		try {
-			assertCriticalFeatures();
-		} catch (error) {
-			logger.error('Critical environment validation failed', error);
-			// In production, fail fast if environment is not configured
-			return NextResponse.json(
-				{ 
-					error: 'Server configuration error',
-					message: 'The application is not properly configured. Please contact the administrator.',
-				},
-				{ status: 503 }
-			);
-		}
-	}
+	// NOTE: only the Supabase URL / anon key are critical for the site as a whole
+	// (checked below). Feature-level keys (Gemini, VC issuer, SMTP) must degrade
+	// the specific feature, never take the whole site (including /login) offline.
+	// /api/* is excluded by the matcher: every API route enforces its own auth.
 
 	// Check if environment variables are set
 	if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
@@ -43,11 +30,12 @@ export async function middleware(req: NextRequest) {
 	// Determine route type early and short-circuit public routes BEFORE creating Supabase client
 	const isAuthRoute = req.nextUrl.pathname.startsWith('/login') || req.nextUrl.pathname.startsWith('/signup');
 	const isPasswordResetRoute = req.nextUrl.pathname.startsWith('/reset-password');
-	const isAuthCallbackRoute = req.nextUrl.pathname.startsWith('/auth/confirm') || req.nextUrl.pathname.startsWith('/api/auth/callback');
+	const isAuthCallbackRoute = req.nextUrl.pathname.startsWith('/auth/confirm');
 	const isSetupRoute = req.nextUrl.pathname.startsWith('/setup') || req.nextUrl.pathname.startsWith('/admin/setup');
 	const isWaitingRoute = req.nextUrl.pathname.startsWith('/waiting') || req.nextUrl.pathname.startsWith('/faculty/waiting') || req.nextUrl.pathname.startsWith('/recruiter/waiting');
 	const isHome = req.nextUrl.pathname === '/';
-	const isPublic = isAuthRoute || isPasswordResetRoute || isAuthCallbackRoute || isHome || req.nextUrl.pathname.startsWith('/public') || isSetupRoute || isWaitingRoute;
+	const isWellKnown = req.nextUrl.pathname === '/.well-known' || req.nextUrl.pathname.startsWith('/.well-known/');
+	const isPublic = isWellKnown || isAuthRoute || isPasswordResetRoute || isAuthCallbackRoute || isHome || req.nextUrl.pathname.startsWith('/public') || isSetupRoute || isWaitingRoute;
 
 	// Update session and get user
 	const { supabaseResponse, user, supabase } = await updateSession(req);
@@ -55,7 +43,6 @@ export async function middleware(req: NextRequest) {
 	if (isDev) {
 		logger.debug('Middleware - getUser', {
 			hasUser: !!user,
-			userEmail: user?.email,
 			path: req.nextUrl.pathname
 		});
 	}
@@ -150,8 +137,13 @@ export async function middleware(req: NextRequest) {
 	return supabaseResponse;
 }
 
+// Run on every page route, including dynamic segments that contain a dot
+// (e.g. /recruiter/student/a.b). Skipped: Next internals (_next/static,
+// _next/image), favicon, /api/* (each API route self-enforces auth), and
+// well-known static file extensions at the END of the path. /.well-known/* is
+// always matched (and treated as public above) even when it ends in .json.
 export const config = {
-	matcher: ['/((?!_next/|api/|.*\\..*).*)'],
+	matcher: [
+		'/((?!_next/static|_next/image|favicon\\.ico|api/|(?!\\.well-known/).*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map|txt|xml|json|woff2?|ttf|pdf)$).*)',
+	],
 };
-
-

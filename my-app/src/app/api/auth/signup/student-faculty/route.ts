@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, createSupabaseServerClient } from '@/lib/supabaseServer';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { extractDomain, domainMatchesAllowedList } from '@/lib/emailValidation';
+import { findAuthUserByEmail } from '@/lib/auth/findUserByEmail';
 
 /**
  * POST /api/auth/signup/student-faculty
@@ -73,11 +75,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify email domain matches organization's allowed domains
-    const emailDomain = email.toLowerCase().split('@')[1];
-    const settings = org.settings as { allowed_email_domains?: string[] };
-    const allowedDomains = settings?.allowed_email_domains || [];
-    
-    if (!allowedDomains.some(d => d.toLowerCase() === emailDomain)) {
+    // (single shared implementation: exact domain or `*.domain` wildcard)
+    const emailDomain = extractDomain(String(email));
+    const settings = org.settings as { allowed_email_domains?: unknown } | null;
+
+    if (!domainMatchesAllowedList(emailDomain, settings?.allowed_email_domains)) {
       return NextResponse.json(
         { error: 'Email domain not authorized for this organization' },
         { status: 403 }
@@ -85,8 +87,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user already exists
-    const { data: existingUsers } = await adminClient.auth.admin.listUsers();
-    const existingUser = existingUsers?.users.find((u: { email?: string }) => u.email?.toLowerCase() === email.toLowerCase());
+    const existingUser = await findAuthUserByEmail(adminClient, email);
 
     let userId: string;
     let isNewUser = false;
@@ -112,9 +113,6 @@ export async function POST(request: NextRequest) {
         .from('user_roles')
         .select('id, role, organization_id, approval_status')
         .eq('user_id', userId);
-
-      console.log('[STUDENT_FACULTY_SIGNUP] Existing roles:', existingRoles);
-      console.log('[STUDENT_FACULTY_SIGNUP] Is OAuth user:', isOAuthUser, 'Email confirmed:', isEmailConfirmed);
 
       // Check if user already has the correct role for this org
       const roleForThisOrg = existingRoles?.find(r => 
@@ -150,14 +148,12 @@ export async function POST(request: NextRequest) {
 
       if (otherOrgRoles && otherOrgRoles.length > 0) {
         // User belongs to different organization
-        console.log('[STUDENT_FACULTY_SIGNUP] User belongs to different organization, allowing multi-org');
         // Allow multi-org - continue to role assignment below
       }
 
       // IMPORTANT: For OAuth users completing signup, set the password they entered
       // This allows them to login with email/password in addition to OAuth
       if (isOAuthUser && password) {
-        console.log('[STUDENT_FACULTY_SIGNUP] Setting password for OAuth user:', email);
         try {
           const { error: passwordError } = await adminClient.auth.admin.updateUserById(
             userId,
@@ -165,10 +161,8 @@ export async function POST(request: NextRequest) {
           );
           
           if (passwordError) {
-            console.error('[STUDENT_FACULTY_SIGNUP] Failed to set password for OAuth user:', passwordError);
+            console.error('[STUDENT_FACULTY_SIGNUP] Failed to set password for OAuth user:', passwordError.message);
             // Don't fail the signup - they can still use OAuth
-          } else {
-            console.log('[STUDENT_FACULTY_SIGNUP] ✅ Password set successfully for OAuth user');
           }
         } catch (err) {
           console.error('[STUDENT_FACULTY_SIGNUP] Error setting password:', err);
@@ -225,17 +219,14 @@ export async function POST(request: NextRequest) {
         });
 
         if (resendError) {
-          console.error('[SIGNUP] Failed to send confirmation email:', resendError);
-          console.log('[SIGNUP] Note: User created but confirmation email not sent.');
-        } else {
-          console.log('[SIGNUP] ✅ Confirmation email sent successfully to:', email);
+          console.error('[SIGNUP] Failed to send confirmation email for user', userId, resendError.message);
         }
       } catch (emailError) {
-        console.error('[SIGNUP] Error sending confirmation email:', emailError);
+        console.error('[SIGNUP] Error sending confirmation email for user', userId, emailError instanceof Error ? emailError.message : 'unknown');
       }
     }
 
-    // Check if user_roles entry already exists (from trigger)
+    // Check if a user_roles entry already exists for this org (e.g. created by a trigger)
     const { data: existingRole } = await adminClient
       .from('user_roles')
       .select('id, role')
@@ -243,36 +234,57 @@ export async function POST(request: NextRequest) {
       .eq('organization_id', organization_id)
       .maybeSingle();
 
+    const approvalStatus = role === 'faculty' ? 'pending' : 'approved'; // Faculty needs approval
+
     if (existingRole) {
-      // Update existing role to student if it's not already
-      if (existingRole.role !== 'student') {
+      if (!isNewUser) {
+        // An existing user already holds a different kind of role in this org
+        // (admin, recruiter, ...). Never rewrite it from a public signup form.
+        return NextResponse.json(
+          { error: 'This account already has a role in this organization. Please sign in.', shouldSignIn: true },
+          { status: 409 }
+        );
+      }
+      // Brand new user: normalise the trigger-created row to the requested role
+      if (existingRole.role !== role) {
         const { error: updateError } = await adminClient
           .from('user_roles')
-          .update({ 
-            role: role, // Use the role from request instead of hardcoded 'student'
-            approval_status: role === 'faculty' ? 'pending' : 'approved', // Faculty needs approval
+          .update({
+            role,
+            approval_status: approvalStatus,
             updated_at: new Date().toISOString()
           })
           .eq('id', existingRole.id);
 
         if (updateError) {
-          console.error('[SIGNUP] Failed to update role:', updateError);
+          console.error('[SIGNUP] Failed to update role:', updateError.message);
         }
       }
     } else {
-    // Create new role entry
-    const { error: roleError } = await adminClient
-      .from('user_roles')
-      .insert({
-        user_id: userId,
-        organization_id,
-        role: role, // Use the role from request instead of hardcoded 'student'
-        approval_status: role === 'faculty' ? 'pending' : 'approved', // Faculty needs approval, students auto-approved
-        assigned_by: null
-      });      if (roleError) {
-        console.error('[SIGNUP] Role assignment failed:', roleError);
-        // Rollback: delete auth user
-        await adminClient.auth.admin.deleteUser(userId);
+      // Create new role entry (explicit organization_id and approval_status)
+      const { error: roleError } = await adminClient
+        .from('user_roles')
+        .insert({
+          user_id: userId,
+          organization_id,
+          role,
+          approval_status: approvalStatus,
+          assigned_by: null
+        });
+
+      if (roleError) {
+        console.error('[SIGNUP] Role assignment failed:', roleError.code, roleError.message);
+        if (roleError.code === '23505' && !isNewUser) {
+          // unique (user_id, organization_id) violation: already has a role in this org
+          return NextResponse.json(
+            { error: 'This account already has a role in this organization. Please sign in.', shouldSignIn: true },
+            { status: 409 }
+          );
+        }
+        if (isNewUser) {
+          // Rollback: delete the auth user we just created
+          await adminClient.auth.admin.deleteUser(userId);
+        }
         return NextResponse.json(
           { error: 'Failed to assign role' },
           { status: 500 }
@@ -287,7 +299,9 @@ export async function POST(request: NextRequest) {
         id: userId,
         email,
         full_name,
-        role: role, // Use the role from request instead of hardcoded 'student'
+        // profiles.role is user-editable and must never be used for authorization;
+        // keep it at 'student' until a faculty role is actually approved.
+        role: 'student',
         organization_id,
         university: university || null,
         major: major || null,
@@ -300,6 +314,7 @@ export async function POST(request: NextRequest) {
 
     if (profileError) {
       // Don't rollback - profile creation is not critical, can be completed later
+      console.error('[SIGNUP] Profile upsert failed for user', userId, profileError.message);
     }
 
     // Determine if user is OAuth (existing user) or email/password (new user)
@@ -317,12 +332,10 @@ export async function POST(request: NextRequest) {
       requiresEmailVerification: isNewUser // Only new email/password users need verification
     };
 
-    console.log('[STUDENT_FACULTY_SIGNUP] Returning response:', response);
-
     return NextResponse.json(response, { status: isNewUser ? 201 : 200 });
 
   } catch (error: unknown) {
-    console.error('[SIGNUP] Error:', error);
+    console.error('[SIGNUP] Error:', error instanceof Error ? error.message : 'unknown');
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
