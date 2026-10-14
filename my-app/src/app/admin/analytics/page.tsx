@@ -10,7 +10,7 @@ interface AnalyticsData {
   rejectedCertificates: number;
   autoApprovedCertificates: number;
   manualReviewCertificates: number;
-  averageConfidenceScore: number;
+  averageConfidenceScore: number | null;
   verificationMethods: {
     qr_verified: number;
     logo_match: number;
@@ -176,7 +176,7 @@ export default function AnalyticsDashboard() {
               </div>
               <div>
                 <p className="text-white/60 text-sm">Avg Confidence</p>
-                <p className="text-3xl font-bold text-white">{Math.round(data.averageConfidenceScore * 100)}%</p>
+                <p className="text-3xl font-bold text-white">{data.averageConfidenceScore == null ? 'N/A' : `${Math.round(data.averageConfidenceScore * 100)}%`}</p>
               </div>
             </div>
             <div className="text-white/50 text-sm">

@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ApiError, apiFetchJson, unwrapData } from '@/lib/apiClient';
 import { parseSignupParams, parseSignupRole } from '@/lib/signupQuery';
 import { MAX_UPLOAD_BYTES, validateUploadFile } from '@/lib/uploadValidation';
-import { formatConfidence } from '@/lib/documents/reviewClient';
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
@@ -134,14 +133,5 @@ describe('validateUploadFile', () => {
     expect(validateUploadFile({ type: '', size: 10 })).toMatch(/Unsupported/);
     expect(validateUploadFile({ type: 'image/png', size: MAX_UPLOAD_BYTES + 1 })).toMatch(/too large/);
     expect(validateUploadFile({ type: 'image/png', size: 0 })).toMatch(/empty/);
-  });
-});
-
-describe('formatConfidence', () => {
-  it('renders 0..1 and legacy 0..100 values as percentages', () => {
-    expect(formatConfidence(0.856)).toBe('86%');
-    expect(formatConfidence(85)).toBe('85%');
-    expect(formatConfidence(undefined)).toBe('-');
-    expect(formatConfidence(Number.NaN)).toBe('-');
   });
 });

@@ -45,14 +45,15 @@ const detailedHealth = withRole(['super_admin'], async () => {
     }
 
     // Check critical tables exist
-    const tableChecks = ['profiles', 'user_roles', 'certificates', 'documents'];
+    const tableChecks = ['profiles', 'user_roles', 'certificates'];
     for (const table of tableChecks) {
       try {
         const tableStart = Date.now();
-        await supabase.from(table).select('count').limit(1);
+        const { error: tableError } = await supabase.from(table).select('count').limit(1);
         health.checks[`table_${table}`] = {
-          status: 'healthy',
-          responseTime: Date.now() - tableStart
+          status: tableError ? 'unhealthy' : 'healthy',
+          responseTime: Date.now() - tableStart,
+          ...(tableError ? { error: tableError.message } : {})
         };
       } catch (error: unknown) {
         health.checks[`table_${table}`] = {

@@ -74,7 +74,6 @@ applying). What the owner observed in production:
 
 - Public endpoints that are expensive or sensitive use the in-memory limiter in `src/lib/rateLimit.ts`
   (per instance; not a distributed limit).
-- Webhooks (`/api/webhooks/verification`) verify an HMAC-SHA256 signature with `WEBHOOK_SECRET`.
 - Redirect targets after login are validated by `src/lib/safeRedirect.ts`.
 - Credentials are signed with the key in `VC_ISSUER_JWK`; see SECURITY.md for rotation.
 

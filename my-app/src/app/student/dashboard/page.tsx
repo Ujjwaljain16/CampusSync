@@ -58,27 +58,8 @@ export default function StudentDashboard() {
     setLoading(true);
     setError(null);
     try {
-      // Prefer the documents endpoint (own rows only); fall back to legacy certificates
-      let list: Row[] = [];
-      try {
-        const docs = await apiFetchJson<Array<Record<string, unknown>>>('/api/documents?scope=mine&limit=100');
-        list = (Array.isArray(docs) ? docs : []).map(d => ({
-          id: d.id,
-          title: d.title,
-          institution: d.institution || '',
-          date_issued: d.issue_date || '',
-          file_url: d.file_url,
-          verification_status: d.verification_status,
-          created_at: d.created_at,
-        })) as Row[];
-      } catch (e) {
-        console.warn('Documents endpoint unavailable, using certificates:', e);
-      }
-
-      if (list.length === 0) {
-        list = await apiFetchJson<Row[]>('/api/certificates/mine');
-        if (!Array.isArray(list)) list = [];
-      }
+      let list = await apiFetchJson<Row[]>('/api/certificates/mine');
+      if (!Array.isArray(list)) list = [];
 
       // Newest first (copy: never mutate the array that goes into state)
       const sortedList = [...list].sort((a, b) => {

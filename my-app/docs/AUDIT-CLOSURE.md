@@ -28,13 +28,13 @@ with placeholder environment variables.
 | ID | Finding | Status |
 |---|---|---|
 | C-06 | Wrong-org admin authority for multi-row users (earliest row used) | Fixed in code (`getOrganizationContext` ranks approved rows deterministically) |
-| C-07 | Pending/denied faculty pass non-`withRole` routes, service-role verify | Fixed in code (documents API rewritten with an approved-reviewer gate in the document's org) |
+| C-07 | Pending/denied faculty pass non-`withRole` routes, service-role verify | Fixed in code (documents API rewritten with an approved-reviewer gate in the document's org; the documents API has since been removed entirely) |
 | C-08 | No student consent controls; recruiters over-exposed; public portfolio exposed OCR text | Fixed in code; the two visibility columns need a migration (defaults to private if absent) |
 | C-09 | Revoking recruiter access had no effect (two disjoint tables) | Fixed in code (single source of truth: `user_roles`; revoke sets `approval_status='denied'`) |
 | C-10 | No last-admin / primary-admin / hierarchy guards; swallowed super-admin guard | Fixed in code (`applyRoleChange`); DB trigger is a draft (`authz_03`) |
 | C-11 | Revert/reject/delete did not revoke credentials; `.single()` skipped revocation; delete returned 200 on zero rows | Fixed in code |
 | C-12 | Primary-admin lookup open to any admin; domain squatting; trusted issuers writable by tenant admins | Fixed in code; unique-domain index is a draft (`authz_06`) |
-| C-13 | Students could edit verified documents; `file_url` weakly bound | Fixed in code (`parseStoragePublicUrl`, owner immutability after review) |
+| C-13 | Students could edit verified documents; `file_url` weakly bound | Fixed in code (`parseStoragePublicUrl`, owner immutability after review; the documents API that used them has since been removed, certificates use `parseCertificateFileUrl`) |
 | C-14 | Audit trail wrote three different column sets and ignored errors | Mostly fixed in code (`writeAudit` helper in the admin/recruiter/document/certificate paths). Not every legacy route was migrated. |
 | C-15 | Unpaginated `listUsers()` lookups | Fixed in code (paginated, bounded helper) |
 | C-16 | No CI, no schema in repo, dishonest health check, no observability | CI and honest health fixed in code; schema is **drafts only**; observability still minimal (**Open**) |

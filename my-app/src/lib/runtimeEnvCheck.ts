@@ -105,11 +105,6 @@ export function performHealthCheck(): HealthCheckResult {
       required: false,
     },
     {
-      name: 'Documents Table',
-      enabled: features.isDocumentsTableEnabled(),
-      required: false,
-    },
-    {
       name: 'External OCR Service',
       enabled: features.hasExternalOcrService(),
       required: false,
@@ -247,7 +242,6 @@ function isFeatureAvailable(feature: string): boolean {
     ocr: features.isOcrEnabled,
     gemini: features.hasGeminiApi,
     externalOcr: features.hasExternalOcrService,
-    documentsTable: features.isDocumentsTableEnabled,
   };
 
   const checkFn = featureMap[feature];

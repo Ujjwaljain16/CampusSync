@@ -65,7 +65,6 @@ const GUARDS: RegExp[] = [
   /assertSuperAdmin\(/,
   /getServerUserWithRole\(/,
   /supabase\.auth\.getUser\(/i, // also matches authSupabase.auth.getUser(
-  /WEBHOOK_SECRET/,
 ];
 
 function walk(dir: string, out: string[] = []): string[] {

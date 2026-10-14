@@ -28,7 +28,7 @@ interface Analytics {
     verified: number;
     rejected: number;
     autoApprovalRate: number;
-    averageConfidence: number;
+    averageConfidence: number | null;
   };
   confidenceDistribution: {
     high: number;
@@ -79,46 +79,15 @@ export default function FacultyDashboardPage() {
     setError(null);
     try {
       let pending: PendingCert[] = [];
-      
-      // Try documents pending first
       try {
-        const dres = await fetch('/api/documents/pending');
-        if (dres.ok) {
-          const dj = await dres.json();
-          const docs = dj.data || [];
-          if (docs.length > 0) {
-            pending = docs.map((d: Record<string, unknown>) => ({
-              id: d.id,
-              title: d.title,
-              institution: d.institution || '',
-              date_issued: d.issue_date || d.created_at,
-              file_url: d.file_url,
-              student_id: d.student_id,
-              created_at: d.created_at,
-              confidence_score: d.confidence_score,
-              auto_approved: d.auto_approved,
-              verification_method: d.verification_method,
-              verification_details: d.verification_details,
-            }));
-            console.log(`[Faculty Dashboard] Loaded ${pending.length} pending documents`);
-          }
-        }
+        const res = await fetch('/api/certificates/pending');
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to load');
+        pending = json.data as PendingCert[];
+        console.log(`[Faculty Dashboard] Loaded ${pending.length} pending certificates`);
       } catch (err) {
-        console.error('Failed to fetch documents/pending:', err);
-      }
-
-      // Fallback to certificates pending if no documents found
-      if (pending.length === 0) {
-        try {
-          const res = await fetch('/api/certificates/pending');
-          const json = await res.json();
-          if (!res.ok) throw new Error(json.error || 'Failed to load');
-          pending = json.data as PendingCert[];
-          console.log(`[Faculty Dashboard] Loaded ${pending.length} pending certificates`);
-        } catch (err) {
-          console.error('Failed to fetch certificates/pending:', err);
-          throw err;
-        }
+        console.error('Failed to fetch certificates/pending:', err);
+        throw err;
       }
 
       console.log(`[Faculty Dashboard] Total pending items: ${pending.length}`);
@@ -782,12 +751,12 @@ export default function FacultyDashboardPage() {
                     <h3 className="text-lg font-semibold text-white">Average Confidence</h3>
                   </div>
                   <div className="text-3xl font-bold text-white mb-2">
-                    {Math.round(analytics.overview.averageConfidence * 100)}%
+                    {analytics.overview.averageConfidence == null ? 'N/A' : `${Math.round(analytics.overview.averageConfidence * 100)}%`}
                   </div>
                   <div className="w-full bg-gray-700 rounded-full h-3">
                     <div 
                       className="bg-gradient-to-r from-blue-500 to-cyan-500 h-3 rounded-full transition-all duration-500"
-                      style={{ width: `${analytics.overview.averageConfidence * 100}%` }}
+                      style={{ width: `${(analytics.overview.averageConfidence ?? 0) * 100}%` }}
                     />
                   </div>
                   <p className="text-white/60 text-sm mt-2">

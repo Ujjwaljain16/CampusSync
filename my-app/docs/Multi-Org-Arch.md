@@ -23,7 +23,7 @@ graph TD
 - `recruiter_org_access (recruiter_id, organization_id, status)`: a recruiter must request access to each
   organization (`/api/recruiter/request-access`); an org admin approves or revokes
   (`/api/admin/org/access-requests`, `/api/admin/org/revoke-access`).
-- Tenant-owned data (`certificates`, `documents`, `audit_logs`, ...) carries `organization_id`.
+- Tenant-owned data (`certificates`, `audit_logs`, ...) carries `organization_id`.
 - `organization_domains (organization_id, domain, created_by)`: the domains an organization claims, `UNIQUE(domain)`.
   `/api/admin/domains` and `/api/admin/organizations/[orgId]/domains` manage it; every write also rewrites
   `settings.allowed_email_domains` (merge) because sign-up still reads that JSON, and a database trigger keeps the

@@ -18,7 +18,7 @@ A short, code-derived description of the system as it exists. Counts below were 
 | Path | Contents |
 |------|----------|
 | `src/app/` | Pages (`page.tsx`), layouts and `api/` route handlers. Sections: `admin`, `faculty`, `student`, `recruiter`, `organizations`, `login`, `signup`, `onboarding`, `waiting`, `reset-password`, `public`, `setup`. |
-| `src/app/api/` | 100 `route.ts` files: `admin` (16), `recruiter` (16), `auth` (15), `certificates` (13), `v2` (11, super-admin organization management and org context), `documents` (8), plus smaller groups (`analytics`, `health`, `vcs`, `organizations`, `webhooks`, ...). |
+| `src/app/api/` | 93 `route.ts` files: `admin` (16), `recruiter` (14), `auth` (14), `certificates` (12), `v2` (11, super-admin organization management and org context), plus smaller groups (`analytics`, `health`, `vcs`, `organizations`, ...). The former `documents` API, `webhooks/verification` and `recruiter/saved-searches` / `recruiter/verify-certificate` routes were removed (see [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md)). |
 | `src/lib/api/` | Route helpers: `withAuth`, `withRole`, `withErrorHandler`, response helpers, validation, organization and recruiter context resolution. |
 | `src/lib/supabaseServer.ts` | Cookie-bound server client, service-role admin client, `getServerUserWithRole`, `requireRole`. |
 | `src/lib/supabase/middleware.ts` | Session refresh used by `src/middleware.ts`. |
@@ -115,12 +115,16 @@ flowchart LR
 
 ## Data stores
 
-Tables referenced in code through `.from('<table>')` (27): `allowed_domains`, `audit_logs`, `certificate_metadata`,
-`certificates`, `document_metadata`, `documents`, `institution_templates`, `job_history`, `job_queue`,
+Tables referenced in code through `.from('<table>')`: `allowed_domains`, `audit_logs`, `certificate_metadata`,
+`certificates`, `institution_templates`, `job_history`, `job_queue`,
 `organizations`, `profiles`, `recruiter_contacts`, `recruiter_favorites`, `recruiter_org_access`,
-`recruiter_pipeline`, `revocation_list` (does not exist in production), `role_requests`, `saved_searches`,
+`recruiter_pipeline`, `revocation_list` (does not exist in production), `role_requests`,
 `students`, `super_admin_audit`, `super_admin_audit_partitioned`, `trusted_issuers`, `user_roles`,
-`verifiable_credentials`, `verification_metrics`, `verification_requests`, `verification_results`.
+`verifiable_credentials`, `verification_metrics`.
+The code no longer reads or writes `documents`, `document_metadata`, `verification_results`, `verification_requests`
+or `saved_searches` (the documents subsystem, the verification webhook and the saved-search / recruiter-flag routes were
+removed). `/api/analytics/dashboard` and `/api/analytics/faculty` are computed from `certificates` only
+(`confidence_score`, `auto_approved`, `verification_method`, `verification_details`).
 Some of these may not exist in a given deployment; the schema is not versioned here. RPC functions called:
 `ensure_role`, `is_super_admin`, `transfer_primary_admin`, `check_and_reserve_slug`, `generate_organization_slug`,
 `get_organization_primary_admin`, `get_accuracy_metrics`, `get_correction_stats`.
@@ -156,7 +160,7 @@ Read in code: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPA
 `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_BASE_URL`, `VC_ISSUER_JWK` (server only, private key),
 `NEXT_PUBLIC_ISSUER_DID`, `NEXT_PUBLIC_ISSUER_VERIFICATION_METHOD`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `OCR_ENABLED`,
 `OCR_SERVICE_URL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
-`SMTP_PASS`, `SMTP_FROM`, `WEBHOOK_SECRET`, `NEXT_PUBLIC_CERTIFICATES_BUCKET`, `USE_DOCUMENTS_TABLE`,
+`SMTP_PASS`, `SMTP_FROM`, `NEXT_PUBLIC_CERTIFICATES_BUCKET`,
 `ENABLE_MONITORING`. Template with comments: [`.env.example`](../.env.example). `NEXT_PUBLIC_*` values are shipped to
 the browser; a test fails if such a name contains `SERVICE`, `SECRET` or `PRIVATE`.
 

@@ -158,7 +158,6 @@ Key internal documentation that explains the app flows, DB query patterns, error
 
 ### **Cryptography & Security**
 - **VC Signing**: JWS via the JOSE library; the algorithm is set by the `alg` of the `VC_ISSUER_JWK` key you provide (RS256/RSA-2048 in the key tooling), not Ed25519
-- **Webhooks**: HMAC-SHA256 signature verification (`WEBHOOK_SECRET`)
 - **Key Management**: The issuer key is supplied through the `VC_ISSUER_JWK` environment variable; rotation is manual
 
 ### **Storage & CDN**

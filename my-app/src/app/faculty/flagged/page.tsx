@@ -10,17 +10,11 @@ interface FlaggedCert {
   date_issued: string;
   description?: string;
   file_url?: string;
-  user_id: string;
+  student_id: string;
   created_at: string;
-  verification_results?: {
-    confidence_score?: number;
-    auto_approved?: boolean;
-    details?: Record<string, unknown>;
-  }[] | {
-    confidence_score?: number;
-    auto_approved?: boolean;
-    details?: Record<string, unknown>;
-  } | null;
+  confidence_score?: number | null;
+  auto_approved?: boolean | null;
+  verification_details?: Record<string, unknown> | null;
 }
 
 export default function FacultyFlaggedPage() {
@@ -185,20 +179,19 @@ export default function FacultyFlaggedPage() {
             </thead>
             <tbody>
               {rows.map(r => {
-                const vr = Array.isArray(r.verification_results) ? r.verification_results[0] : r.verification_results;
-                const conf = vr?.confidence_score ?? null;
+                const conf = r.confidence_score ?? null;
                 return (
                   <tr key={r.id} className="border-t border-white/10">
                     <td className="p-3"><input type="checkbox" checked={!!selected[r.id]} onChange={() => toggle(r.id)} /></td>
                     <td className="p-3 text-white">
                       <div className="font-medium">{r.title}</div>
                       <div className="text-white/70 text-sm">{r.institution} • {new Date(r.date_issued).toLocaleDateString()}</div>
-                      <div className="text-white/60 text-xs">{r.user_id}</div>
+                      <div className="text-white/60 text-xs">{r.student_id}</div>
                     </td>
                     <td className="p-3 text-white/80">{conf !== null ? `${(Number(conf) * 100).toFixed(1)}%` : '-'}</td>
                     <td className="p-3">
-                      {vr?.details ? (() => {
-                        const details = vr.details as Record<string, unknown>;
+                      {r.verification_details ? (() => {
+                        const details = r.verification_details as Record<string, unknown>;
                         const qrVerif = details?.qr_verification as Record<string, unknown> | undefined;
                         const logoMatch = details?.logo_match as Record<string, unknown> | undefined;
                         const templateMatch = details?.template_match as Record<string, unknown> | undefined;

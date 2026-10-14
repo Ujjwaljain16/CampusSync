@@ -22,20 +22,6 @@ export const GET = withRole(['student'], async (_req, { user }) => {
     throw apiError.internal('Failed to fetch certificates');
   }
 
-  // Get student's documents (filtered by organization)
-  const { data: documents, error: docError } = await supabase
-    .from('documents')
-    .select('id, document_type, title, institution, issue_date, file_url, ocr_confidence, verification_status, created_at, updated_at')
-    .eq('user_id', user.id)
-    .in('organization_id', targetOrgIds)
-    .order('created_at', { ascending: false })
-    .limit(500);
-
-  if (docError) {
-    console.error('Error fetching documents:', docError);
-    throw apiError.internal('Failed to fetch documents');
-  }
-
   return success({
     user: {
       id: user.id,
@@ -44,10 +30,8 @@ export const GET = withRole(['student'], async (_req, { user }) => {
     },
     organizationId: 'organizationId' in orgContext ? orgContext.organizationId : null,
     certificates: certificates || [],
-    documents: documents || [],
     stats: {
       totalCertificates: certificates?.length || 0,
-      totalDocuments: documents?.length || 0,
       pendingApproval: certificates?.filter((c: { verification_status?: string }) => c.verification_status === 'pending').length || 0,
       approved: certificates?.filter((c: { verification_status?: string }) => c.verification_status === 'verified').length || 0,
       rejected: certificates?.filter((c: { verification_status?: string }) => c.verification_status === 'rejected').length || 0

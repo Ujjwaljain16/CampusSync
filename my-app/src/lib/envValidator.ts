@@ -21,7 +21,6 @@ export const optionalEnvVars = [
   'NEXT_PUBLIC_BASE_URL', // Can fallback to NEXT_PUBLIC_SITE_URL
   'GEMINI_API_KEY', // Optional: OCR is disabled (degraded) without it
   'GEMINI_MODEL', // Has default: gemini-2.0-flash
-  'USE_DOCUMENTS_TABLE', // Has default: true
   'OCR_ENABLED', // Has default: true
   'OCR_SERVICE_URL', // Optional OCR service
   'VC_ISSUER_PREVIOUS_PUBLIC_JWKS', // Optional: JSON array of rotated-out PUBLIC issuer keys
@@ -252,14 +251,6 @@ export const features = {
   },
 
   /**
-   * Check if documents table is enabled
-   */
-  isDocumentsTableEnabled(): boolean {
-    const enabled = process.env.USE_DOCUMENTS_TABLE?.toLowerCase();
-    return enabled !== 'false' && enabled !== '0'; // Default: true
-  },
-
-  /**
    * Check if external OCR service is configured
    */
   hasExternalOcrService(): boolean {
@@ -439,7 +430,6 @@ export function getFeatureStatus(): {
     optional: {
       email: features.isEmailEnabled(),
       externalOcr: features.hasExternalOcrService(),
-      documentsTable: features.isDocumentsTableEnabled(),
       ocr: features.isOcrEnabled(),
     },
     config: {

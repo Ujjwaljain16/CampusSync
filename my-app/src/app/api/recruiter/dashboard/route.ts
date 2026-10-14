@@ -5,8 +5,8 @@ import { RateLimitPresets } from '@/lib/rateLimit';
 import { recruiterRoute } from '@/lib/privacy/recruiterAccess';
 
 /**
- * Audit actions that are actually written for recruiter verification work
- * (see /api/recruiter/verify-certificate).
+ * Audit actions that count as recruiter verification work. (The route that wrote
+ * `recruiter_certificate_verification` was removed; nothing writes it today.)
  */
 const VERIFICATION_ACTIONS = ['recruiter_certificate_verification'];
 
