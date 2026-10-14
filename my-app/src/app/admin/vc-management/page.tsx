@@ -1,137 +1,135 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { 
-  Key, 
-  CheckCircle, 
-  XCircle, 
-  RefreshCw,
-  AlertTriangle,
-  Clock,
-  BarChart3,
-  FileText,
-  Activity
-} from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Key, CheckCircle, XCircle, RefreshCw, AlertTriangle, Search, Info } from 'lucide-react';
+import { apiFetchJson, ApiError } from '@/lib/apiClient';
 
-interface VCStats {
-  totalIssuances: number;
-  successfulIssuances: number;
-  failedIssuances: number;
-  byType: Record<string, number>;
-  byUser: Record<string, number>;
+/**
+ * VC management.
+ *
+ * The server only exposes per-credential endpoints (`GET /api/vcs/verify?vcId=`,
+ * `POST /api/vcs/revoke`, `POST /api/certificates/issue`); there are no aggregate
+ * statistics endpoints, so no counts are shown (and none are invented).
+ */
+
+interface VerifyResult {
+  valid?: boolean;
+  revoked?: boolean;
+  reason?: string;
+  status?: string;
 }
 
-interface RevocationStats {
-  totalRevoked: number;
-  byReason: Record<string, number>;
-  byStatus: Record<string, number>;
-  byIssuer: Record<string, number>;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function messageOf(e: unknown, fallback: string): string {
+  if (e instanceof ApiError) return e.message;
+  return e instanceof Error ? e.message : fallback;
 }
 
-interface VerificationStats {
-  totalVerifications: number;
-  successfulVerifications: number;
-  failedVerifications: number;
-  averageProcessingTime: number;
-  byVerifier: Record<string, number>;
-}
+type Tab = 'overview' | 'verify' | 'revoke' | 'keys';
 
 export default function VCManagementPage() {
-  const [loading, setLoading] = useState(true);
-  const [vcStats, setVcStats] = useState<VCStats | null>(null);
-  const [revocationStats, setRevocationStats] = useState<RevocationStats | null>(null);
-  const [verificationStats, setVerificationStats] = useState<VerificationStats | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'issuance' | 'verification' | 'revocation' | 'keys'>('overview');
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
 
-  const fetchStats = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      // Fetch VC issuance stats
-      const vcResponse = await fetch('/api/vc/issue/stats');
-      if (vcResponse.ok) {
-        const vcData = await vcResponse.json();
-        setVcStats(vcData.data);
-      }
+  // Verify
+  const [vcId, setVcId] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const verifyReq = useRef(0);
 
-      // Fetch verification stats
-      const verificationResponse = await fetch('/api/vc/verify');
-      if (verificationResponse.ok) {
-        const verificationData = await verificationResponse.json();
-        setVerificationStats(verificationData.data);
-      }
+  // Revoke
+  const [revokeId, setRevokeId] = useState('');
+  const [reason, setReason] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [revokeMessage, setRevokeMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
-      // Fetch revocation stats
-      const revocationResponse = await fetch('/api/vc/revoke');
-      if (revocationResponse.ok) {
-        const revocationData = await revocationResponse.json();
-        setRevocationStats(revocationData.data);
-      }
-
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch stats');
-    } finally {
-      setLoading(false);
+  async function handleVerify(e: React.FormEvent) {
+    e.preventDefault();
+    const id = vcId.trim();
+    setVerifyResult(null);
+    setVerifyError(null);
+    if (!UUID_RE.test(id)) {
+      setVerifyError('Enter a valid credential ID (UUID).');
+      return;
     }
-  }, []);
-
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 text-white">
-        <div className="flex items-center justify-center py-12">
-          <RefreshCw className="w-8 h-8 animate-spin text-blue-400" />
-          <span className="ml-2">Loading VC management data...</span>
-        </div>
-      </div>
-    );
+    const reqId = ++verifyReq.current;
+    setVerifying(true);
+    try {
+      const result = await apiFetchJson<VerifyResult>(`/api/vcs/verify?vcId=${encodeURIComponent(id)}`, { cache: 'no-store' });
+      if (reqId !== verifyReq.current) return;
+      setVerifyResult(result && typeof result === 'object' ? result : {});
+    } catch (err) {
+      if (reqId !== verifyReq.current) return;
+      setVerifyError(messageOf(err, 'Verification request failed'));
+    } finally {
+      if (reqId === verifyReq.current) setVerifying(false);
+    }
   }
+
+  async function handleRevoke() {
+    if (revoking) return;
+    setRevoking(true);
+    setRevokeMessage(null);
+    try {
+      await apiFetchJson('/api/vcs/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credentialId: revokeId.trim(), reason: reason.trim() }),
+      });
+      setRevokeMessage({ kind: 'ok', text: 'Credential revoked.' });
+      setRevokeId('');
+      setReason('');
+    } catch (err) {
+      setRevokeMessage({ kind: 'error', text: messageOf(err, 'Revocation failed') });
+    } finally {
+      setRevoking(false);
+      setConfirming(false);
+    }
+  }
+
+  function requestRevoke(e: React.FormEvent) {
+    e.preventDefault();
+    setRevokeMessage(null);
+    if (!UUID_RE.test(revokeId.trim())) {
+      setRevokeMessage({ kind: 'error', text: 'Enter a valid credential ID (UUID).' });
+      return;
+    }
+    if (!reason.trim()) {
+      setRevokeMessage({ kind: 'error', text: 'A reason is required to revoke a credential.' });
+      return;
+    }
+    setConfirming(true);
+  }
+
+  const tabs: { id: Tab; name: string; icon: typeof Search }[] = [
+    { id: 'overview', name: 'Overview', icon: Info },
+    { id: 'verify', name: 'Verify credential', icon: CheckCircle },
+    { id: 'revoke', name: 'Revoke credential', icon: XCircle },
+    { id: 'keys', name: 'Key management', icon: Key },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      {/* Header */}
       <div className="bg-gray-800 border-b border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <div>
-              <h1 className="text-3xl font-bold text-white">VC Management</h1>
-              <p className="text-gray-300 mt-1">Manage Verifiable Credentials, keys, and policies</p>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={fetchStats}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>Refresh</span>
-              </button>
-            </div>
-          </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <h1 className="text-3xl font-bold text-white">VC Management</h1>
+          <p className="text-gray-300 mt-1">Verify and revoke individual Verifiable Credentials</p>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="border-b border-gray-700">
-          <nav className="-mb-px flex space-x-8">
-            {[
-              { id: 'overview', name: 'Overview', icon: BarChart3 },
-              { id: 'issuance', name: 'Issuance', icon: FileText },
-              { id: 'verification', name: 'Verification', icon: CheckCircle },
-              { id: 'revocation', name: 'Revocation', icon: XCircle },
-              { id: 'keys', name: 'Key Management', icon: Key }
-            ].map((tab) => {
+          <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="VC management sections">
+            {tabs.map((tab) => {
               const Icon = tab.icon;
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as 'overview' | 'issuance' | 'verification' | 'revocation' | 'keys')}
-                  className={`flex items-center space-x-2 py-2 px-1 border-b-2 font-medium text-sm ${
+                  onClick={() => setActiveTab(tab.id)}
+                  aria-current={activeTab === tab.id ? 'page' : undefined}
+                  className={`flex items-center space-x-2 py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
                     activeTab === tab.id
                       ? 'border-blue-500 text-blue-400'
                       : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'
@@ -146,252 +144,123 @@ export default function VCManagementPage() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
-        {error && (
-          <div className="bg-red-900/20 border border-red-500/50 rounded-lg p-4 mb-6">
-            <div className="flex items-center">
-              <AlertTriangle className="w-5 h-5 text-red-400 mr-2" />
-              <span className="text-red-300">{error}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Overview Tab */}
         {activeTab === 'overview' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-white mb-6">System Overview</h2>
-            
-            {/* Key Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div className="bg-gray-800 rounded-lg p-6">
-                <div className="flex items-center">
-                  <FileText className="w-8 h-8 text-blue-400" />
-                  <div className="ml-4">
-                    <p className="text-sm text-gray-400">Total Issuances</p>
-                    <p className="text-2xl font-bold text-white">
-                      {vcStats?.totalIssuances || 0}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-gray-800 rounded-lg p-6">
-                <div className="flex items-center">
-                  <CheckCircle className="w-8 h-8 text-green-400" />
-                  <div className="ml-4">
-                    <p className="text-sm text-gray-400">Successful</p>
-                    <p className="text-2xl font-bold text-white">
-                      {vcStats?.successfulIssuances || 0}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-gray-800 rounded-lg p-6">
-                <div className="flex items-center">
-                  <XCircle className="w-8 h-8 text-red-400" />
-                  <div className="ml-4">
-                    <p className="text-sm text-gray-400">Revoked</p>
-                    <p className="text-2xl font-bold text-white">
-                      {revocationStats?.totalRevoked || 0}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-gray-800 rounded-lg p-6">
-                <div className="flex items-center">
-                  <Activity className="w-8 h-8 text-purple-400" />
-                  <div className="ml-4">
-                    <p className="text-sm text-gray-400">Verifications</p>
-                    <p className="text-2xl font-bold text-white">
-                      {verificationStats?.totalVerifications || 0}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Success Rate */}
-            <div className="bg-gray-800 rounded-lg p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Success Rate</h3>
-              <div className="flex items-center space-x-4">
-                <div className="flex-1">
-                  <div className="flex justify-between text-sm text-gray-400 mb-1">
-                    <span>Issuance Success</span>
-                    <span>
-                      {vcStats?.totalIssuances 
-                        ? Math.round((vcStats.successfulIssuances / vcStats.totalIssuances) * 100)
-                        : 0}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-2">
-                    <div 
-                      className="bg-green-500 h-2 rounded-full" 
-                      style={{ 
-                        width: `${vcStats?.totalIssuances 
-                          ? (vcStats.successfulIssuances / vcStats.totalIssuances) * 100
-                          : 0}%` 
-                      }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Issuance Tab */}
-        {activeTab === 'issuance' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-white mb-6">Issuance Management</h2>
-            
-            <div className="bg-gray-800 rounded-lg p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Issuance Statistics</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <p className="text-sm text-gray-400 mb-2">By Credential Type</p>
-                  <div className="space-y-2">
-                    {vcStats?.byType && Object.entries(vcStats.byType).map(([type, count]) => (
-                      <div key={type} className="flex justify-between">
-                        <span className="text-white capitalize">{type}</span>
-                        <span className="text-blue-400">{count}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-400 mb-2">Top Users</p>
-                  <div className="space-y-2">
-                    {vcStats?.byUser && Object.entries(vcStats.byUser)
-                      .sort(([,a], [,b]) => b - a)
-                      .slice(0, 5)
-                      .map(([userId, count]) => (
-                        <div key={userId} className="flex justify-between">
-                          <span className="text-white font-mono text-sm">{userId.slice(0, 8)}...</span>
-                          <span className="text-blue-400">{count}</span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Verification Tab */}
-        {activeTab === 'verification' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-white mb-6">Verification Management</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-gray-800 rounded-lg p-6">
-                <div className="flex items-center">
-                  <CheckCircle className="w-8 h-8 text-green-400" />
-                  <div className="ml-4">
-                    <p className="text-sm text-gray-400">Successful</p>
-                    <p className="text-2xl font-bold text-white">
-                      {verificationStats?.successfulVerifications || 0}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-gray-800 rounded-lg p-6">
-                <div className="flex items-center">
-                  <XCircle className="w-8 h-8 text-red-400" />
-                  <div className="ml-4">
-                    <p className="text-sm text-gray-400">Failed</p>
-                    <p className="text-2xl font-bold text-white">
-                      {verificationStats?.failedVerifications || 0}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-gray-800 rounded-lg p-6">
-                <div className="flex items-center">
-                  <Clock className="w-8 h-8 text-blue-400" />
-                  <div className="ml-4">
-                    <p className="text-sm text-gray-400">Avg. Time</p>
-                    <p className="text-2xl font-bold text-white">
-                      {verificationStats?.averageProcessingTime 
-                        ? `${Math.round(verificationStats.averageProcessingTime)}ms`
-                        : '0ms'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Revocation Tab */}
-        {activeTab === 'revocation' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-white mb-6">Revocation Management</h2>
-            
-            <div className="bg-gray-800 rounded-lg p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Revocation Statistics</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <p className="text-sm text-gray-400 mb-2">By Reason</p>
-                  <div className="space-y-2">
-                    {revocationStats?.byReason && Object.entries(revocationStats.byReason).map(([reason, count]) => (
-                      <div key={reason} className="flex justify-between">
-                        <span className="text-white">{reason}</span>
-                        <span className="text-red-400">{count}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-400 mb-2">By Status</p>
-                  <div className="space-y-2">
-                    {revocationStats?.byStatus && Object.entries(revocationStats.byStatus).map(([status, count]) => (
-                      <div key={status} className="flex justify-between">
-                        <span className="text-white capitalize">{status}</span>
-                        <span className="text-red-400">{count}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Key Management Tab */}
-        {activeTab === 'keys' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-white mb-6">Key Management</h2>
-            
-            <div className="bg-gray-800 rounded-lg p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Signing Keys</h3>
-              <p className="text-gray-400 mb-4">
-                Manage cryptographic keys used for signing Verifiable Credentials.
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold">Overview</h2>
+            <div className="bg-gray-800 rounded-lg p-6" role="status">
+              <p className="text-gray-200">Issuance, verification and revocation statistics are unavailable.</p>
+              <p className="text-gray-400 text-sm mt-2">
+                The server does not expose aggregate VC statistics. Use the tabs above to verify or revoke a specific
+                credential. Credentials are issued per certificate from the faculty review flow.
               </p>
-              
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-gray-700 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <Key className="w-5 h-5 text-blue-400" />
-                    <div>
-                      <p className="text-white font-medium">Current Signing Key</p>
-                      <p className="text-sm text-gray-400">RSA-2048 • Active</p>
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
-                    <button className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
-                      Rotate
-                    </button>
-                    <button className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm">
-                      Export
-                    </button>
-                  </div>
-                </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'verify' && (
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold">Verify a credential</h2>
+            <form onSubmit={handleVerify} className="bg-gray-800 rounded-lg p-6 space-y-4">
+              <div>
+                <label htmlFor="vc-verify-id" className="block text-sm text-gray-300 mb-1">Credential ID</label>
+                <input
+                  id="vc-verify-id"
+                  value={vcId}
+                  onChange={(e) => setVcId(e.target.value)}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 font-mono text-sm"
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  autoComplete="off"
+                />
               </div>
+              <button
+                type="submit"
+                disabled={verifying}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
+              >
+                {verifying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                <span>{verifying ? 'Checking…' : 'Verify'}</span>
+              </button>
+              <div aria-live="polite">
+                {verifyError && (
+                  <p className="text-red-300 flex items-center" role="alert">
+                    <AlertTriangle className="w-4 h-4 mr-2" />
+                    {verifyError}
+                  </p>
+                )}
+                {verifyResult && (
+                  <div className={`rounded p-4 border ${verifyResult.valid ? 'border-green-500/50 bg-green-900/20' : 'border-red-500/50 bg-red-900/20'}`}>
+                    <p className="font-semibold">
+                      {verifyResult.valid ? 'Credential is valid' : verifyResult.revoked ? 'Credential is revoked' : 'Credential is not valid'}
+                    </p>
+                    {verifyResult.status && <p className="text-sm text-gray-300">Status: {verifyResult.status}</p>}
+                    {verifyResult.reason && <p className="text-sm text-gray-300">Reason: {verifyResult.reason}</p>}
+                  </div>
+                )}
+              </div>
+            </form>
+          </div>
+        )}
+
+        {activeTab === 'revoke' && (
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold">Revoke a credential</h2>
+            <form onSubmit={requestRevoke} className="bg-gray-800 rounded-lg p-6 space-y-4">
+              <div>
+                <label htmlFor="vc-revoke-id" className="block text-sm text-gray-300 mb-1">Credential ID</label>
+                <input
+                  id="vc-revoke-id"
+                  value={revokeId}
+                  onChange={(e) => setRevokeId(e.target.value)}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 font-mono text-sm"
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label htmlFor="vc-revoke-reason" className="block text-sm text-gray-300 mb-1">Reason</label>
+                <textarea
+                  id="vc-revoke-reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                />
+              </div>
+              {!confirming ? (
+                <button type="submit" className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg">
+                  Revoke…
+                </button>
+              ) : (
+                <div className="flex items-center space-x-3" role="alertdialog" aria-label="Confirm revocation">
+                  <span className="text-sm text-red-200">Revoking is permanent. Continue?</span>
+                  <button type="button" onClick={handleRevoke} disabled={revoking} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg">
+                    {revoking ? 'Revoking…' : 'Confirm revoke'}
+                  </button>
+                  <button type="button" onClick={() => setConfirming(false)} disabled={revoking} className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg">
+                    Cancel
+                  </button>
+                </div>
+              )}
+              <div aria-live="polite">
+                {revokeMessage && (
+                  <p className={revokeMessage.kind === 'ok' ? 'text-green-300' : 'text-red-300'} role={revokeMessage.kind === 'error' ? 'alert' : 'status'}>
+                    {revokeMessage.text}
+                  </p>
+                )}
+              </div>
+            </form>
+          </div>
+        )}
+
+        {activeTab === 'keys' && (
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold">Key management</h2>
+            <div className="bg-gray-800 rounded-lg p-6" role="status">
+              <p className="text-gray-200">Key rotation and export are unavailable from this page.</p>
+              <p className="text-gray-400 text-sm mt-2">
+                Signing keys are managed through server configuration; there is no API for rotating or exporting them.
+              </p>
             </div>
           </div>
         )}

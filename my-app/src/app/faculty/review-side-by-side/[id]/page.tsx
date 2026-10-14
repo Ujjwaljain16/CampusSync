@@ -2,6 +2,8 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
+import { apiFetchJson } from "@/lib/apiClient";
+import { revokeDocument, submitDocumentReview } from "@/lib/documents/reviewClient";
 
 type Document = {
   id: string;
@@ -31,6 +33,9 @@ export default function SideBySideReviewPage() {
   const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [note, setNote] = useState("");
   const [selectedTab, setSelectedTab] = useState<'preview' | 'fields' | 'evidence'>('preview');
 
   useEffect(() => {
@@ -45,19 +50,17 @@ export default function SideBySideReviewPage() {
       setLoading(true);
       setError(null);
 
-      // Load document details
-      const docRes = await fetch(`/api/documents/${documentId}`, { cache: "no-store" });
-      if (!docRes.ok) throw new Error(`Failed to load document: ${docRes.status}`);
-      const docData = await docRes.json();
+      // Load document details (API envelope is unwrapped by apiFetchJson)
+      const docData = await apiFetchJson<Document>(`/api/documents/${encodeURIComponent(documentId)}`, { cache: "no-store" });
       setDocument(docData);
 
-      // Load evidence
-      const evRes = await fetch(`/api/documents/evidence?documentId=${documentId}`, { cache: "no-store" });
-      if (evRes.ok) {
-        const evData = await evRes.json();
+      // Load evidence (best effort: the page still works without it)
+      try {
+        const evData = await apiFetchJson<Evidence>(`/api/documents/evidence?documentId=${encodeURIComponent(documentId)}`, { cache: "no-store" });
         setEvidence(evData);
+      } catch {
+        setEvidence(null);
       }
-
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load document");
     } finally {
@@ -65,63 +68,53 @@ export default function SideBySideReviewPage() {
     }
   };
 
-  const handleApprove = async () => {
+  const runAction = async (label: string, fn: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(true);
+    setActionError(null);
     try {
-      const res = await fetch('/api/documents/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          documentId, 
-          verificationStatus: 'verified',
-          reason: 'Faculty approved via side-by-side review'
-        })
-      });
-      
-      if (res.ok) {
-        router.push('/faculty/dashboard');
-      }
-    } catch (error) {
-      console.error('Approval failed:', error);
+      await fn();
+      router.push('/faculty/dashboard');
+    } catch (e: unknown) {
+      setActionError(`${label} failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setBusy(false);
     }
   };
 
-  const handleReject = async () => {
-    try {
-      const res = await fetch('/api/documents/revoke', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          documentId, 
-          reason: 'Faculty rejected via side-by-side review'
-        })
-      });
-      
-      if (res.ok) {
-        router.push('/faculty/dashboard');
-      }
-    } catch (error) {
-      console.error('Rejection failed:', error);
+  const requireNote = (): string | null => {
+    const text = note.trim();
+    if (!text) {
+      setActionError('Please enter a note for the student / audit log first.');
+      return null;
     }
+    return text;
   };
 
-  const handleSendBack = async () => {
-    try {
-      const res = await fetch('/api/documents/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          documentId, 
-          verificationStatus: 'pending',
-          reason: 'Sent back to student for resubmission'
-        })
-      });
-      
-      if (res.ok) {
-        router.push('/faculty/dashboard');
-      }
-    } catch (error) {
-      console.error('Send back failed:', error);
-    }
+  const handleApprove = () =>
+    runAction('Approval', () =>
+      submitDocumentReview(documentId, 'verified', { reason: note.trim() || 'Approved via side-by-side review' })
+    );
+
+  const handleReject = () => {
+    const text = requireNote();
+    if (!text) return;
+    return runAction('Rejection', () => submitDocumentReview(documentId, 'rejected', { reason: text }));
+  };
+
+  // "Send back" = reject with a resubmission note; the student can edit a rejected document, which re-queues it as pending
+  const handleSendBack = () => {
+    const text = requireNote();
+    if (!text) return;
+    return runAction('Send back', () =>
+      submitDocumentReview(documentId, 'rejected', { reason: `Sent back for resubmission: ${text}` })
+    );
+  };
+
+  const handleRevoke = () => {
+    const text = requireNote();
+    if (!text) return;
+    return runAction('Revocation', () => revokeDocument(documentId, text));
   };
 
   if (loading) return <div className="p-6">Loading...</div>;
@@ -303,26 +296,65 @@ export default function SideBySideReviewPage() {
             </div>
 
             {/* Action Buttons */}
-            <div className="border-t p-4">
-              <div className="flex gap-3">
-                <button
-                  onClick={handleApprove}
-                  className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-                >
-                  Approve
-                </button>
-                <button
-                  onClick={handleSendBack}
-                  className="flex-1 bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700"
-                >
-                  ↶ Send Back
-                </button>
-                <button
-                  onClick={handleReject}
-                  className="flex-1 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
-                >
-                  Reject
-                </button>
+            <div className="border-t p-4 space-y-3">
+              {document.verification_status === 'pending' || document.verification_status === 'verified' ? (
+                <>
+                  <div>
+                    <label htmlFor="review-note" className="block text-sm font-medium mb-1">
+                      Note (required to reject, send back or revoke)
+                    </label>
+                    <textarea
+                      id="review-note"
+                      className="w-full border rounded p-2 text-sm"
+                      rows={2}
+                      maxLength={900}
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex gap-3">
+                    {document.verification_status === 'pending' ? (
+                      <>
+                        <button
+                          onClick={handleApprove}
+                          disabled={busy}
+                          className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={handleSendBack}
+                          disabled={busy}
+                          className="flex-1 bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700 disabled:opacity-50"
+                        >
+                          ↶ Send Back
+                        </button>
+                        <button
+                          onClick={handleReject}
+                          disabled={busy}
+                          className="flex-1 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={handleRevoke}
+                        disabled={busy}
+                        className="flex-1 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 disabled:opacity-50"
+                      >
+                        Revoke verification
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  This document is {document.verification_status}; no review actions are available here.
+                </p>
+              )}
+              <div aria-live="polite">
+                {actionError && <p className="text-sm text-red-600" role="alert">{actionError}</p>}
               </div>
             </div>
           </div>

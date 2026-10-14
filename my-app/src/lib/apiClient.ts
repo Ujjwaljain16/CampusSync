@@ -53,6 +53,69 @@ export async function apiFetch(
 }
 
 /**
+ * Error thrown by `apiFetchJson` / `apiClient` for non-OK responses.
+ * `message` is the server's `error` string when present, otherwise a stable
+ * generic message, so it is safe to show to users.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly details?: unknown;
+
+  constructor(message: string, status: number, details?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.details = details;
+  }
+}
+
+/**
+ * Unwrap the `{ data: T }` envelope returned by `success()` on the server.
+ * Tolerates raw (un-enveloped) payloads: returns `json.data ?? json`.
+ */
+export function unwrapData<T>(json: unknown): T {
+  if (json && typeof json === 'object' && !Array.isArray(json) && 'data' in json) {
+    const data = (json as { data?: unknown }).data;
+    if (data !== undefined && data !== null) return data as T;
+  }
+  return json as T;
+}
+
+async function toApiError(response: Response): Promise<ApiError> {
+  const body = await response.json().catch(() => null);
+  const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const message =
+    typeof record.error === 'string' && record.error
+      ? record.error
+      : typeof record.message === 'string' && record.message
+        ? record.message
+        : `Request failed (${response.status})`;
+  return new ApiError(message, response.status, record.details);
+}
+
+/**
+ * Typed fetch wrapper: attaches X-Organization-ID like `apiFetch`, throws
+ * `ApiError` (status + message) on non-OK, and returns the unwrapped payload
+ * for both enveloped (`{ data }`) and raw JSON responses.
+ */
+export async function apiFetchJson<T = unknown>(
+  url: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const response = await apiFetch(url, options);
+  if (!response.ok) throw await toApiError(response);
+  if (response.status === 204) return undefined as T;
+
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch {
+    throw new ApiError('Invalid response from server', response.status);
+  }
+  return unwrapData<T>(json);
+}
+
+/**
  * Type-safe API client with JSON parsing
  */
 export const apiClient = {
@@ -65,10 +128,7 @@ export const apiClient = {
       method: 'GET',
     });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}: ${response.statusText}`);
-    }
+    if (!response.ok) throw await toApiError(response);
 
     return response.json();
   },
@@ -94,10 +154,7 @@ export const apiClient = {
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}: ${response.statusText}`);
-    }
+    if (!response.ok) throw await toApiError(response);
 
     return response.json();
   },
@@ -123,10 +180,7 @@ export const apiClient = {
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}: ${response.statusText}`);
-    }
+    if (!response.ok) throw await toApiError(response);
 
     return response.json();
   },
@@ -152,10 +206,7 @@ export const apiClient = {
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}: ${response.statusText}`);
-    }
+    if (!response.ok) throw await toApiError(response);
 
     return response.json();
   },
@@ -169,10 +220,7 @@ export const apiClient = {
       method: 'DELETE',
     });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}: ${response.statusText}`);
-    }
+    if (!response.ok) throw await toApiError(response);
 
     return response.json();
   },

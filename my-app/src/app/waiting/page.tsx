@@ -227,7 +227,7 @@ export default function WaitingPage() {
               </div>
 
               <Link
-                href="/organizations"
+                href="/recruiter/organizations"
                 className="px-4 py-2 text-white/80 hover:text-white transition-colors text-sm font-medium"
               >
                 Organizations
@@ -367,7 +367,7 @@ export default function WaitingPage() {
                     <Clock className="w-16 h-16 mx-auto mb-4 text-white/20" />
                     <p className="text-white/60 mb-4">No access requests yet</p>
                     <Link
-                      href="/organizations"
+                      href="/recruiter/organizations"
                       className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-emerald-500 text-white rounded-xl font-semibold hover:scale-105 transition-all"
                     >
                       Browse Organizations

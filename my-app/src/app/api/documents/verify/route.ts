@@ -1,178 +1,188 @@
 // Unified document verification API
 import { NextRequest } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { success, apiError, parseAndValidateBody, isValidUUID, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { withAuth, success, apiError, error as apiErrorResponse, isValidUUID } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import {
+  canTransition,
+  isOwner,
+  loadDocumentHead,
+  normalizeConfidence,
+  requireApprovedReviewer,
+  upsertMetadataMerged,
+  writeAuditLog,
+} from '@/lib/documents/authz';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-const REVIEWER_ROLES = ['faculty', 'admin', 'org_admin', 'super_admin'];
+// 'revoked' has its own endpoint (/api/documents/revoke); everything else goes through here.
 const ALLOWED_STATUSES = ['pending', 'verified', 'rejected'];
+const MAX_REASON = 1000;
+
+const AUDIT_ACTION: Record<string, string> = {
+  verified: 'verify_document',
+  rejected: 'reject_document',
+  pending: 'reopen_document',
+};
 
 interface VerifyDocumentBody {
-  documentId: string;
-  verificationStatus: string;
-  reason?: string;
-  confidence?: number;
+  documentId?: unknown;
+  verificationStatus?: unknown;
+  reason?: unknown;
+  confidence?: unknown;
 }
 
-export async function POST(request: NextRequest) {
-  // Get authenticated user
-  const authSupabase = await createSupabaseServerClient();
-  const { data: { user }, error: authError } = await authSupabase.auth.getUser();
-  if (authError || !user) {
-    throw apiError.unauthorized('Authentication required');
+// POST /api/documents/verify - approved reviewers of the document's organization only
+export const POST = withAuth(async (request: NextRequest, { user }) => {
+  const body = (await request.json().catch(() => null)) as VerifyDocumentBody | null;
+  if (!body || typeof body !== 'object') return apiError.badRequest('Invalid JSON body');
+
+  const { documentId, verificationStatus, reason, confidence } = body;
+
+  if (typeof documentId !== 'string' || !isValidUUID(documentId)) {
+    return apiError.badRequest('Invalid document ID format');
+  }
+  if (typeof verificationStatus !== 'string' || !ALLOWED_STATUSES.includes(verificationStatus)) {
+    return apiError.badRequest('Invalid verification status');
+  }
+  if (reason !== undefined && reason !== null && (typeof reason !== 'string' || reason.length > MAX_REASON)) {
+    return apiError.badRequest(`reason must be a string up to ${MAX_REASON} characters`);
+  }
+  const cleanReason = typeof reason === 'string' ? reason.trim() : '';
+  if (verificationStatus === 'rejected' && !cleanReason) {
+    return apiError.badRequest('A reason is required to reject a document');
   }
 
-  // Get organization context for multi-tenancy
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-
-  // Only reviewers may change verification status (students must not self-verify)
-  if (!REVIEWER_ROLES.includes(orgContext.role)) {
-    throw apiError.forbidden('Only faculty or admins can verify documents');
+  let normalizedConfidence: number | undefined;
+  if (confidence !== undefined && confidence !== null) {
+    const c = normalizeConfidence(confidence);
+    if (c === null) return apiError.badRequest('confidence must be a number between 0 and 100');
+    normalizedConfidence = c;
   }
 
-  const result = await parseAndValidateBody<VerifyDocumentBody>(
-    request, 
-    ['documentId', 'verificationStatus']
-  );
-  if (result.error) return result.error;
-  
-  const { documentId, verificationStatus, reason, confidence } = result.data;
+  const supabase = await createSupabaseServerClient();
 
-  // Validate UUID format for documentId
-  if (!isValidUUID(documentId)) {
-    throw apiError.badRequest('Invalid document ID format');
-  }
-  if (!ALLOWED_STATUSES.includes(verificationStatus)) {
-    throw apiError.badRequest('Invalid verification status');
-  }
-  if (confidence !== undefined && confidence !== null && (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 100)) {
-    throw apiError.badRequest('confidence must be a number between 0 and 100');
+  const doc = await loadDocumentHead(supabase, documentId);
+  if (!doc) return apiError.notFound('Document not found or access denied');
+
+  const reviewer = await requireApprovedReviewer(user, doc.organization_id, supabase);
+  if (!reviewer) return apiError.forbidden('Only approved faculty or admins of this organization can verify documents');
+
+  // Reviewers must not approve their own submissions
+  if (verificationStatus === 'verified' && isOwner(doc, user.id)) {
+    return apiError.forbidden('You cannot verify your own document');
   }
 
-  // Verify document belongs to user's organization before updating
-  const { data: doc, error: fetchError } = await supabase
+  const from = doc.verification_status;
+  if (!canTransition(from, verificationStatus, reviewer.role)) {
+    return apiErrorResponse(`Cannot change status from '${from}' to '${verificationStatus}'`, 409);
+  }
+
+  // Conditional update: only succeeds if nobody changed the status in the meantime
+  const { data: updated, error: updateError } = await supabase
     .from('documents')
-    .select('organization_id')
+    .update({ verification_status: verificationStatus, updated_at: new Date().toISOString() })
     .eq('id', documentId)
-    .in('organization_id', targetOrgIds) // Multi-org filter
-    .single();
-    
-  if (fetchError || !doc) {
-    throw apiError.notFound('Document not found or access denied');
-  }
-
-  // Update document verification status
-  const { error: updateError } = await supabase
-    .from('documents')
-    .update({
-      verification_status: verificationStatus,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', documentId)
-    .in('organization_id', targetOrgIds); // Ensure org match
+    .eq('organization_id', doc.organization_id)
+    .eq('verification_status', from)
+    .select('id');
 
   if (updateError) {
     console.error('Document update error:', updateError);
-    throw apiError.internal('Failed to update document');
+    return apiError.internal('Failed to update document');
+  }
+  if (!updated || updated.length === 0) {
+    return apiErrorResponse('Document status changed concurrently; reload and retry', 409);
   }
 
-  // Update document metadata if provided
-  if (confidence !== undefined) {
-    const { error: metadataError } = await supabase
-      .from('document_metadata')
-      .upsert({
-        document_id: documentId,
-        ai_confidence_score: confidence,
-        verification_details: { reason, verified_at: new Date().toISOString() },
-        updated_at: new Date().toISOString()
-      });
-
-    if (metadataError) {
-      console.error('Metadata update error:', metadataError);
-      // Don't fail the request, just log the error
-    }
+  // Merge review evidence into metadata (never wipe existing verification_details)
+  const now = new Date().toISOString();
+  const metaResult = await upsertMetadataMerged(supabase, documentId, {
+    ai_confidence_score: normalizedConfidence,
+    detailsPatch: {
+      review: {
+        status: verificationStatus,
+        reason: cleanReason || null,
+        reviewed_by: user.id,
+        reviewed_at: now,
+      },
+      // Re-opening a previously revoked document clears the revocation flag
+      ...(from === 'revoked' ? { revoked: false } : {}),
+    },
+  });
+  if (!metaResult.ok) {
+    console.error('Metadata update error:', metaResult.error);
   }
 
-  // Log audit entry
-  try {
-    await supabase.from('audit_logs').insert({
-      actor_id: user.id,
-      organization_id: 'organizationId' in orgContext ? orgContext.organizationId : null, // Multi-org support
-      action: 'verify_document',
-      target_id: documentId,
-      details: { verification_status: verificationStatus, reason },
-      created_at: new Date().toISOString()
-    });
-  } catch (auditError) {
-    console.error('Audit log error:', auditError);
-    // Don't fail the request, just log the error
-  }
+  await writeAuditLog(supabase, {
+    actorId: user.id,
+    organizationId: doc.organization_id,
+    action: AUDIT_ACTION[verificationStatus],
+    targetId: documentId,
+    details: {
+      from_status: from,
+      to_status: verificationStatus,
+      reason: cleanReason || null,
+      confidence: normalizedConfidence ?? null,
+    },
+  });
 
-  return success({
-    success: true,
-    documentId,
-    verificationStatus
-  }, 'Document verification updated successfully');
-}
+  return success(
+    {
+      success: true,
+      documentId,
+      verificationStatus,
+      previousStatus: from,
+      metadataUpdated: metaResult.ok,
+    },
+    'Document verification updated successfully'
+  );
+});
 
-export async function GET(request: NextRequest) {
-  // Get authenticated user
-  const authSupabase = await createSupabaseServerClient();
-  const { data: { user }, error: authError } = await authSupabase.auth.getUser();
-  if (authError || !user) {
-    throw apiError.unauthorized('Authentication required');
-  }
-
-  // Get organization context for multi-tenancy
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-
+// GET /api/documents/verify?documentId=... - owner or approved reviewer
+export const GET = withAuth(async (request: NextRequest, { user }) => {
   const { searchParams } = new URL(request.url);
   const documentId = searchParams.get('documentId');
-
-  if (!documentId) {
-    throw apiError.badRequest('Document ID required');
+  if (!documentId || !isValidUUID(documentId)) {
+    return apiError.badRequest('Valid document ID required');
   }
 
-  // Get document with metadata (filtered by organization)
+  const supabase = await createSupabaseServerClient();
+  const head = await loadDocumentHead(supabase, documentId);
+  if (!head) return apiError.notFound('Document not found');
+
+  const owner = isOwner(head, user.id);
+  if (!owner) {
+    const reviewer = await requireApprovedReviewer(user, head.organization_id, supabase);
+    if (!reviewer) return apiError.forbidden('You do not have permission to view this document');
+  }
+
   const { data: document, error: docError } = await supabase
     .from('documents')
-    .select(`
-      *,
-      document_metadata (
-        ai_confidence_score,
-        verification_details,
-        created_at,
-        updated_at
-      )
-    `)
+    .select(
+      `id, student_id, organization_id, document_type, title, institution, issue_date,
+       verification_status, created_at, updated_at,
+       document_metadata ( ai_confidence_score, verification_details, created_at, updated_at )`
+    )
     .eq('id', documentId)
-    .in('organization_id', targetOrgIds) // Multi-org filter
-    .single();
+    .eq('organization_id', head.organization_id)
+    .maybeSingle();
 
-  if (docError || !document) {
-    throw apiError.notFound('Document not found');
+  if (docError) {
+    console.error('Document fetch error:', docError);
+    return apiError.internal('Failed to fetch document');
   }
+  if (!document) return apiError.notFound('Document not found');
 
-  // Students may only view verification details of their own documents
-  if (orgContext.role === 'student' && document.student_id !== user.id) {
-    throw apiError.forbidden('You do not have permission to view this document');
-  }
+  const rawMeta = (document as { document_metadata?: unknown }).document_metadata;
+  const meta = (Array.isArray(rawMeta) ? rawMeta[0] : rawMeta) as
+    | { ai_confidence_score?: number; verification_details?: unknown }
+    | null
+    | undefined;
 
   return success({
     document,
     verification: {
       status: document.verification_status,
-      confidence: document.document_metadata?.[0]?.ai_confidence_score,
-      details: document.document_metadata?.[0]?.verification_details
-    }
+      confidence: meta?.ai_confidence_score,
+      details: meta?.verification_details,
+    },
   });
-}
-
-
+});

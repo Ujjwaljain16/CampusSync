@@ -51,9 +51,6 @@ export default function FacultyHistoryPage() {
         throw new Error(json.error || 'Failed to fetch approval history');
       }
       
-      console.log('[Faculty History] API Response:', json);
-      console.log('[Faculty History] Approvals:', json.data?.approvals);
-      console.log('[Faculty History] Pagination:', json.data?.pagination);
       
       setApprovals(json.data?.approvals || []);
       setPagination(json.data?.pagination || { page: 1, limit: 20, total: 0, totalPages: 0 });

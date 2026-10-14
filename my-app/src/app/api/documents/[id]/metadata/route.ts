@@ -1,83 +1,110 @@
 import { NextRequest } from 'next/server';
-import { success, apiError, isValidUUID, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { withAuth, success, apiError, isValidUUID } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import {
+  isOwner,
+  isPlainObject,
+  loadDocumentHead,
+  normalizeConfidence,
+  requireApprovedReviewer,
+  upsertMetadataMerged,
+  withinJsonSize,
+  writeAuditLog,
+} from '@/lib/documents/authz';
 
-const REVIEWER_ROLES = ['faculty', 'admin', 'org_admin', 'super_admin'];
+type RouteContext = { params: Promise<{ id: string }> };
 
-async function authorize(id: string) {
-  if (!isValidUUID(id)) throw apiError.badRequest('Invalid document ID');
+const MAX_JSON_BYTES = 50_000;
 
-  const supabase = await createSupabaseServerClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw apiError.unauthorized('Authentication required');
+// GET /api/documents/[id]/metadata - owner or approved reviewer
+export function GET(req: NextRequest, routeCtx: RouteContext) {
+  return withAuth(async (_r, { user }) => {
+    const { id } = await routeCtx.params;
+    if (!isValidUUID(id)) return apiError.badRequest('Invalid document ID');
 
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
+    const supabase = await createSupabaseServerClient();
+    const head = await loadDocumentHead(supabase, id);
+    if (!head) return apiError.notFound('Document not found');
 
-  // Document must be inside the caller's organization(s)
-  const { data: document, error: docError } = await supabase
-    .from('documents')
-    .select('organization_id, student_id')
-    .eq('id', id)
-    .in('organization_id', targetOrgIds)
-    .single();
+    if (!isOwner(head, user.id)) {
+      const reviewer = await requireApprovedReviewer(user, head.organization_id, supabase);
+      if (!reviewer) return apiError.forbidden('You do not have permission to view this document');
+    }
 
-  if (docError || !document) throw apiError.notFound('Document not found');
+    const { data, error } = await supabase
+      .from('document_metadata')
+      .select('*')
+      .eq('document_id', id)
+      .maybeSingle();
 
-  return { supabase, user, orgContext, document };
+    if (error) {
+      console.error('Document metadata fetch error:', error);
+      return apiError.internal('Failed to fetch document metadata');
+    }
+
+    return success(data || null);
+  })(req);
 }
 
-// GET /api/documents/[id]/metadata
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const { supabase, user, orgContext, document } = await authorize(id);
+// POST /api/documents/[id]/metadata - approved reviewers only (scores must not be self-reported)
+export function POST(req: NextRequest, routeCtx: RouteContext) {
+  return withAuth(async (r, { user }) => {
+    const { id } = await routeCtx.params;
+    if (!isValidUUID(id)) return apiError.badRequest('Invalid document ID');
 
-  // Students may only read metadata of their own documents
-  if (orgContext.role === 'student' && document.student_id !== user.id) {
-    throw apiError.forbidden('You do not have permission to view this document');
-  }
+    const supabase = await createSupabaseServerClient();
+    const head = await loadDocumentHead(supabase, id);
+    if (!head) return apiError.notFound('Document not found');
 
-  const { data, error } = await supabase
-    .from('document_metadata')
-    .select('*')
-    .eq('document_id', id)
-    .maybeSingle();
+    const reviewer = await requireApprovedReviewer(user, head.organization_id, supabase);
+    if (!reviewer) return apiError.forbidden('Only approved faculty or admins of this organization can update document metadata');
 
-  if (error && error.code !== 'PGRST116') {
-    console.error('Document metadata fetch error:', error);
-    throw apiError.internal('Failed to fetch document metadata');
-  }
+    const body = (await r.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!isPlainObject(body)) return apiError.badRequest('Invalid JSON body');
 
-  return success(data || null);
-}
+    let confidence: number | null | undefined;
+    if (body.ai_confidence_score !== undefined && body.ai_confidence_score !== null) {
+      const c = normalizeConfidence(body.ai_confidence_score);
+      if (c === null) return apiError.badRequest('ai_confidence_score must be a number between 0 and 100');
+      confidence = c;
+    } else if (body.ai_confidence_score === null) {
+      confidence = null;
+    }
 
-// POST /api/documents/[id]/metadata - reviewers only (confidence scores must not be self-reported)
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const { supabase, orgContext } = await authorize(id);
+    if (body.verification_details !== undefined && !isPlainObject(body.verification_details)) {
+      return apiError.badRequest('verification_details must be an object');
+    }
+    if (body.extracted_fields !== undefined && body.extracted_fields !== null && typeof body.extracted_fields !== 'object') {
+      return apiError.badRequest('extracted_fields must be an object');
+    }
+    if (!withinJsonSize(body.verification_details, MAX_JSON_BYTES) || !withinJsonSize(body.extracted_fields, MAX_JSON_BYTES)) {
+      return apiError.badRequest('Payload too large');
+    }
+    if (confidence === undefined && body.verification_details === undefined && body.extracted_fields === undefined) {
+      return apiError.badRequest('No updatable fields provided');
+    }
 
-  if (!REVIEWER_ROLES.includes(orgContext.role)) {
-    throw apiError.forbidden('Only faculty or admins can update document metadata');
-  }
-
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body !== 'object') throw apiError.badRequest('Invalid JSON body');
-
-  const { data, error } = await supabase
-    .from('document_metadata')
-    .upsert({
-      document_id: id,
-      ai_confidence_score: body.ai_confidence_score,
-      verification_details: body.verification_details,
+    const result = await upsertMetadataMerged(supabase, id, {
+      ai_confidence_score: confidence,
       extracted_fields: body.extracted_fields,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'document_id' })
-    .select()
-    .single();
+      detailsPatch: body.verification_details as Record<string, unknown> | undefined,
+    });
+    if (!result.ok) {
+      console.error('Document metadata update error:', result.error);
+      return apiError.internal('Failed to update document metadata');
+    }
 
-  if (error) {
-    console.error('Document metadata update error:', error);
-    throw apiError.internal('Failed to update document metadata');
-  }
-  return success(data);
+    await writeAuditLog(supabase, {
+      actorId: user.id,
+      organizationId: head.organization_id,
+      action: 'update_document_metadata',
+      targetId: id,
+      details: {
+        fields: ['ai_confidence_score', 'verification_details', 'extracted_fields'].filter((k) => body[k] !== undefined),
+        ai_confidence_score: confidence ?? null,
+      },
+    });
+
+    return success(result.data ?? null);
+  })(req);
 }

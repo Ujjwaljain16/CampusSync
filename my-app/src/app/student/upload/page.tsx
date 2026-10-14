@@ -1,23 +1,55 @@
 
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useId, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Upload, Eye, Sparkles, Check, AlertCircle, ArrowLeft, ScrollText, Zap, Shield, Brain } from 'lucide-react';
 import { logger } from '@/lib/logger';
+import { apiFetchJson, ApiError } from '@/lib/apiClient';
+import { validateUploadFile } from '@/lib/uploadValidation';
 
 // OCR extraction result type matching the API
 type OcrExtractionResult = {
   title?: string;
   institution?: string;
-  date_issued?: string;
+  date_issued?: string | null;
   description?: string;
   raw_text?: string;
-  confidence?: number;
+  confidence?: number | null;
   recipient?: string;
   certificate_id?: string;
 };
+
+/** Turn API failures from the OCR/create routes into clear, user-facing messages */
+function describeUploadError(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    switch (err.status) {
+      case 400:
+      case 413:
+        return err.message && !err.message.startsWith('Request failed') ? err.message : 'The file is invalid or too large (max 10MB).';
+      case 401:
+        return 'Your session has expired. Please sign in again.';
+      case 403:
+        return err.message || 'Only approved students can upload certificates.';
+      case 422:
+        return err.message && !err.message.startsWith('Request failed')
+          ? err.message
+          : 'We could not read this certificate. Try a clearer image or PDF.';
+      case 429:
+        return err.message && !err.message.startsWith('Request failed')
+          ? err.message
+          : 'Upload limit reached. Please wait a bit and try again.';
+      case 502:
+        return 'The AI extraction service failed. Please try again.';
+      case 504:
+        return 'The AI extraction service timed out. Please try again.';
+      default:
+        return err.message || fallback;
+    }
+  }
+  return err instanceof Error ? err.message : fallback;
+}
 
 export default function StudentUploadPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -28,14 +60,34 @@ export default function StudentUploadPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const uid = useId();
+  // Submit-once guard: set synchronously so a double click cannot create two certificates
+  const savingRef = useRef(false);
+  const savedRef = useRef(false);
 
-  const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setFile(e.target.files?.[0] ?? null);
+  const acceptFile = useCallback((f: File | null) => {
+    savedRef.current = false;
     setOcr(null);
     setPublicUrl(null);
-    setError(null);
     setSuccess(null);
+    if (!f) {
+      setFile(null);
+      setError(null);
+      return;
+    }
+    const problem = validateUploadFile(f);
+    if (problem) {
+      setFile(null);
+      setError(problem);
+      return;
+    }
+    setFile(f);
+    setError(null);
   }, []);
+
+  const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    acceptFile(e.target.files?.[0] ?? null);
+  }, [acceptFile]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -53,13 +105,9 @@ export default function StudentUploadPage() {
     setDragActive(false);
     
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setFile(e.dataTransfer.files[0]);
-      setOcr(null);
-      setPublicUrl(null);
-      setError(null);
-      setSuccess(null);
+      acceptFile(e.dataTransfer.files[0]);
     }
-  }, []);
+  }, [acceptFile]);
 
   const handleOcr = useCallback(async () => {
     if (!file) return;
@@ -75,36 +123,33 @@ export default function StudentUploadPage() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('/api/certificates/ocr-gemini', {
+      // apiFetchJson unwraps the { data } envelope: { ocr, publicUrl, filePath }
+      const result = await apiFetchJson<{
+        ocr?: OcrExtractionResult;
+        publicUrl?: string;
+      }>('/api/certificates/ocr-gemini', {
         method: 'POST',
         body: formData
       });
-      
+
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       logger.debug('Certificate extraction completed', { elapsedSeconds: elapsed });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to extract certificate information');
-      }
-
-      const result = await response.json();
-      
-      // The OCR endpoint returns: { data: { ocr: {...}, publicUrl, filePath } }
-      if (!result.data || !result.data.ocr) {
+      if (!result || !result.ocr || !result.publicUrl) {
         throw new Error('Certificate extraction failed - no OCR data returned');
       }
 
       logger.debug('Certificate extraction completed successfully', {
-        ocrData: result.data.ocr,
-        fileUrl: result.data.publicUrl
+        ocrData: result.ocr,
+        fileUrl: result.publicUrl
       });
-      
+
       // Set the public URL for Save button
-      setPublicUrl(result.data.publicUrl);
+      savedRef.current = false;
+      setPublicUrl(result.publicUrl);
       
       // Map the OCR result to our state format
-      const ocrData = result.data.ocr;
+      const ocrData = result.ocr;
       setOcr({
         title: ocrData.title || '',
         institution: ocrData.institution || '',
@@ -113,7 +158,8 @@ export default function StudentUploadPage() {
         recipient: ocrData.recipient || '',
         certificate_id: ocrData.certificate_id || '',
         raw_text: ocrData.raw_text || '',
-        confidence: ocrData.confidence || 0
+        // null = the model gave no usable confidence; never substitute a fake number
+        confidence: typeof ocrData.confidence === 'number' ? ocrData.confidence : null
       });
       
       // Show success message
@@ -121,7 +167,7 @@ export default function StudentUploadPage() {
       
     } catch (err) {
       logger.error('Certificate extraction error', err);
-      setError(err instanceof Error ? err.message : 'Failed to extract certificate information');
+      setError(describeUploadError(err, 'Failed to extract certificate information'));
     } finally {
       setUploading(false);
     }
@@ -129,6 +175,12 @@ export default function StudentUploadPage() {
 
   const handleSave = useCallback(async () => {
     if (!ocr || !publicUrl) return;
+    if (savingRef.current || savedRef.current) return;
+    if (!ocr.date_issued) {
+      setError('Please enter the date the certificate was issued before saving.');
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -139,44 +191,43 @@ export default function StudentUploadPage() {
         ocr: {
           title: ocr.title,
           institution: ocr.institution,
-          date_issued: ocr.date_issued,
+          // omitted when empty; Save is blocked until the user enters it
+          date_issued: ocr.date_issued || undefined,
           description: ocr.description,
           raw_text: ocr.raw_text,
           recipient: ocr.recipient,
           certificate_id: ocr.certificate_id,
-          confidence: ocr.confidence
+          // omitted (not 0) when unavailable
+          confidence: typeof ocr.confidence === 'number' ? ocr.confidence : undefined
         }
       };
 
       logger.debug('Saving certificate', payload);
 
       // Call create API endpoint with extracted data
-      const response = await fetch('/api/certificates/create', {
+      const result = await apiFetchJson<{ status?: string }>('/api/certificates/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
       });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to save certificate');
-      }
-      
-      const result = await response.json();
-      
-      if (result.data?.status === 'created') {
+
+      if (result?.status === 'created') {
+        savedRef.current = true;
+        // Disable Save immediately: the file URL is consumed, a second save would duplicate the certificate
+        setPublicUrl(null);
         setSuccess('Certificate saved successfully! Awaiting faculty approval.');
-        // Reset will happen automatically after 3 seconds via useEffect
+        // Form reset happens automatically after 3 seconds via useEffect
       } else {
         throw new Error('Unexpected response from server');
       }
-      
+
     } catch (err) {
       logger.error('Save Error', err);
-      setError(err instanceof Error ? err.message : 'Failed to save certificate');
+      setError(describeUploadError(err, 'Failed to save certificate'));
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }, [ocr, publicUrl]);
@@ -191,6 +242,7 @@ export default function StudentUploadPage() {
         setOcr(null);
         setPublicUrl(null);
         setError(null);
+        savedRef.current = false;
       }, 3000); // 3 seconds
 
       return () => clearTimeout(timer);
@@ -342,6 +394,8 @@ export default function StudentUploadPage() {
               >
                 <input 
                   type="file" 
+                  id={`${uid}-file`}
+                  aria-label="Choose a certificate file (PDF or image, max 10MB)"
                   accept="image/*,application/pdf" 
                   onChange={onFileChange}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
@@ -494,8 +548,9 @@ export default function StudentUploadPage() {
               </div>
 
               {/* Status Messages - Enhanced with auto-reset indicator */}
+              <div aria-live="polite" role="status">
               {(error || success) && (
-                <div className={`mt-6 p-5 rounded-2xl border bg-gradient-to-br backdrop-blur-xl transition-all duration-300 ${
+                <div role={error ? 'alert' : undefined} className={`mt-6 p-5 rounded-2xl border bg-gradient-to-br backdrop-blur-xl transition-all duration-300 ${
                   error 
                     ? 'from-red-500/10 to-red-500/5 border-red-500/30 text-red-300' 
                     : 'from-emerald-500/10 to-emerald-500/5 border-emerald-500/30 text-emerald-300'
@@ -521,6 +576,7 @@ export default function StudentUploadPage() {
                   </div>
                 </div>
               )}
+              </div>
 
               {/* File Preview - Enhanced */}
               {publicUrl && (
@@ -564,8 +620,9 @@ export default function StudentUploadPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Certificate Title */}
                     <div className="space-y-2">
-                      <label className="block text-sm font-semibold text-white/80">Certificate Title</label>
-                      <input 
+                      <label htmlFor={`${uid}-title`} className="block text-sm font-semibold text-white/80">Certificate Title</label>
+                      <input
+                        id={`${uid}-title`} 
                         className="w-full bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-xl px-4 py-3.5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/50 focus:bg-white/15 transition-all hover:bg-white/10" 
                         value={ocr.title ?? ''} 
                         onChange={e => setOcr({ ...ocr, title: e.target.value })}
@@ -575,8 +632,9 @@ export default function StudentUploadPage() {
 
                     {/* Institution */}
                     <div className="space-y-2">
-                      <label className="block text-sm font-semibold text-white/80">Institution</label>
-                      <input 
+                      <label htmlFor={`${uid}-institution`} className="block text-sm font-semibold text-white/80">Institution</label>
+                      <input
+                        id={`${uid}-institution`} 
                         className="w-full bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-xl px-4 py-3.5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-400/50 focus:border-emerald-400/50 focus:bg-white/15 transition-all hover:bg-white/10" 
                         value={ocr.institution ?? ''} 
                         onChange={e => setOcr({ ...ocr, institution: e.target.value })}
@@ -586,8 +644,9 @@ export default function StudentUploadPage() {
 
                     {/* Recipient Name */}
                     <div className="space-y-2">
-                      <label className="block text-sm font-semibold text-white/80">Recipient Name</label>
-                      <input 
+                      <label htmlFor={`${uid}-recipient`} className="block text-sm font-semibold text-white/80">Recipient Name</label>
+                      <input
+                        id={`${uid}-recipient`} 
                         className="w-full bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-xl px-4 py-3.5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-400/50 focus:border-purple-400/50 focus:bg-white/15 transition-all hover:bg-white/10" 
                         value={ocr.recipient ?? ''} 
                         onChange={e => setOcr({ ...ocr, recipient: e.target.value })}
@@ -597,19 +656,24 @@ export default function StudentUploadPage() {
 
                     {/* Date Issued */}
                     <div className="space-y-2">
-                      <label className="block text-sm font-semibold text-white/80">Date Issued</label>
-                      <input 
+                      <label htmlFor={`${uid}-date_issued`} className="block text-sm font-semibold text-white/80">Date Issued <span aria-hidden="true">*</span></label>
+                      <input
+                        id={`${uid}-date_issued`} 
                         type="date" 
                         className="w-full bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-xl px-4 py-3.5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/50 focus:bg-white/15 transition-all hover:bg-white/10" 
                         value={ocr.date_issued ?? ''} 
                         onChange={e => setOcr({ ...ocr, date_issued: e.target.value })}
+                      required
+                        aria-required="true"
                       />
+                      {!ocr.date_issued && (<p className="text-xs text-yellow-300">The date could not be read from the file - please enter it.</p>)}
                     </div>
 
                     {/* Certificate ID */}
                     <div className="space-y-2">
-                      <label className="block text-sm font-semibold text-white/80">Certificate ID</label>
-                      <input 
+                      <label htmlFor={`${uid}-certificate_id`} className="block text-sm font-semibold text-white/80">Certificate ID</label>
+                      <input
+                        id={`${uid}-certificate_id`} 
                         className="w-full bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-xl px-4 py-3.5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-400/50 focus:border-purple-400/50 focus:bg-white/15 transition-all hover:bg-white/10" 
                         value={ocr.certificate_id ?? ''} 
                         onChange={e => setOcr({ ...ocr, certificate_id: e.target.value })}
@@ -619,7 +683,7 @@ export default function StudentUploadPage() {
 
                     {/* Confidence Score (Read-only) - Enhanced */}
                     <div className="space-y-2">
-                      <label className="block text-sm font-semibold text-white/80">
+                      <span className="block text-sm font-semibold text-white/80">
                         AI Confidence Score
                         {typeof ocr.confidence === 'number' && (
                           <span className={`ml-2 px-2.5 py-1 rounded-lg text-xs font-semibold border ${
@@ -630,7 +694,7 @@ export default function StudentUploadPage() {
                             {(ocr.confidence * 100).toFixed(1)}%
                           </span>
                         )}
-                      </label>
+                      </span>
                       <div className="w-full bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-xl px-4 py-3.5 text-white/70 text-sm font-medium">
                         {typeof ocr.confidence === 'number' ? 
                           `${(ocr.confidence * 100).toFixed(1)}% - ${
@@ -638,15 +702,16 @@ export default function StudentUploadPage() {
                             ocr.confidence > 0.6 ? 'Medium confidence' :
                             'Low confidence - please review carefully'
                           }` : 
-                          'No confidence score available'
+                          'Confidence unavailable - please review all fields carefully'
                         }
                       </div>
                     </div>
 
                     {/* Description - Full width */}
                     <div className="space-y-2 md:col-span-2">
-                      <label className="block text-sm font-semibold text-white/80">Description</label>
-                      <textarea 
+                      <label htmlFor={`${uid}-description`} className="block text-sm font-semibold text-white/80">Description</label>
+                      <textarea
+                        id={`${uid}-description`} 
                         className="w-full bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-xl px-4 py-3.5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/50 focus:bg-white/15 transition-all hover:bg-white/10 resize-none" 
                         rows={3} 
                         value={ocr.description ?? ''} 

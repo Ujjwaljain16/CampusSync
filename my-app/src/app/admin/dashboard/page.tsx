@@ -9,6 +9,7 @@ import { toast } from '@/components/ui/toast';
 
 interface UserWithRole {
   user_id: string;
+  organization_id?: string | null;
   role: string;
   is_super_admin?: boolean;
   is_primary_admin?: boolean;
@@ -151,14 +152,21 @@ export default function AdminDashboardPage() {
     return warnings.join('\n');
   };
 
-  const removeUserRole = useCallback(async (userId: string) => {
-    setActioning(userId);
+  const removeUserRole = useCallback(async (target: UserWithRole) => {
+    const label = target.auth_users?.full_name || target.auth_users?.email || target.user_id;
+    if (!window.confirm(`Remove the "${target.role}" role from ${label}? They will lose the access that role grants.`)) {
+      return;
+    }
+    setActioning(target.user_id);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/roles?user_id=${userId}`, {
+      // Admin / org_admin callers must scope the removal to the row's organization
+      const params = new URLSearchParams({ user_id: target.user_id });
+      if (target.organization_id) params.set('organization_id', target.organization_id);
+      const res = await fetch(`/api/admin/roles?${params.toString()}`, {
         method: 'DELETE',
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Failed to remove role');
       toast.success('Role Removed', 'User role has been removed');
       await fetchUsers();
@@ -491,10 +499,12 @@ export default function AdminDashboardPage() {
                             Protected
                           </div>
                         )}
-                        {user.role !== 'student' && !user.is_super_admin && (
+                        {user.role !== 'student' && !user.is_super_admin && !user.is_primary_admin && user.user_id !== currentUserId && (
                           <button
-                            onClick={() => removeUserRole(user.user_id)}
+                            onClick={() => removeUserRole(user)}
                             disabled={actioning === user.user_id}
+                            aria-label={`Remove ${user.role} role from ${user.auth_users?.full_name || user.auth_users?.email || user.user_id}`}
+                            title="Remove role"
                             className="px-4 py-2 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 disabled:hover:scale-100"
                           >
                             <UserX className="w-4 h-4" />

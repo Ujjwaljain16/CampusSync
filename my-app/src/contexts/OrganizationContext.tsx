@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { Organization, OrganizationContext as OrganizationContextType } from '@/types';
 import { supabase } from '@/lib/supabase/client';
 
@@ -10,6 +10,8 @@ export function OrganizationProvider({ children }: { children: React.ReactNode }
   const [currentOrganization, setCurrentOrganization] = useState<Organization | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // Id of the user whose organizations are currently loaded (used to ignore redundant SIGNED_IN events)
+  const loadedUserIdRef = useRef<string | null>(null);
 
   // Fetch user's organizations
   const fetchOrganizations = useCallback(async () => {
@@ -17,6 +19,7 @@ export function OrganizationProvider({ children }: { children: React.ReactNode }
       setIsLoading(true);
       
       const { data: { user } } = await supabase.auth.getUser();
+      loadedUserIdRef.current = user?.id ?? null;
       if (!user) {
         setCurrentOrganization(null);
         setOrganizations([]);
@@ -162,14 +165,23 @@ export function OrganizationProvider({ children }: { children: React.ReactNode }
 
   // Listen for auth state changes
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN') {
+        // Supabase re-emits SIGNED_IN on tab focus/token refresh; only reload for a different user
+        if (session?.user?.id && session.user.id === loadedUserIdRef.current) return;
         fetchOrganizations();
       } else if (event === 'SIGNED_OUT') {
+        loadedUserIdRef.current = null;
         setCurrentOrganization(null);
         setOrganizations([]);
         if (typeof window !== 'undefined') {
-          localStorage.removeItem('currentOrganizationId');
+          try {
+            localStorage.removeItem('currentOrganizationId');
+            // Key sent by apiClient as X-Organization-ID
+            localStorage.removeItem('selectedOrganizationId');
+          } catch {
+            // storage unavailable
+          }
         }
       }
     });
@@ -198,92 +210,4 @@ export function useOrganization() {
     throw new Error('useOrganization must be used within an OrganizationProvider');
   }
   return context;
-}
-
-// Helper hook to check if user is org admin
-export function useIsOrgAdmin() {
-  const [isOrgAdmin, setIsOrgAdmin] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const { currentOrganization } = useOrganization();
-
-  useEffect(() => {
-    async function checkOrgAdmin() {
-      if (!currentOrganization) {
-        setIsOrgAdmin(false);
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          setIsOrgAdmin(false);
-          return;
-        }
-
-        const { data, error } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', user.id)
-          .eq('organization_id', currentOrganization.id)
-          .single();
-
-        if (error) throw error;
-
-        const roleData = data as { role: string } | null;
-        setIsOrgAdmin(
-          roleData?.role === 'admin' || 
-          roleData?.role === 'org_admin' || 
-          roleData?.role === 'super_admin'
-        );
-      } catch (error) {
-        console.error('Error checking org admin status:', error);
-        setIsOrgAdmin(false);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    checkOrgAdmin();
-  }, [currentOrganization]);
-
-  return { isOrgAdmin, isLoading };
-}
-
-// Helper hook to check if user is super admin
-export function useIsSuperAdmin() {
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    async function checkSuperAdmin() {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          setIsSuperAdmin(false);
-          return;
-        }
-
-        const { data, error } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', user.id)
-          .eq('role', 'super_admin')
-          .maybeSingle();
-
-        if (error) throw error;
-
-        setIsSuperAdmin(!!data);
-      } catch (error) {
-        console.error('Error checking super admin status:', error);
-        setIsSuperAdmin(false);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    checkSuperAdmin();
-  }, []);
-
-  return { isSuperAdmin, isLoading };
 }

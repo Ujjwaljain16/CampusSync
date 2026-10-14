@@ -96,3 +96,19 @@ export function normalizeConfidence(value: unknown): number | null {
   if (typeof n !== 'number' || !Number.isFinite(n)) return null;
   return Math.min(1, Math.max(0, n));
 }
+
+// ---------------------------------------------------------------------------
+// Client-side checks (picker and drag & drop share this). Not a security boundary:
+// the server re-validates size, magic bytes and MIME in the OCR route.
+// ---------------------------------------------------------------------------
+
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
+
+/** Returns a user-facing error message, or null when the file is acceptable. */
+export function validateUploadFile(file: { type: string; size: number }): string | null {
+  const okType = file.type === 'application/pdf' || file.type.startsWith('image/');
+  if (!okType) return 'Unsupported file type. Please upload a PDF or an image (PNG, JPG, JPEG).';
+  if (file.size === 0) return 'The selected file is empty.';
+  if (file.size > MAX_UPLOAD_BYTES) return 'File is too large. The maximum size is 10MB.';
+  return null;
+}

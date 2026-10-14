@@ -12,6 +12,7 @@ import MultiStepSignup from '@/components/features/signup/MultiStepSignup';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { parseSignupParams } from '@/lib/signupQuery';
 
 // Static particle positions to avoid hydration mismatch
 const particles = [
@@ -36,7 +37,7 @@ export default function SignupPage() {
 
   const handleSignupComplete = (data: { role: string | null; email: string; shouldSignIn?: boolean; requiresEmailVerification?: boolean }) => {
     // Check if this is an OAuth user or existing user who can sign in immediately
-    const isOAuthUser = new URLSearchParams(window.location.search).get('oauth') === 'true';
+    const isOAuthUser = parseSignupParams(window.location.search).oauth;
     const shouldSignIn = data.shouldSignIn || isOAuthUser;
     
     if (shouldSignIn) {

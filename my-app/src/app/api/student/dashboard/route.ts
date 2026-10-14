@@ -14,7 +14,8 @@ export const GET = withRole(['student'], async (_req, { user }) => {
     .select('*')
     .eq('student_id', user.id)
     .in('organization_id', targetOrgIds)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(500);
 
   if (certError) {
     console.error('Error fetching certificates:', certError);
@@ -24,10 +25,11 @@ export const GET = withRole(['student'], async (_req, { user }) => {
   // Get student's documents (filtered by organization)
   const { data: documents, error: docError } = await supabase
     .from('documents')
-    .select('*')
+    .select('id, document_type, title, institution, issue_date, file_url, ocr_confidence, verification_status, created_at, updated_at')
     .eq('user_id', user.id)
     .in('organization_id', targetOrgIds)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(500);
 
   if (docError) {
     console.error('Error fetching documents:', docError);
@@ -46,8 +48,9 @@ export const GET = withRole(['student'], async (_req, { user }) => {
     stats: {
       totalCertificates: certificates?.length || 0,
       totalDocuments: documents?.length || 0,
-      pendingApproval: certificates?.filter((c: { status: string }) => c.status === 'pending').length || 0,
-      approved: certificates?.filter((c: { status: string }) => c.status === 'approved').length || 0
+      pendingApproval: certificates?.filter((c: { verification_status?: string }) => c.verification_status === 'pending').length || 0,
+      approved: certificates?.filter((c: { verification_status?: string }) => c.verification_status === 'verified').length || 0,
+      rejected: certificates?.filter((c: { verification_status?: string }) => c.verification_status === 'rejected').length || 0
     }
   });
 });
