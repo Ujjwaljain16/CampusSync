@@ -60,7 +60,7 @@
     "@vitest/coverage-v8": "^4.1.11",
     "@vitest/ui": "^4.1.11",
     "cross-env": "^10.1.0",
-    "eslint": "^9",
+    "eslint": "^10",
     "eslint-config-next": "15.5.27",
     "happy-dom": "^20.0.10",
     "jsdom": "^27.1.0",
