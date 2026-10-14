@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createSupabaseServerClient, requireRole } from '@/lib/supabaseServer'
 import { apiError } from '../utils/response'
+import { logger } from '@/lib/logger'
 import type { User } from '@supabase/supabase-js'
 
 export type ApiHandler = (
@@ -48,17 +49,17 @@ export function withAuth(
       console.error('[withAuth] Handler did not return a Response:', result)
       return apiError.internal('Invalid response from handler')
     } catch (err) {
-      console.error('[withAuth] Error:', err)
-      
-      // If the error is already a Response (from apiError), return it
+      // If the error is already a Response (from apiError), return it. Expected 4xx responses are not logged as
+      // errors; a thrown 5xx is.
       if (err instanceof Response) {
+        if (err.status >= 500) logger.error('[withAuth] Handler threw a server error response', undefined, { status: err.status })
         return err
       }
-      
-      // Log the actual error message
+
+      // Unexpected exception: logged through the logger, which raises a (throttled, redacted) alert
+      logger.error('[withAuth] Unexpected error', err)
       const errorMessage = err instanceof Error ? err.message : String(err)
-      console.error('[withAuth] Error message:', errorMessage)
-      
+
       return apiError.internal('Authentication error: ' + errorMessage)
     }
   }
@@ -98,7 +99,7 @@ export function withRole(
         return err
       }
       
-      console.error('[withRole] Error:', err)
+      logger.error('[withRole] Unexpected error', err)
       const errorMessage = err instanceof Error ? err.message : String(err)
       return apiError.internal('Authorization error: ' + errorMessage)
     }
