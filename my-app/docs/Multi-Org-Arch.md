@@ -10,8 +10,8 @@ graph TD
     OA[org_admin / admin] -->|manages| O1
     F[faculty] -->|reviews certificates of| O1
     S[student] -->|owns certificates in| O1
-    R[recruiter<br/>user_roles.organization_id = NULL] -->|recruiter_org_access approved| O1
-    R -->|recruiter_org_access approved| O2
+    R[recruiter] -->|approved user_roles row| O1
+    R -->|approved user_roles row| O2
 ```
 
 ## Data model (as used by the code)
@@ -20,7 +20,7 @@ graph TD
 - `user_roles (user_id, role, organization_id, approval_status)`: one row per user per organization (unique on
   `(user_id, organization_id)`). `super_admin` and `recruiter` rows have `organization_id = NULL`. A user can hold
   roles in several organizations.
-- `recruiter_org_access (recruiter_id, organization_id, status)`: a recruiter must request access to each
+- A recruiter needs one approved `user_roles` row per organization (`role = 'recruiter'`): they must request access to each
   organization (`/api/recruiter/request-access`); an org admin approves or revokes
   (`/api/admin/org/access-requests`, `/api/admin/org/revoke-access`).
 - Tenant-owned data (`certificates`, `audit_logs`, ...) carries `organization_id`.

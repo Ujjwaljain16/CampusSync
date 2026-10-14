@@ -23,7 +23,6 @@ interface Row {
   organization_id: string | null;
   verification_status: string | null;
   file_url: string | null;
-  /** Only certificates have it (documents do not). */
   storage_path?: string | null;
 }
 
@@ -80,83 +79,61 @@ export const DELETE = withRole(['student', 'admin', 'org_admin', 'super_admin'],
   // app-level authorization checks.
   const admin = (await createSupabaseAdminClient()) as unknown as SupabaseClient;
 
-  // Certificates first; fall back to documents (newer flow). Same rules for both.
-  const tables = [
-    { table: 'certificates', metaTable: null, metaKey: null, isCertificate: true },
-    { table: 'documents', metaTable: 'document_metadata', metaKey: 'document_id', isCertificate: false },
-  ] as const;
+  const { data: rec, error: readErr } = await supabase
+    .from('certificates')
+    .select('id, student_id, organization_id, verification_status, file_url, storage_path')
+    .eq('id', certificateId)
+    .maybeSingle();
 
-  for (const t of tables) {
-    // documents have no storage_path column
-    const columns: string = t.isCertificate
-      ? 'id, student_id, organization_id, verification_status, file_url, storage_path'
-      : 'id, student_id, organization_id, verification_status, file_url';
-    const { data: rec, error: readErr } = await supabase
-      .from(t.table)
-      .select(columns)
-      .eq('id', certificateId)
-      .maybeSingle();
+  if (readErr) {
+    logger.error('[Delete] Query error in certificates', readErr);
+    throw apiError.internal('Failed to look up certificate');
+  }
+  if (!rec) throw apiError.notFound('Certificate not found');
+  const row = rec as unknown as Row;
 
-    if (readErr) {
-      logger.error(`[Delete] Query error in ${t.table}`, readErr);
-      if (t.isCertificate) throw apiError.internal('Failed to look up certificate');
-      continue;
-    }
-    if (!rec) continue;
-    const row = rec as unknown as Row;
+  const isOwner = row.student_id === user.id;
+  const isAdminOfOrg = actorHasRoleInOrg(actor, ADMIN_ROLES, row.organization_id);
+  if (!isOwner && !isAdminOfOrg) throw apiError.forbidden('Access denied');
 
-    const isOwner = row.student_id === user.id;
-    const isAdminOfOrg = actorHasRoleInOrg(actor, ADMIN_ROLES, row.organization_id);
-    if (!isOwner && !isAdminOfOrg) throw apiError.forbidden('Access denied');
-
-    // A student (non-admin) may only delete their own pending or rejected certificate.
-    const ownerOnly = isOwner && !isAdminOfOrg;
-    if (ownerOnly && row.verification_status === 'verified') {
-      throw apiError.forbidden('Verified certificates can only be deleted by an administrator');
-    }
-
-    // 1) Revoke every credential issued for the certificate.
-    if (t.isCertificate) {
-      const revoke = await revokeAllCredentialsForCertificate(admin, row.id, 'Certificate deleted');
-      if (!revoke.ok) throw apiError.internal('Failed to revoke credentials; certificate not deleted');
-    }
-
-    // 2) Document metadata (certificates have none), then the row itself, scoped in the WHERE clause.
-    if (t.metaTable) {
-      const { error: metaErr } = await admin.from(t.metaTable).delete().eq(t.metaKey, row.id);
-      if (metaErr) logger.error(`[Delete] Error deleting ${t.metaTable}`, metaErr);
-    }
-
-    let del = admin.from(t.table).delete().eq('id', row.id);
-    if (ownerOnly) {
-      del = del.eq('student_id', user.id).in('verification_status', ['pending', 'rejected']);
-    } else {
-      const orgIds = actorOrganizationIds(actor, ADMIN_ROLES);
-      if (orgIds !== 'all') del = del.in('organization_id', orgIds);
-    }
-    const { data: deleted, error: deleteError } = await del.select('id');
-    if (deleteError) {
-      logger.error(`[Delete] Failed to delete from ${t.table}`, deleteError);
-      throw apiError.internal('Failed to delete');
-    }
-    if (!deleted || deleted.length === 0) {
-      // RLS or a concurrent change prevented the delete; do NOT touch storage.
-      return errorResponse('Could not delete: the record was changed or is not deletable by you', 409);
-    }
-
-    // 3) Storage object last: a failure here leaves an orphan file, never a dangling row.
-    await removeStoredFile(admin, row, row.student_id);
-
-    await writeAudit(admin, {
-      actorId: user.id,
-      organizationId: row.organization_id,
-      action: t.isCertificate ? 'delete_certificate' : 'delete_document',
-      targetId: row.id,
-      details: { previous_status: row.verification_status },
-    });
-
-    return success({ success: true }, t.isCertificate ? 'Certificate deleted successfully' : 'Document deleted successfully');
+  // A student (non-admin) may only delete their own pending or rejected certificate.
+  const ownerOnly = isOwner && !isAdminOfOrg;
+  if (ownerOnly && row.verification_status === 'verified') {
+    throw apiError.forbidden('Verified certificates can only be deleted by an administrator');
   }
 
-  throw apiError.notFound('Certificate not found');
+  // 1) Revoke every credential issued for the certificate.
+  const revoke = await revokeAllCredentialsForCertificate(admin, row.id, 'Certificate deleted');
+  if (!revoke.ok) throw apiError.internal('Failed to revoke credentials; certificate not deleted');
+
+  // 2) The row itself, scoped in the WHERE clause.
+  let del = admin.from('certificates').delete().eq('id', row.id);
+  if (ownerOnly) {
+    del = del.eq('student_id', user.id).in('verification_status', ['pending', 'rejected']);
+  } else {
+    const orgIds = actorOrganizationIds(actor, ADMIN_ROLES);
+    if (orgIds !== 'all') del = del.in('organization_id', orgIds);
+  }
+  const { data: deleted, error: deleteError } = await del.select('id');
+  if (deleteError) {
+    logger.error('[Delete] Failed to delete from certificates', deleteError);
+    throw apiError.internal('Failed to delete');
+  }
+  if (!deleted || deleted.length === 0) {
+    // RLS or a concurrent change prevented the delete; do NOT touch storage.
+    return errorResponse('Could not delete: the record was changed or is not deletable by you', 409);
+  }
+
+  // 3) Storage object last: a failure here leaves an orphan file, never a dangling row.
+  await removeStoredFile(admin, row, row.student_id);
+
+  await writeAudit(admin, {
+    actorId: user.id,
+    organizationId: row.organization_id,
+    action: 'delete_certificate',
+    targetId: row.id,
+    details: { previous_status: row.verification_status },
+  });
+
+  return success({ success: true }, 'Certificate deleted successfully');
 });

@@ -576,14 +576,12 @@ describe('POST /api/certificates/issue', () => {
 
 // ===========================================================================
 describe('DELETE /api/certificates/delete', () => {
-  const OWN_URL = `${SUPABASE_URL}/storage/v1/object/public/certificates/${STUDENT}/1_cert.pdf`;
   const asStudent = (tables: Record<string, Row[]> = {}) =>
     setup(
       {
         user_roles: [{ user_id: STUDENT, role: 'student', organization_id: ORG, approval_status: 'approved' }],
         certificates: [cert()],
         verifiable_credentials: [],
-        documents: [],
         ...tables,
       },
       { id: STUDENT },
@@ -683,12 +681,6 @@ describe('DELETE /api/certificates/delete', () => {
     asStudent();
     expect((await deleteDELETE(req('DELETE', '/x', { certificateId: uuid(404) }))).status).toBe(404);
     expect((await deleteDELETE(req('DELETE', '/x', { certificateId: 'x' }))).status).toBe(400);
-  });
-
-  it('falls back to the documents table with the same ownership rules', async () => {
-    asStudent({ documents: [{ id: uuid(30), student_id: STUDENT, organization_id: ORG, verification_status: 'pending', file_url: OWN_URL }] });
-    expect((await deleteDELETE(req('DELETE', '/x', { certificateId: uuid(30) }))).status).toBe(200);
-    expect(db.tables.documents).toHaveLength(0);
   });
 });
 

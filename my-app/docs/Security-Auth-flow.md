@@ -47,7 +47,7 @@ Key points:
 | `withAuth(handler)` | `src/lib/api/middleware/auth.ts` | 401 when `auth.getUser()` fails. |
 | `withRole(roles, handler)` | same | 403 unless `requireRole(roles)` succeeds. |
 | `requireRole(roles)` | `src/lib/supabaseServer.ts` | Uses the user's highest-priority role across all organizations; rows with `approval_status` `pending`/`denied` are refused. |
-| `getOrganizationContext(user, orgId?)` | `src/lib/api/utils/organization.ts` | Resolves the organization (header `X-Organization-ID` / body `organization_id`, verified against `user_roles`); super admins may pick any, recruiters get their approved `recruiter_org_access` set. |
+| `getOrganizationContext(user, orgId?)` | `src/lib/api/utils/organization.ts` | Resolves the organization (header `X-Organization-ID` / body `organization_id`, verified against `user_roles`); super admins may pick any, recruiters get their approved per-organization `user_roles` set. |
 
 Roles (6): `student`, `faculty`, `admin`, `recruiter`, `org_admin`, `super_admin`.
 

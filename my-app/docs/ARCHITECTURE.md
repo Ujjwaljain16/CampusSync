@@ -75,7 +75,7 @@ flowchart LR
   step: `getOrganizationContext(user, requestedOrgId)` (`src/lib/api/utils/organization.ts`) resolves the
   organization from the `X-Organization-ID` header / body (verifying a `user_roles` row for that org) or the user's
   first role row; super admins may select any organization; recruiters get an `accessibleOrganizations` list from
-  `recruiter_org_access`. A route that checks `withRole` but forgets the organization step can act across tenants,
+  their approved per-organization `user_roles` rows. A route that checks `withRole` but forgets the organization step can act across tenants,
   so new multi-tenant routes must do both.
 - Row-Level Security is the intended second layer for user-bound clients. Policies are not in this repository
   (see the database section).
@@ -115,19 +115,16 @@ flowchart LR
 
 ## Data stores
 
-Tables referenced in code through `.from('<table>')`: `allowed_domains`, `audit_logs`, `certificate_metadata`,
-`certificates`, `institution_templates`, `job_history`, `job_queue`,
-`organizations`, `profiles`, `recruiter_contacts`, `recruiter_favorites`, `recruiter_org_access`,
-`recruiter_pipeline`, `revocation_list` (does not exist in production), `role_requests`,
-`students`, `super_admin_audit`, `super_admin_audit_partitioned`, `trusted_issuers`, `user_roles`,
-`verifiable_credentials`, `verification_metrics`.
-The code no longer reads or writes `documents`, `document_metadata`, `verification_results`, `verification_requests`
-or `saved_searches` (the documents subsystem, the verification webhook and the saved-search / recruiter-flag routes were
-removed). `/api/analytics/dashboard` and `/api/analytics/faculty` are computed from `certificates` only
-(`confidence_score`, `auto_approved`, `verification_method`, `verification_details`).
-Some of these may not exist in a given deployment; the schema is not versioned here. RPC functions called:
-`ensure_role`, `is_super_admin`, `transfer_primary_admin`, `check_and_reserve_slug`, `generate_organization_slug`,
-`get_organization_primary_admin`, `get_accuracy_metrics`, `get_correction_stats`.
+Tables referenced in code through `.from('<table>')`: `allowed_domains`, `audit_logs`, `certificates`,
+`organization_domains`, `organizations`, `profiles`, `recruiter_contacts`, `recruiter_favorites`,
+`recruiter_pipeline`, `role_requests`, `sd_issuances`, `tlog_entries`, `tlog_tree_heads`, `trusted_issuers`,
+`user_roles`, `verifiable_credentials`.
+The code no longer reads or writes `documents`, `document_metadata`, `certificate_metadata`, `verification_results`,
+`verification_requests` or `saved_searches` (the documents subsystem, the verification webhook and the saved-search /
+recruiter-flag routes were removed). `/api/analytics/dashboard` and `/api/analytics/faculty` are computed from
+`certificates` only (`confidence_score`, `auto_approved`, `verification_method`, `verification_details`).
+RPC functions called: `check_and_reserve_slug`, `generate_organization_slug`, `transfer_primary_admin`,
+`allocate_status_index`, `set_status_bit`, `tlog_append`. The full target schema is in `DATABASE-SCHEMA.md`.
 
 Storage: bucket `certificates` (override with `NEXT_PUBLIC_CERTIFICATES_BUCKET` where read). Realtime: the
 `waiting`, `faculty/waiting` and `recruiter/waiting` pages and `FacultyApprovalManager` subscribe to changes.
