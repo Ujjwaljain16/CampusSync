@@ -24,6 +24,13 @@ graph TD
   organization (`/api/recruiter/request-access`); an org admin approves or revokes
   (`/api/admin/org/access-requests`, `/api/admin/org/revoke-access`).
 - Tenant-owned data (`certificates`, `documents`, `audit_logs`, ...) carries `organization_id`.
+- `organization_domains (organization_id, domain, created_by)`: the domains an organization claims, `UNIQUE(domain)`.
+  `/api/admin/domains` and `/api/admin/organizations/[orgId]/domains` manage it; every write also rewrites
+  `settings.allowed_email_domains` (merge) because sign-up still reads that JSON, and a database trigger keeps the
+  two in sync (a domain claimed by another organization is rejected with 409). Wildcard overlaps (`*.x.edu` vs
+  `a.x.edu`) are checked in the application before the insert.
+- `allowed_domains`: the GLOBAL list of educational suffixes (`.edu`, `ac.in`), not organization data. Managed by
+  super admins only through `/api/admin/domains?scope=global`.
 - Sign-up for students/faculty requires an email domain listed in the organization's `settings.allowed_email_domains`;
   students are approved automatically, faculty become `pending` until an admin approves. Recruiters sign up with any
   email and need platform approval, then per-organization access.

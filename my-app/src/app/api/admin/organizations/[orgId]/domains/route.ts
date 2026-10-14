@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 import { withSession, authorizeOrg, apiError, error as errorResponse, writeAudit } from '@/lib/api';
-import { validateDomain, findDomainConflict } from '@/lib/api/utils/domains';
+import { validateDomain, findDomainConflict, isUniqueViolation, listOrgDomains } from '@/lib/api/utils/domains';
 
 /**
  * GET /api/admin/organizations/[orgId]/domains
@@ -11,6 +11,11 @@ import { validateDomain, findDomainConflict } from '@/lib/api/utils/domains';
  * Replace the allowed email domains of an organization
  *
  * Caller must be admin/org_admin OF THIS organization (or super_admin).
+ *
+ * GET reads the organization_domains table. PUT writes the JSON setting
+ * organizations.settings.allowed_email_domains (what the signup flow reads); a database
+ * trigger mirrors it into organization_domains and raises unique_violation (23505) when
+ * another organization already claims one of the domains, which is answered with a 409.
  */
 
 const MAX_DOMAINS = 50;
@@ -22,7 +27,7 @@ export const GET = withSession<{ orgId: string }>(async (_request, { user, param
   const admin = await createSupabaseAdminClient();
   const { data: org, error } = await admin
     .from('organizations')
-    .select('id, name, slug, settings')
+    .select('id, name, slug')
     .eq('id', orgId)
     .maybeSingle();
 
@@ -32,7 +37,12 @@ export const GET = withSession<{ orgId: string }>(async (_request, { user, param
   }
   if (!org) return apiError.notFound('Organization not found');
 
-  const allowedDomains = (org.settings as { allowed_email_domains?: string[] } | null)?.allowed_email_domains || [];
+  const { rows, error: domainsError } = await listOrgDomains(admin, orgId);
+  if (domainsError) {
+    console.error('Error fetching domains:', domainsError);
+    return apiError.internal('Failed to fetch domains');
+  }
+  const allowedDomains = rows.map((r) => r.domain);
 
   return NextResponse.json({
     organizationId: org.id,
@@ -73,7 +83,7 @@ export const PUT = withSession<{ orgId: string }>(async (request, { user, params
 
   const admin = await createSupabaseAdminClient();
 
-  // Anti-squatting across BOTH domain stores
+  // Anti-squatting incl. wildcard overlaps (the UNIQUE(domain) constraint only catches exact duplicates)
   let conflict;
   try {
     conflict = await findDomainConflict(admin, orgId, normalized);
@@ -107,6 +117,9 @@ export const PUT = withSession<{ orgId: string }>(async (request, { user, params
     .update({ settings: updatedSettings })
     .eq('id', orgId);
   if (updateError) {
+    if (isUniqueViolation(updateError)) {
+      return errorResponse('A domain is already claimed by another organization', 409);
+    }
     console.error('Error updating domains:', updateError);
     return apiError.internal('Failed to update domains');
   }
