@@ -1,62 +1,64 @@
 import { NextRequest } from 'next/server';
-import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
-import { success, apiError } from '@/lib/api';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { success, apiError, isUuid, authorizeOrg, withSession } from '@/lib/api';
 
-export async function GET(_req: NextRequest, context: { params: Promise<{ certificateId: string }> }) {
-  const userWithRole = await getServerUserWithRole();
-  
-  if (!userWithRole) {
-    throw apiError.unauthorized();
-  }
+const REVIEWER_ROLES = ['faculty', 'admin', 'org_admin', 'super_admin'] as const;
 
-  const { user, role } = userWithRole;
-  
-  if (!['student', 'faculty', 'admin'].includes(role || '')) {
-    throw apiError.unauthorized();
-  }
+/**
+ * GET /api/certificates/metadata/[certificateId]
+ *
+ * Extraction metadata (confidence, evidence, method) for one certificate.
+ * Visible to the certificate's owner and to APPROVED reviewers of the
+ * certificate's own organization — nobody else (recruiters never see it).
+ */
+export const GET = withSession<{ certificateId: string }>(async (_req: NextRequest, { user, params }) => {
+  const { certificateId } = params;
+  if (!isUuid(certificateId)) return apiError.badRequest('Invalid certificate id');
 
-  const { certificateId } = await context.params;
   const supabase = await createSupabaseServerClient();
-  
-  // First, get the certificate itself which may have confidence_score stored directly
+
   const { data: certificate, error: certError } = await supabase
     .from('certificates')
-    .select('*')
+    .select('id, student_id, organization_id, confidence_score, verification_details, auto_approved, verification_method, created_at')
     .eq('id', certificateId)
-    .single();
-  
-  if (certError || !certificate) {
-    throw apiError.notFound('Certificate not found');
+    .maybeSingle();
+
+  if (certError) {
+    console.error('[certificates/metadata] certificate lookup failed', certError);
+    return apiError.internal('Failed to load certificate');
   }
-  
-  // For students, verify they own this certificate
-  if (role === 'student' && certificate.student_id !== user.id) {
-    throw apiError.forbidden();
+  // Same answer for "does not exist" and "not yours": do not reveal existence.
+  if (!certificate) return apiError.notFound('Certificate not found');
+
+  if (certificate.student_id !== user.id) {
+    if (!certificate.organization_id) return apiError.notFound('Certificate not found');
+    try {
+      await authorizeOrg(user, { orgId: certificate.organization_id, roles: REVIEWER_ROLES });
+    } catch (err) {
+      if (err instanceof Response && err.status === 403) return apiError.notFound('Certificate not found');
+      throw err;
+    }
   }
 
-  // Try to fetch from certificate_metadata table
   const { data: metadata, error: metadataError } = await supabase
     .from('certificate_metadata')
     .select('*')
     .eq('certificate_id', certificateId)
     .maybeSingle();
 
-  // If metadata exists in separate table, use it
   if (metadata && !metadataError) {
     return success({ data: metadata });
   }
-  
-  // Otherwise, construct metadata from certificate fields
-  const constructedMetadata = {
-    certificate_id: certificate.id,
-    ai_confidence_score: certificate.confidence_score || 0,
-    verification_details: certificate.verification_details || {},
-    auto_approved: certificate.auto_approved || false,
-    verification_method: certificate.verification_method || null,
-    created_at: certificate.created_at,
-  };
-  
-  return success({ data: constructedMetadata });
-}
 
-
+  // No separate metadata row: derive it from the certificate itself.
+  return success({
+    data: {
+      certificate_id: certificate.id,
+      ai_confidence_score: certificate.confidence_score ?? null,
+      verification_details: certificate.verification_details || {},
+      auto_approved: certificate.auto_approved || false,
+      verification_method: certificate.verification_method || null,
+      created_at: certificate.created_at,
+    },
+  });
+});

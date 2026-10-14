@@ -3,7 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { apiError } from '@/lib/api';
 import { safeRedirectPath } from '@/lib/safeRedirect';
 
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
 	const { searchParams } = new URL(request.url);
 	const redirectTo = safeRedirectPath(searchParams.get('redirectTo'));
 
@@ -49,3 +49,13 @@ export async function GET(request: NextRequest) {
 }
 
 
+
+export async function GET(request: NextRequest) {
+	try {
+		return await handleGet(request);
+	} catch (err) {
+		if (err instanceof Response) return err;
+		console.error('[oauth/google] unexpected error', err);
+		return apiError.internal('Failed to initialize OAuth');
+	}
+}

@@ -15,7 +15,7 @@ interface LoginBody {
   refresh_token: string;
 }
 
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest) {
 	const result = await parseAndValidateBody<LoginBody>(request, ['access_token', 'refresh_token']);
 	if (result.error) return result.error;
 	
@@ -45,14 +45,14 @@ export async function POST(request: NextRequest) {
 	const { error: setSessionError } = await supabase.auth.setSession({ access_token, refresh_token });
 	if (setSessionError) {
 		console.error('[complete-login] setSessionError:', setSessionError);
-		throw apiError.internal(setSessionError.message || 'Failed to set session');
+		throw apiError.internal('Failed to set session');
 	}
 
 	// Identify user and role using the newly established session (RLS-aware)
 	const { data: { user }, error: userError } = await supabase.auth.getUser();
 	if (userError || !user) {
 		console.error('[complete-login] getUser error:', userError);
-		throw apiError.internal(userError?.message || 'User not found after login');
+		throw apiError.internal('User not found after login');
 	}
 
 	let role: string | null = null;
@@ -90,3 +90,13 @@ export async function POST(request: NextRequest) {
 }
 
 
+
+export async function POST(request: NextRequest) {
+	try {
+		return await handlePost(request);
+	} catch (err) {
+		if (err instanceof Response) return err;
+		console.error('[complete-login] unexpected error', err);
+		return apiError.internal('Login failed');
+	}
+}
