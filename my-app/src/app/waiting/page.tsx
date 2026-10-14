@@ -2,19 +2,18 @@
  * Waiting/Pending Approval Page
  * 
  * Shown to recruiters awaiting admin approval for organization access.
- * Features Supabase Realtime for instant status updates (no polling!).
+ * Checks for status updates by polling the server every 10 seconds (slower while the tab is hidden).
  * Maintains CampusSync dark glassmorphism theme.
  */
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Clock, CheckCircle, XCircle, RefreshCw, Sparkles, Wifi, WifiOff } from 'lucide-react';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/client';
 import { logger } from '@/lib/logger';
-import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { usePolling } from '@/hooks/usePolling';
 
 interface AccessRequest {
   id: string;
@@ -34,98 +33,53 @@ export default function WaitingPage() {
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [realtimeConnected, setRealtimeConnected] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const redirectScheduled = useRef(false);
 
-  // Fetch access requests
-  const fetchRequests = React.useCallback(async () => {
+  // Fetch access requests. Resolves to false once the user is approved (or signed out) so polling stops.
+  const fetchRequests = React.useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch('/api/recruiter/request-access');
+      if (res.status === 401) {
+        router.push('/login');
+        return false;
+      }
       if (!res.ok) {
         throw new Error('Failed to fetch requests');
       }
       const data = await res.json();
       setRequests(data.requests || []);
+      setError(null);
 
-      // Check if any requests are approved - auto redirect
+      // Check if any requests are approved - auto redirect (once)
       const hasApproved = data.requests?.some((r: AccessRequest) => r.status === 'approved');
       if (hasApproved) {
-        setTimeout(() => {
-          router.push('/recruiter/dashboard');
-        }, 2000);
+        if (!redirectScheduled.current) {
+          redirectScheduled.current = true;
+          setTimeout(() => {
+            router.push('/recruiter/dashboard');
+          }, 2000);
+        }
+        return false;
       }
+      return true;
     } catch (err) {
       logger.error('Failed to fetch requests', err);
       setError(err instanceof Error ? err.message : 'Failed to load requests');
+      throw err; // counts as a failed poll: the next one is delayed
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [router]);
 
-  // Get current user ID for realtime filtering
-  useEffect(() => {
-    const getUserId = async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUserId(user.id);
-      }
-    };
-    getUserId();
-  }, []);
-
-  // Initial fetch + Supabase Realtime subscription
-  useEffect(() => {
-    fetchRequests();
-
-    if (!userId) return;
-
-    logger.debug('Setting up Supabase Realtime for user', { userId });
-
-    // Create Supabase client
-    const supabase = createClient();
-    
-    // Subscribe to changes of my own role rows (approval state lives in user_roles)
-    const channel: RealtimeChannel = supabase
-      .channel('recruiter-access-requests')
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // INSERT, UPDATE, DELETE
-          schema: 'public',
-          table: 'user_roles',
-          filter: `user_id=eq.${userId}` // Only my role rows
-        },
-        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
-          logger.debug('Realtime update received', { payload });
-          
-          // Auto-refresh data on any change
-          fetchRequests();
-        }
-      )
-      .subscribe((status: string) => {
-        logger.debug('Realtime subscription status', { status });
-        
-        if (status === 'SUBSCRIBED') {
-          setRealtimeConnected(true);
-        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          setRealtimeConnected(false);
-        }
-      });
-
-    // Cleanup on unmount
-    return () => {
-      logger.debug('Cleaning up Supabase Realtime subscription');
-      supabase.removeChannel(channel);
-    };
-  }, [userId, fetchRequests]);
+  // Initial fetch, then every 10 s (slower while the tab is hidden)
+  const { healthy: pollHealthy, pollNow } = usePolling(fetchRequests);
 
   // Manual refresh handler
   const handleManualRefresh = () => {
     setRefreshing(true);
-    fetchRequests();
+    void pollNow().finally(() => setRefreshing(false));
   };
 
   // Calculate status counts
@@ -207,16 +161,16 @@ export default function WaitingPage() {
             </Link>
 
             <div className="flex items-center gap-4">
-              {/* Realtime Connection Status */}
+              {/* Auto-refresh status */}
               <div className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg text-xs font-medium transition-all ${
-                realtimeConnected
+                pollHealthy
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                   : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300'
               }`}>
-                {realtimeConnected ? (
+                {pollHealthy ? (
                   <>
                     <Wifi className="w-3.5 h-3.5" />
-                    <span>Live Updates</span>
+                    <span>Auto-refreshing</span>
                   </>
                 ) : (
                   <>
@@ -252,7 +206,7 @@ export default function WaitingPage() {
                 Awaiting Approval
               </h1>
               <p className="text-lg text-white/60 max-w-2xl mx-auto">
-                Your access requests are being reviewed. Updates appear instantly via Supabase Realtime!
+                Your access requests are being reviewed. This page checks for updates automatically.
               </p>
             </div>
 

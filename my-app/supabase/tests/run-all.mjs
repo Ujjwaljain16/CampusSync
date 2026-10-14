@@ -1,11 +1,11 @@
-// Runs the schema-cleanup migrations (20261015_*) against a model of the production database inside an in-process
+// Runs the schema-cleanup migrations (20261015_*) and the rate-limit migration (20261016_02) against a model of the production database inside an in-process
 // PostgreSQL (PGlite) and asserts what they are supposed to guarantee.
 //
 //   cd my-app/supabase/tests && npm install && npm test
 //
 // Two scenarios, each on a fresh database:
 //   1. steps 01-03 (expand, integrity, indexes)        -> assert-expand.mjs   (behaviour of the data + constraints)
-//   2. steps 00-08 (everything)                         -> assert-final.mjs    (final shape, policies, guards, idempotency)
+//   2. steps 00-08 + 16_02 (everything)                 -> assert-final.mjs    (final shape, policies, guards, idempotency, rate limiter)
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -14,7 +14,9 @@ import { join } from 'node:path';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const migrationsDir = join(here, '..', 'migrations');
 const migration = (prefix) => {
-  const f = readdirSync(migrationsDir).find((n) => n.startsWith(`20261015_${prefix}_`));
+  // '16_02' selects 20261016_02_*, anything else is a 20261015_* step
+  const stamp = /^16_/.test(prefix) ? `20261016_${prefix.slice(3)}_` : `20261015_${prefix}_`;
+  const f = readdirSync(migrationsDir).find((n) => n.startsWith(stamp));
   if (!f) throw new Error(`migration ${prefix} not found`);
   return join(migrationsDir, f);
 };
@@ -73,7 +75,7 @@ async function scenario(title, prefixes, assertFile) {
 }
 
 await scenario('steps 01-03: data and constraints', ['01', '02', '03', '03b'], 'assert-expand.mjs');
-await scenario('steps 00-08: final state', ['00', '01', '02', '03', '03b', '04', '05', '06', '07', '08'], 'assert-final.mjs');
+await scenario('steps 00-08: final state', ['00', '01', '02', '03', '03b', '04', '05', '06', '07', '08', '16_02'], 'assert-final.mjs');
 
 console.log(`\n${totalChecks - totalBad}/${totalChecks} checks passed`);
 process.exit(totalBad ? 1 : 0);

@@ -57,49 +57,61 @@ describe('GET /api/health', () => {
     setEnv(saved as Record<string, string | undefined>);
   });
 
-  async function get() {
+  async function get(deep = false) {
     const { GET } = await import('@/app/api/health/route');
-    return GET();
+    return GET(new Request(`https://campus.test/api/health${deep ? '?deep=1' : ''}`));
   }
 
-  it('returns 200 ok when the database responds and config is complete', async () => {
+  it('shallow check does not touch the database', async () => {
     setEnv(GOOD_ENV);
+    pingImpl = () => {
+      throw new Error('database must not be queried');
+    };
     const res = await get();
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe('ok');
+  });
+
+  it('returns 200 ok when the database responds and config is complete (deep)', async () => {
+    setEnv(GOOD_ENV);
+    const res = await get(true);
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.healthy).toBe(true);
     expect(body.status).toBe('ok');
   });
 
-  it('returns 503 and no error text when the database query fails', async () => {
+  it('deep: returns 503 degraded and no error text when the database query fails', async () => {
     setEnv(GOOD_ENV);
     pingImpl = () => ({ error: { message: 'connection refused to db.internal:5432', code: '08006' } });
-    const res = await get();
+    const res = await get(true);
     const text = await res.text();
     expect(res.status).toBe(503);
     expect(JSON.parse(text).healthy).toBe(false);
+    expect(JSON.parse(text).status).toBe('degraded');
     expect(text).not.toContain('db.internal');
     expect(text).not.toContain('connection refused');
   });
 
-  it('returns 503 when the database ping throws', async () => {
+  it('deep: returns 503 when the database ping throws', async () => {
     setEnv(GOOD_ENV);
     pingImpl = () => {
       throw new Error('socket hang up');
     };
-    const res = await get();
+    const res = await get(true);
     expect(res.status).toBe(503);
     expect(await res.text()).not.toContain('socket hang up');
   });
 
-  it('returns 503 when the database ping times out (2s)', async () => {
+  it('deep: returns 503 when the database ping times out (1.5s)', async () => {
     setEnv(GOOD_ENV);
     vi.useFakeTimers();
     pingImpl = () => new Promise(() => {});
-    const pending = get();
-    await vi.advanceTimersByTimeAsync(2500);
+    const pending = get(true);
+    await vi.advanceTimersByTimeAsync(1600);
     const res = await pending;
     expect(res.status).toBe(503);
+    expect((await res.json()).status).toBe('degraded');
   });
 
   it('is degraded (HTTP 200) when GEMINI_API_KEY or the VC key is missing', async () => {
@@ -115,11 +127,18 @@ describe('GET /api/health', () => {
     setEnv({ ...GOOD_ENV, NEXT_PUBLIC_SUPABASE_URL: undefined, NEXT_PUBLIC_SUPABASE_ANON_KEY: undefined });
     const res = await get();
     expect(res.status).toBe(503);
+    expect((await res.json()).status).toBe('unhealthy');
+  });
+
+  it('also works when called without a request object', async () => {
+    setEnv(GOOD_ENV);
+    const { GET } = await import('@/app/api/health/route');
+    expect((await GET(new Request('http://localhost/api/health'))).status).toBe(200);
   });
 
   it('does not expose configuration details in production', async () => {
     setEnv(GOOD_ENV);
-    const body = await (await get()).json();
+    const body = await (await get(true)).json();
     expect(Object.keys(body).sort()).toEqual(['healthy', 'status', 'timestamp']);
   });
 });

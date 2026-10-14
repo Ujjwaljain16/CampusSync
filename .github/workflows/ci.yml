@@ -40,6 +40,57 @@ jobs:
       - name: Test
         run: npm test
 
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: my-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: my-app/.nvmrc
+          cache: npm
+          cache-dependency-path: my-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `tsc` does not run Next's own route-type checks (for example the signature of route handlers), so build too.
+      # Placeholder values only: nothing is contacted at build time.
+      - name: Build
+        run: npx next build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_placeholder
+          SUPABASE_SERVICE_ROLE_KEY: sb_secret_placeholder
+          NEXT_PUBLIC_SITE_URL: http://localhost:3000
+
+  migrations:
+    name: Database migrations (PGlite model)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: my-app/supabase/tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: my-app/.nvmrc
+          cache: npm
+          cache-dependency-path: my-app/supabase/tests/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Applies supabase/migrations/20261015_* to an in-process PostgreSQL model of the production schema and asserts
+      # the result (see my-app/supabase/tests/README.md). It is a model, not the real database.
+      - name: Migration checks
+        run: npm test
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

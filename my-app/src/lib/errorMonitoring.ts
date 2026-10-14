@@ -3,6 +3,8 @@
  * Tracks errors, performance issues, and user actions
  */
 
+import { reportError } from '@/lib/alerts';
+
 export type ErrorSeverity = 'low' | 'medium' | 'high' | 'critical';
 
 export interface ErrorLog {
@@ -156,18 +158,12 @@ class ErrorMonitoring {
    * Send error to external monitoring service
    */
   private async sendToExternalService(errorLog: ErrorLog): Promise<void> {
-    // Placeholder for Sentry, DataDog, or other monitoring service
-    // In production, uncomment and configure:
-    /*
-    await fetch('/api/monitoring/error', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(errorLog),
-    });
-    */
-    
-    // Prevent unused variable warning in development
-    void errorLog;
+    // Critical errors raise a throttled, redacted webhook alert (server side only; a no-op in
+    // the browser and when ALERT_WEBHOOK_URL is unset). Stacks and context are not sent.
+    const error = new Error(errorLog.message);
+    error.name = 'CriticalError';
+    error.stack = errorLog.stack; // fingerprint on the original frame, not on this helper
+    reportError(error, { logMessage: errorLog.message });
   }
 
   /**

@@ -28,7 +28,10 @@ const PUBLIC_ROUTES: Record<string, string> = {
   'auth/check-email': 'Pre-login flow: reports whether an email is registered (rate limited).',
   'auth/check-env': 'Reports only booleans about public Supabase config presence; no secrets.',
   'auth/check-user-exists': 'Pre-login/signup flow: existence check by email (rate limited).',
+  'auth/login': 'Pre-login flow: server-side email/password sign-in that sets the HttpOnly session cookies (rate limited per address and per account, one generic error for bad credentials).',
   'auth/oauth/google': 'OAuth sign-in entry point; unauthenticated by nature.',
+  'auth/password-reset/request': 'Pre-login flow: asks for a reset email; always answers 200 with a generic message (rate limited per address and per mailbox).',
+  'auth/password-reset/verify': 'Pre-login flow: exchanges the single-use token from a reset email for a recovery session (HttpOnly cookies; rate limited).',
   'auth/resend-confirmation': 'Pre-login flow: resend signup confirmation email.',
   'auth/signout': 'Sign-out must work for any caller; only clears the caller session.',
   'auth/signup/recruiter': 'Public sign-up for recruiters.',
@@ -128,6 +131,32 @@ describe('API route inventory', () => {
       redundant,
       `These routes are now guarded; delete them from PUBLIC_ROUTES:\n  ${redundant.join('\n  ')}`
     ).toEqual([]);
+  });
+
+  // Routes that must stay behind a SPECIFIC guard (the generic check above only needs any guard).
+  const STRICT_GUARDS: Record<string, RegExp> = {
+    'admin/vcs/resign': /withSuperAdmin(?:<[^>]*>)?\(/, // key rotation: platform-level, super admin only
+  };
+
+  it('routes with a required specific guard still use it', () => {
+    for (const [key, guard] of Object.entries(STRICT_GUARDS)) {
+      const route = routes.find((r) => r.key === key);
+      expect(route, `route ${key} not found`).toBeDefined();
+      expect(guard.test(route!.src), `${key} must use ${guard}`).toBe(true);
+    }
+  });
+
+  it('public session routes enforce a rate limit and never hand tokens to the browser', () => {
+    const SESSION_ROUTES = ['auth/login', 'auth/password-reset/request', 'auth/password-reset/verify', 'auth/password-reset/update'];
+    const byKey = new Map(routes.map((r) => [r.key, r.src]));
+    for (const key of SESSION_ROUTES) {
+      const src = byKey.get(key);
+      expect(src, `${key} route must exist`).toBeTruthy();
+      expect(src, `${key} must call enforceRateLimit`).toMatch(/enforceRateLimit\(/);
+      expect(src, `${key} must not return session tokens`).not.toMatch(/access_token|refresh_token|session\.(?:access|refresh)/);
+    }
+    // the update route changes a password, so it is not allowed to be anonymous
+    expect(byKey.get('auth/password-reset/update')).toMatch(/supabase\.auth\.getUser\(/);
   });
 
   it('no route file uses dangerouslySetInnerHTML', () => {

@@ -1,4 +1,4 @@
--- DRAFT - review before applying; idempotent
+-- APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent. (columns); the list table is in 20261014_vc_status_lists.sql.
 --
 -- Informational copy of a credential's status-list slot. The authoritative copy is the signed
 -- `credentialStatus` entry inside the stored credential JSON, and the application works without

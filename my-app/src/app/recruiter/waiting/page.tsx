@@ -2,19 +2,18 @@
  * Recruiter Waiting/Pending Approval Page
  * 
  * Shown to recruiters awaiting admin approval for organization access.
- * Features Supabase Realtime for instant status updates.
+ * Checks the approval status by polling the server every 10 seconds (slower while the tab is hidden).
  * Maintains CampusSync dark glassmorphism theme - matches faculty/waiting design.
  */
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Clock, CheckCircle, XCircle, RefreshCw, Wifi, WifiOff, Briefcase, Building2 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { createClient } from '@/lib/supabase/client';
-import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { usePolling } from '@/hooks/usePolling';
 
 interface RecruiterApprovalRequest {
   organization_id: string | null;
@@ -31,157 +30,75 @@ export default function RecruiterWaitingPage() {
   const [request, setRequest] = useState<RecruiterApprovalRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [realtimeConnected, setRealtimeConnected] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [redirecting, setRedirecting] = useState(false);
+  const redirectStarted = useRef(false);
 
-  // Fetch approval status
-  const fetchApprovalStatus = React.useCallback(async () => {
+  // Fetch approval status from the server. Resolves to false once approved (or signed out) so polling stops.
+  const fetchApprovalStatus = React.useCallback(async (): Promise<boolean> => {
     try {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
+      const res = await fetch('/api/auth/approval-status?role=recruiter', { cache: 'no-store' });
+
+      if (res.status === 401) {
         router.push('/login');
-        return;
+        return false;
+      }
+      if (!res.ok) {
+        throw new Error('Failed to fetch approval status');
       }
 
-      // Fetch user's role and approval status
-      const { data: roleData, error: roleError } = await supabase
-        .from('user_roles')
-        .select(`
-          organization_id,
-          role,
-          approval_status,
-          created_at,
-          approved_at,
-          approved_by,
-          approval_notes
-        `)
-        .eq('user_id', user.id)
-        .eq('role', 'recruiter')
-        .single();
+      const data = (await res.json()) as {
+        has_role?: boolean;
+        organization_id: string | null;
+        approval_status: 'pending' | 'approved' | 'denied' | null;
+        requested_at: string | null;
+        approved_at?: string | null;
+        approved_by?: string | null;
+        approval_notes?: string | null;
+      };
 
-      if (roleError) {
-        console.error('Role fetch error:', roleError);
-        throw new Error('Failed to fetch approval status: ' + roleError.message);
-      }
-
-      if (!roleData) {
+      if (!data.has_role || !data.approval_status) {
         throw new Error('No recruiter role found');
       }
 
-      const organizationName = 'Platform Access'; // Recruiters don't belong to a specific org initially
-
-      // Type cast the data
-      const typedRoleData = roleData as unknown as {
-        organization_id: string | null;
-        role: string;
-        approval_status: string;
-        created_at: string;
-        approved_at?: string;
-        approved_by?: string;
-        approval_notes?: string;
-      };
-
       // If approved, redirect to recruiter dashboard immediately
-      if (typedRoleData.approval_status === 'approved') {
-        console.log('[SUCCESS] Recruiter approved! Redirecting to dashboard...');
-        setRedirecting(true);
-        router.push('/recruiter/dashboard');
-        return; // Stop further processing
+      if (data.approval_status === 'approved') {
+        if (!redirectStarted.current) {
+          redirectStarted.current = true;
+          setRedirecting(true);
+          router.push('/recruiter/dashboard');
+        }
+        return false; // stop polling
       }
 
       setRequest({
-        organization_id: typedRoleData.organization_id,
-        organization_name: organizationName,
-        approval_status: typedRoleData.approval_status as 'pending' | 'approved' | 'denied',
-        requested_at: typedRoleData.created_at,
-        approved_at: typedRoleData.approved_at,
-        approved_by: typedRoleData.approved_by,
-        approval_notes: typedRoleData.approval_notes
+        organization_id: data.organization_id,
+        organization_name: 'Platform Access', // Recruiters don't belong to a specific org initially
+        approval_status: data.approval_status,
+        requested_at: data.requested_at ?? new Date().toISOString(),
+        approved_at: data.approved_at ?? undefined,
+        approved_by: data.approved_by ?? undefined,
+        approval_notes: data.approval_notes ?? undefined,
       });
+      setError(null);
+      return true;
     } catch (err) {
       console.error('Failed to fetch approval status:', err);
       setError(err instanceof Error ? err.message : 'Failed to load approval status');
+      throw err; // counts as a failed poll: the next one is delayed
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [router]);
 
-  // Get current user ID for realtime filtering
-  useEffect(() => {
-    const getUserId = async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUserId(user.id);
-      }
-    };
-    getUserId();
-  }, []);
-
-  // Initial fetch + Supabase Realtime subscription
-  useEffect(() => {
-    fetchApprovalStatus();
-
-    if (!userId) return;
-
-    console.log('[INFO] Setting up Supabase Realtime for recruiter user:', userId);
-
-    // Create Supabase client
-    const supabase = createClient();
-    
-    // Subscribe to user_roles table changes
-    const channel: RealtimeChannel = supabase
-      .channel('recruiter-approval-status')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE', // Only listen for updates
-          schema: 'public',
-          table: 'user_roles',
-          filter: `user_id=eq.${userId}` // Only my role
-        },
-        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
-          console.log('🎉 Realtime approval status update received:', payload);
-          
-          // Check if approval status changed to approved
-          const newRecord = payload.new as { approval_status?: string };
-          if (newRecord?.approval_status === 'approved') {
-            console.log('🚀 Instant redirect triggered by realtime update!');
-            setRedirecting(true);
-            // Immediate redirect on approval
-            router.push('/recruiter/dashboard');
-          } else {
-            // For other updates, refresh the data
-            fetchApprovalStatus();
-          }
-        }
-      )
-      .subscribe((status: string) => {
-        console.log('Realtime status:', status);
-        
-        if (status === 'SUBSCRIBED') {
-          setRealtimeConnected(true);
-        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          setRealtimeConnected(false);
-        }
-      });
-
-    // Cleanup on unmount
-    return () => {
-      console.log('Cleaning up Supabase Realtime subscription');
-      supabase.removeChannel(channel);
-    };
-  }, [userId, fetchApprovalStatus, router]);
+  // Initial fetch, then every 10 s (slower while the tab is hidden)
+  const { healthy: pollHealthy, pollNow } = usePolling(fetchApprovalStatus);
 
   // Manual refresh handler
   const handleManualRefresh = () => {
     setRefreshing(true);
-    fetchApprovalStatus();
+    void pollNow().finally(() => setRefreshing(false));
   };
 
   // Get status display
@@ -295,16 +212,16 @@ export default function RecruiterWaitingPage() {
             </Link>
 
             <div className="flex items-center gap-4">
-              {/* Realtime Connection Status */}
+              {/* Auto-refresh status */}
               <div className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg text-xs font-medium transition-all ${
-                realtimeConnected
+                pollHealthy
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                   : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300'
               }`}>
-                {realtimeConnected ? (
+                {pollHealthy ? (
                   <>
                     <Wifi className="w-3.5 h-3.5" />
-                    <span>Live Updates</span>
+                    <span>Auto-refreshing</span>
                   </>
                 ) : (
                   <>
@@ -402,7 +319,7 @@ export default function RecruiterWaitingPage() {
                   {request.approval_status === 'pending' && (
                     <div className="mt-8 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
                       <p className="text-sm text-blue-300">
-                        <strong>Tip:</strong> This page updates automatically via Realtime. 
+                        <strong>Tip:</strong> This page checks for updates automatically. 
                         You&apos;ll be redirected immediately once approved!
                       </p>
                     </div>

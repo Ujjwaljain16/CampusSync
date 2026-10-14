@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { success, apiError } from '@/lib/api';
 import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
+import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 import { verifyPresentation, type SdReason } from '@/lib/sdjwt';
 import { sdEnabled, getIssuerDid, getSdVerificationKeys, SD_STANDARD_CLAIMS } from '../_shared';
@@ -40,6 +41,8 @@ export async function POST(req: NextRequest) {
 
   const limited = enforceRateLimit(req, 'sd-verify', RateLimitPresets.relaxed);
   if (limited) return limited;
+  const globalLimited = await enforceGlobalRateLimit(req, 'sd-verify', { limit: 30, windowSeconds: 60 });
+  if (globalLimited) return globalLimited;
 
   const body = (await req.json().catch(() => null)) as VerifyBody | null;
   if (!body || typeof body !== 'object') return apiError.badRequest('Invalid JSON');

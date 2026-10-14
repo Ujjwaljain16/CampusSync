@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { success, apiError } from '@/lib/api/utils/response';
 import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
+import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 import { isUuid } from '@/lib/privacy/sanitize';
 import { getStudentVisibility } from '@/lib/privacy/visibility';
@@ -46,6 +47,8 @@ function pickCredential(embed: CertRow['verifiable_credentials']): { id: string;
 export async function GET(request: NextRequest, { params }: { params: Promise<{ userId: string }> }) {
   const limited = enforceRateLimit(request, 'public-portfolio', RateLimitPresets.relaxed);
   if (limited) return limited;
+  const globalLimited = await enforceGlobalRateLimit(request, 'public-portfolio', { limit: 30, windowSeconds: 60 });
+  if (globalLimited) return globalLimited;
 
   try {
     const { userId } = await params;

@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { withRole, success, apiError, resolveAdminOrg, rankOf } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export const GET = withRole(['faculty', 'admin'], async (req: NextRequest, { user }) => {
+export const GET = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], async (req: NextRequest, { user }) => {
   const supabase = await createSupabaseServerClient();
   const url = new URL(req.url);
   const page = parseInt(url.searchParams.get('page') || '1');

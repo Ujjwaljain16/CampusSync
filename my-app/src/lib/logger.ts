@@ -4,11 +4,35 @@
  * Integrates with monitoring services in production
  */
 
+import { reportError } from '@/lib/alerts';
+
 const isDev = process.env.NODE_ENV !== 'production';
 const isTest = process.env.NODE_ENV === 'test';
 
 interface LogContext {
   [key: string]: unknown;
+}
+
+// Guards against recursion: if anything under reportError logs an error again, that inner
+// call is logged to the console as usual but not forwarded a second time.
+let forwarding = false;
+
+function forwardToAlerts(message: string, error: unknown, context?: LogContext) {
+  if (forwarding) return;
+  forwarding = true;
+  try {
+    const ctx = context ?? {};
+    reportError(error, {
+      logMessage: message,
+      route: typeof ctx.route === 'string' ? ctx.route : typeof ctx.path === 'string' ? ctx.path : undefined,
+      requestId: typeof ctx.requestId === 'string' ? ctx.requestId : undefined,
+      status: typeof ctx.status === 'number' ? ctx.status : undefined,
+    });
+  } catch {
+    // alerting must never affect the caller
+  } finally {
+    forwarding = false;
+  }
 }
 
 class Logger {
@@ -44,7 +68,7 @@ class Logger {
 
   /**
    * Error logs - ALWAYS logged
-   * Automatically sent to monitoring service in production
+   * Also raises a throttled webhook alert when ALERT_WEBHOOK_URL is set (see src/lib/alerts.ts)
    */
   error(message: string, error?: Error | unknown, context?: LogContext) {
     // Always log errors to console
@@ -58,6 +82,9 @@ class Logger {
       timestamp: new Date().toISOString(),
       env: process.env.NODE_ENV,
     });
+
+    // Raise a throttled, redacted webhook alert (no-op unless ALERT_WEBHOOK_URL is set)
+    forwardToAlerts(message, error, context);
 
     // Send to monitoring service in production
     if (!isDev && !isTest) {
@@ -120,9 +147,9 @@ class Logger {
     error?: Error | unknown,
     context?: LogContext
   ) {
-    // Monitoring integration placeholder
+    // Optional extra sink (Sentry, DataDog, ...). Webhook alerting for errors is handled by
+    // forwardToAlerts above and does not depend on ENABLE_MONITORING.
     // Enable with ENABLE_MONITORING=true environment variable
-    // Recommended: Integrate Sentry, DataDog, or New Relic
     // Example Sentry integration:
     // import * as Sentry from '@sentry/nextjs';
     // Sentry.captureException(error || new Error(message), {

@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle, Clock, XCircle, AlertCircle, Eye, Users, Zap, Brain, Shield, Star, Filter, CheckSquare, Square, BarChart3, TrendingUp, Activity, Target, RefreshCw } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 import { toast } from '@/components/ui/toast';
+import { CertificateFileLink } from '@/components/CertificateFileLink';
 
 interface PendingCert {
   id: string;
@@ -475,15 +476,13 @@ export default function FacultyDashboardPage() {
                       {/* Actions */}
                       <div className="flex items-center gap-2">
                         {cert.file_url && (
-                          <a 
-                            href={cert.file_url} 
-                            target="_blank" 
-                            rel="noreferrer"
+                          <CertificateFileLink
+                            certificateId={cert.id}
                             className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
                             title="View Certificate"
                           >
                             <Eye className="w-4 h-4 text-white" />
-                          </a>
+                          </CertificateFileLink>
                         )}
                       </div>
                     </div>

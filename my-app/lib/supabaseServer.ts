@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest } from 'next/server';
 import { getServerEnv } from './envServer';
+import { authCookieOptions } from '../src/lib/supabase/cookieOptions';
 
 export async function createSupabaseServerClient() {
 	const cookieStore = await cookies();
@@ -19,6 +20,7 @@ export async function createSupabaseServerClient() {
 		supabaseUrl,
 		supabaseAnonKey,
 		{
+			cookieOptions: authCookieOptions(),
 			cookies: {
 				getAll() {
 					return cookieStore.getAll();

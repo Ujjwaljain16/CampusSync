@@ -6,6 +6,14 @@ A credential is a compact JWS (a JWT with a `vc` claim) signed by the issuer's k
 credential and the issuer's *public* keys, plus, for revocation, the issuer-signed status list. This document
 describes what exists, how to operate it, and where it falls short.
 
+> **State of the production deployment.** Live: credentials signed with an RS256 key from `VC_ISSUER_JWK`, issuer
+> `did:web:<host>`, `/.well-known/did.json`, `/.well-known/jwks.json`, public verification
+> (`GET /api/vcs/verify?vcId=urn:uuid:...`) and key rotation through `VC_ISSUER_PREVIOUS_PUBLIC_JWKS`.
+> Implemented and unit-tested but **off by default and not enabled in the production deployment**: the revocation
+> status list (`VC_STATUS_LIST_ENABLED`; its tables have not been created there, so credentials issued there carry no
+> `credentialStatus` entry). Revocation is checked against the server (`verifiable_credentials.status`). The sections
+> below say what to run to enable the optional part.
+
 > Wording: "inspired by" / "compatible with" below means *only* what the tests in `tests/vc` and `tests/verifier`
 > exercise. Nothing here has been run against a W3C or IETF conformance suite. See [Limitations](#limitations).
 
@@ -28,7 +36,7 @@ describes what exists, how to operate it, and where it falls short.
 | `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` | server | JSON array of **public** JWKs of rotated-out keys, so old credentials keep verifying. An entry containing any private member (`d`, `p`, `q`, `dp`, `dq`, `qi`, `k`, `oth`) is rejected, not stripped: verification, `/.well-known/jwks.json` and `/.well-known/did.json` then fail with a clear error (signing is unaffected). `alg` may be omitted for Ed25519 / P-256 / RSA keys. Unset or `[]` means no previous keys. |
 | `NEXT_PUBLIC_ISSUER_DID` | public | The issuer identifier, e.g. `did:web:university.example`. Written into every credential as `issuer`/`iss` and served as the DID document `id`. |
 | `NEXT_PUBLIC_ISSUER_VERIFICATION_METHOD` | public | **Legacy, no longer used for signing.** The proof's `verificationMethod` is now always `<NEXT_PUBLIC_ISSUER_DID>#<kid>` of the key that signed. |
-| `VC_STATUS_LIST_ENABLED` | server | `true` turns on the revocation status list (default off). Needs the draft migrations below. |
+| `VC_STATUS_LIST_ENABLED` | server | `true` turns on the revocation status list (default off; off in the production deployment). Needs the two optional migrations listed under "Storage" below. |
 | `VC_VALIDITY_DAYS` | server | Days a new credential stays valid (`exp`), default `730`. |
 | `NEXT_PUBLIC_BASE_URL` / `NEXT_PUBLIC_SITE_URL` | public | Public origin used to build status list URLs (falls back to a host-only `did:web` origin). |
 
@@ -86,6 +94,19 @@ How it works:
 7. **If the old key was compromised**, do the opposite of step 6: do **not** list it. Every credential it signed will fail with
    `unknown_key`, so re-issue the ones that must survive. Rotation cannot make a stolen key harmless while it stays listed.
 
+### Re-signing stored credentials
+
+Instead of waiting for old credentials to expire, a super admin can re-sign them with the current key and then remove the
+previous public key: `POST /api/admin/vcs/resign` (body `{ "dryRun": true | false, "limit": n }`; implemented in
+`src/lib/vcResign.ts`). It rebuilds each stored **active** credential unchanged (same id, subject and dates) and replaces
+only the proof; revoked and expired credentials are skipped, a second run changes nothing, and one audit row with counts
+is written. The full runbook (new key, previous key listed, dry run, real run, check, remove the previous key, plus the
+Supabase keys checklist) is in [KEY-ROTATION.md](./KEY-ROTATION.md). It re-signs the stored W3C credentials only, not
+SD-JWT credentials or earlier signed tree heads.
+
+> Any issuer key that was ever committed or shared must be replaced; see [SECURITY.md](../../SECURITY.md) and
+> [KEY-ROTATION.md](./KEY-ROTATION.md).
+
 ## did:web
 
 `GET /.well-known/did.json` serves a DID document for `NEXT_PUBLIC_ISSUER_DID` when it is a **host-only**
@@ -107,6 +128,15 @@ Not tested: resolution through an independent `did:web` resolver library.
 ## Revocation status list
 
 Enabled by `VC_STATUS_LIST_ENABLED=true`. Off by default; when off, nothing changes for issuance or verification.
+**Status: implemented and unit-tested, but not enabled in the production deployment** (`GET /api/status/revocation/...`
+answers 404 there and the `vc_status_lists` table has not been created).
+
+**To enable it:** apply `supabase/migrations/20261014_vc_status_lists.sql` and
+`supabase/migrations/20261014_vc_status_list_columns.sql` (both idempotent) in the Supabase SQL editor, set
+`VC_STATUS_LIST_ENABLED=true` in the host's environment (with `NEXT_PUBLIC_BASE_URL` or `NEXT_PUBLIC_SITE_URL` set to
+the public origin, since it is written into every status entry), redeploy, then issue a
+credential and check that its payload has a `credentialStatus` entry and that `/api/status/revocation/rev-1` returns a
+JWS. Credentials issued before that carry no entry.
 
 **Model** (`src/lib/statusList.ts`): a list is a fixed-size bitstring (131072 bits = 16 KiB). Each newly issued credential
 is allocated one index; the bit is `1` when revoked. Index 0 is the most significant bit of byte 0. The public
@@ -142,7 +172,8 @@ even if the flag has since been switched off.
 lookup error fails closed (`revocation_check_failed`); storage that is not installed (migration not applied) is treated
 as "bit not consulted" and the status column alone decides.
 
-**Storage** (draft migrations, review before applying, idempotent):
+**Storage** (optional migrations, idempotent, not applied in production; the other migrations and their status are in
+[DATABASE-SCHEMA.md](./DATABASE-SCHEMA.md), section "Migration status"):
 
 * `supabase/migrations/20261014_vc_status_lists.sql`: table `vc_status_lists` (RLS on, no policies, service role only) and
   SECURITY DEFINER functions `allocate_status_index(list_id)` (atomic `update ... where next_index < size returning`, creates
@@ -152,15 +183,16 @@ as "bit not consulted" and the status column alone decides.
 
 The application treats Postgres `42P01`, `42703`, `42883` and PostgREST `PGRST202`, `PGRST204`, `PGRST205` as "feature unavailable".
 
-The SQL has **not** been executed against a real PostgreSQL in this repository's tests (the tests use an in-memory fake that
-mirrors the documented semantics). Run the verification queries at the bottom of the migration after applying it.
+The SQL has **not** been executed against a real PostgreSQL in this repository's tests (the status-list tests use an
+in-memory fake that mirrors the documented semantics; the PostgreSQL model in `supabase/tests` covers the
+`20261015_*` cleanup only). Run the verification queries at the bottom of the migration after applying it.
 
 ## Offline verification
 
 ### Command line
 
 ```sh
-cd verifier && npm install
+(cd verifier && npm install)                                                 # from the repository root
 node verifier/bin/campussync-verify.mjs credential.json --issuer did:web:university.example
 node verifier/bin/campussync-verify.mjs credential.json --jwks jwks.json     # fully offline key material
 ```
@@ -210,14 +242,18 @@ What this is **not**, stated plainly:
   require a maximum age (`maxStatusListAgeSec`) but the issuer does not set an expiry on lists. The server caches a signed list
   for up to 60 s.
 * **Credentials issued without a status entry** (before the flag was enabled, or when allocation failed) cannot have their
-  revocation checked offline, only against the server (`/api/vcs/verify`).
+  revocation checked offline, only against the server (`/api/vcs/verify`). Until the status list is enabled in the
+  production deployment, that is every credential it issues.
 * **No holder binding / bearer credential.** Whoever holds the JWS can present it. It also exposes the student id,
-  title, institution and dates to every verifier (no selective disclosure).
+  title, institution and dates to every verifier (this format has no selective disclosure; the optional SD-JWT feature,
+  see [SELECTIVE-DISCLOSURE.md](./SELECTIVE-DISCLOSURE.md), is off by default and not enabled in production).
 * **Key compromise.** Rotation preserves old credentials by design; if a key is compromised, keeping it in
   `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` keeps its forgeries valid. Removing it invalidates everything it signed.
 * **Clocks.** Offline expiry checks use the verifier's clock (30 s tolerance).
-* **Operational:** the in-process rate limiter and status-list signature cache are per server instance. The draft SQL
-  needs review and a real database test before production. The development placeholder key never produces verifiable
-  credentials (and is refused in production).
+* **Operational:** the in-memory rate limiter and the status-list signature cache are per server instance (the public
+  verify endpoint additionally uses the Postgres-backed global limiter once its migration is applied, see
+  [RATE-LIMITING.md](./RATE-LIMITING.md); it fails open to the in-memory one). The optional
+  status-list SQL needs a test against a real database before it is enabled. The development placeholder key never
+  produces verifiable credentials (and is refused in production).
 * **Legacy field:** `NEXT_PUBLIC_ISSUER_VERIFICATION_METHOD` is ignored for new credentials; credentials issued before this
   change keep whatever `verificationMethod` they were stored with (the JWS, not that field, is what gets verified).

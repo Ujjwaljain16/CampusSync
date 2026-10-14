@@ -26,6 +26,7 @@ export const optionalEnvVars = [
   'VC_ISSUER_PREVIOUS_PUBLIC_JWKS', // Optional: JSON array of rotated-out PUBLIC issuer keys
   'VC_STATUS_LIST_ENABLED', // Optional: "true" enables the revocation status list (default off)
   'VC_VALIDITY_DAYS', // Optional: credential validity (default 730)
+  'ALERT_WEBHOOK_URL', // Optional: https chat webhook (Slack/Discord/JSON) for error alerts; no alerts without it
   'SMTP_HOST', // Optional email service
   'SMTP_PORT',
   'SMTP_USER',
@@ -101,6 +102,19 @@ export function validateServerEnv(): ValidationResult {
       }
     } catch {
       warnings.push('[WARNING] VC_ISSUER_JWK is not valid JSON');
+    }
+  }
+
+  // Optional alert webhook: only https URLs are used, anything else silently disables alerts
+  if (process.env.ALERT_WEBHOOK_URL) {
+    let https = false;
+    try {
+      https = new URL(process.env.ALERT_WEBHOOK_URL).protocol === 'https:';
+    } catch {
+      https = false;
+    }
+    if (!https) {
+      warnings.push('[WARNING] ALERT_WEBHOOK_URL is not a valid https URL; error alerts are disabled');
     }
   }
 

@@ -1,6 +1,8 @@
 # Selective disclosure (SD-JWT) for shared credentials
 
-Status: opt-in feature, off by default (`SD_JWT_ENABLED=true` to enable).
+Status: opt-in feature, implemented and unit-tested, off by default (`SD_JWT_ENABLED=true` to enable). It is **not
+enabled in the production deployment**: `/api/credentials/sd/*` answers 404 there and the optional accounting table
+`sd_issuances` has not been created. See [Configuration](#configuration) for what to run to enable it.
 
 **Honest scope statement.** The mechanism in `src/lib/sdjwt.ts` is *modelled on* the IETF draft
 "Selective Disclosure for JWTs (SD-JWT)" (`draft-ietf-oauth-selective-disclosure-jwt`) as understood by
@@ -104,7 +106,7 @@ Protected against:
   `oct` keys are never used as verification keys), `typ` allow-list, `kid` selection, `exp`/`nbf`.
 * **Server logs and proxies seeing the presentation on page load**: it lives in the URL fragment.
   (The verify page POSTs it to the verification endpoint, which neither stores nor logs it.)
-* **Enumeration/abuse**: both routes are rate limited (in-memory, per instance, best effort).
+* **Enumeration/abuse**: both routes are rate limited (the in-memory limiter plus the global limiter, scopes `sd-issue` and `sd-verify`).
 * **Issuance abuse**: only the certificate owner can mint an SD-JWT, only for a verified certificate in
   their organisation with an active credential.
 
@@ -137,6 +139,8 @@ Not protected against:
   future work.
 * **Decoys and the verify page**: the verify page lists the *standard* field names that were not disclosed;
   it cannot know whether optional fields (`degree_level`, `description`) exist.
+* **Verification uses the current issuer key only.** `/api/credentials/sd/verify` does not consult
+  `VC_ISSUER_PREVIOUS_PUBLIC_JWKS`, so a link issued before a key rotation stops verifying after it.
 * **Not a certified implementation** and not tested for interoperability with other SD-JWT software.
 * Rate limits are per server instance and in memory only.
 * Each "Create share link" action issues a fresh SD-JWT (new `jti` and salts). Disclosures are never
@@ -151,8 +155,14 @@ Not protected against:
 | `NEXT_PUBLIC_ISSUER_DID` | `did:web:example.org` | the `iss` of issued SD-JWTs; the verifier requires it to match |
 | `VC_ISSUER_JWK` | required | existing issuer private key (EdDSA / ES256 / RS256); never leaves the server |
 
-Optional DRAFT migration: `supabase/migrations/20261014_sd_issuances.sql` (accounting table; RLS on,
-no policies, service role only). The code works without it.
+Optional migration: `supabase/migrations/20261014_sd_issuances.sql` (accounting table; RLS on, no policies, service
+role only; not applied in production, see [DATABASE-SCHEMA.md](./DATABASE-SCHEMA.md) "Migration status"). The code works
+without it.
+
+**To enable the feature:** set `SD_JWT_ENABLED=true` in the host's environment and redeploy (the issuer key
+`VC_ISSUER_JWK` and `NEXT_PUBLIC_ISSUER_DID` must already be configured); optionally run the migration above in the
+Supabase SQL editor. Then sign in as a student with a verified certificate that has an active credential and open
+`/student/share`; recipients open the resulting `/verify/sd#...` link.
 
 ## API
 

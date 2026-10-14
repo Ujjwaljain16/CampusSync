@@ -12,6 +12,7 @@ import {
   writeAudit,
 } from '@/lib/api';
 import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
+import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
 import { getIssuerJwk } from '@/lib/vc';
 import { issueSdJwt } from '@/lib/sdjwt';
 import {
@@ -48,6 +49,8 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 
   const limited = enforceRateLimit(req, 'sd-issue', RateLimitPresets.standard, user.id);
   if (limited) return limited;
+  const globalLimited = await enforceGlobalRateLimit(req, 'sd-issue', { limit: 10, windowSeconds: 60 }, user.id);
+  if (globalLimited) return globalLimited;
 
   const body = (await req.json().catch(() => null)) as IssueBody | null;
   if (!body || typeof body !== 'object') return apiError.badRequest('Invalid JSON');

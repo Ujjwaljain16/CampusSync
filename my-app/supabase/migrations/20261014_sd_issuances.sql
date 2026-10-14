@@ -1,4 +1,4 @@
--- DRAFT - review before applying
+-- OPTIONAL module, NOT applied in production (feature is off by default). Idempotent. Needed only with SD_JWT_ENABLED=true.
 --
 -- Selective-disclosure (SD-JWT) issuance accounting. OPTIONAL: the application
 -- tolerates this table not existing (undefined-table errors 42P01 / PGRST205 are

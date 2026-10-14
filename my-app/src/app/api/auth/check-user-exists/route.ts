@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
 import { createClient } from '@supabase/supabase-js';
 import { findAuthUserByEmail } from '@/lib/auth/findUserByEmail';
 
@@ -7,6 +8,8 @@ export async function POST(request: NextRequest) {
   // Account-enumeration surface: keep it tightly rate limited
   const limited = enforceRateLimit(request, 'check-user-exists', { interval: 60 * 1000, uniqueTokenPerInterval: 10 });
   if (limited) return limited;
+  const globalLimited = await enforceGlobalRateLimit(request, 'check-user-exists', { limit: 10, windowSeconds: 60 });
+  if (globalLimited) return globalLimited;
 
   try {
     const { email } = await request.json();

@@ -1,4 +1,4 @@
--- DRAFT - review against the live schema before applying; idempotent
+-- Note only (no required effect). Idempotent.
 -- (comment-only file: it changes nothing)
 --
 -- The table `public.revocation_list` DOES NOT EXIST in the production database.

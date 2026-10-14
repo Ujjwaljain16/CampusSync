@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
 import { findAuthUserByEmail } from '@/lib/auth/findUserByEmail';
 
 /**
@@ -13,6 +14,8 @@ export async function POST(request: NextRequest) {
   // Sends email: prevent abuse as a mail-bomb / enumeration vector
   const limited = enforceRateLimit(request, 'resend-confirmation', { interval: 10 * 60 * 1000, uniqueTokenPerInterval: 5 });
   if (limited) return limited;
+  const globalLimited = await enforceGlobalRateLimit(request, 'resend-confirmation', { limit: 5, windowSeconds: 10 * 60 });
+  if (globalLimited) return globalLimited;
 
   try {
     const body = await request.json();
@@ -33,6 +36,13 @@ export async function POST(request: NextRequest) {
       email.trim().toLowerCase()
     );
     if (perEmailLimited) return perEmailLimited;
+    const perEmailGlobalLimited = await enforceGlobalRateLimit(
+      request,
+      'resend-confirmation-email',
+      { limit: 3, windowSeconds: 10 * 60 },
+      email.trim().toLowerCase()
+    );
+    if (perEmailGlobalLimited) return perEmailGlobalLimited;
 
     const adminClient = await createSupabaseAdminClient();
 

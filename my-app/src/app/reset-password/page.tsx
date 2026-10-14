@@ -4,7 +4,8 @@ import React, { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { emitAuthEvent } from "@/lib/authEvents";
+import { validateNewPassword } from "@/lib/auth/passwordRules";
 import { Lock, Eye, EyeOff, ArrowRight, CheckCircle } from "lucide-react";
 import {
   FormField,
@@ -25,18 +26,20 @@ export default function ResetPasswordPage() {
   const [isValidating, setIsValidating] = useState(true);
   const [sessionEstablished, setSessionEstablished] = useState(false);
 
-  // Check for recovery token and establish session.
+  // Make sure a recovery session exists (it lives in HttpOnly cookies; this page never sees it).
   //
-  // SECURITY: only the `token_hash` + verifyOtp (PKCE-style) flow is supported.
-  // A legacy branch that called setSession() with whatever `#access_token` /
-  // `#refresh_token` was present in the URL has been removed: a crafted link
-  // could otherwise swap the visitor's session for an attacker's, after which
-  // the visitor would set a password on the attacker's account.
+  // Two ways to arrive:
+  //  - from the email link `/reset-password?token_hash=...&type=recovery`: the token is posted to the server,
+  //    which exchanges it and sets the session cookies;
+  //  - via /api/auth/callback (PKCE code), which already exchanged the code and set the cookies before
+  //    redirecting here: the server is asked whether a session exists.
+  //
+  // SECURITY: a legacy branch that adopted whatever `#access_token` / `#refresh_token` was present in the
+  // URL has been removed: a crafted link could otherwise swap the visitor's session for an attacker's,
+  // after which the visitor would set a password on the attacker's account.
   // Never log URLs, hashes or tokens here.
   useEffect(() => {
     const handlePasswordReset = async () => {
-      const supabase = createClient();
-
       try {
         const params = new URLSearchParams(window.location.search);
 
@@ -59,56 +62,46 @@ export default function ResetPasswordPage() {
           return;
         }
 
-        // Exchange the single-use token_hash for a recovery session
+        // Exchange the single-use token_hash for a recovery session (done by the server)
         const tokenHash = params.get('token_hash');
         const type = params.get('type');
 
         if (tokenHash && type === 'recovery') {
-          try {
-            const { data, error: verifyError } = await supabase.auth.verifyOtp({
-              token_hash: tokenHash,
-              type: 'recovery',
-            });
+          const response = await fetch('/api/auth/password-reset/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token_hash: tokenHash, type: 'recovery' }),
+          });
 
-            if (verifyError) {
-              console.error('[Reset Password] Failed to verify OTP:', verifyError.message);
-              setError('Invalid or expired reset link. Please request a new one.');
-              setIsValidating(false);
-              return;
-            }
+          // Remove the one-time token from the address bar either way
+          window.history.replaceState(null, '', window.location.pathname);
 
-            if (data?.session) {
-              // Remove the one-time token from the address bar
-              window.history.replaceState(null, '', window.location.pathname);
-              setSessionEstablished(true);
-              setIsValidating(false);
-              return;
-            }
-          } catch (err) {
-            console.error('[Reset Password] Exception during OTP verification:', err instanceof Error ? err.message : 'unknown');
-            setError('Failed to verify reset link. Please try again.');
+          if (!response.ok) {
+            const result = (await response.json().catch(() => ({}))) as { error?: string };
+            setError(result.error || 'Invalid or expired reset link. Please request a new one.');
             setIsValidating(false);
             return;
           }
-        }
 
-        // Otherwise accept a recovery session that was already established (e.g. by /auth/confirm)
-        const { data: { session: existingSession }, error: sessionError } = await supabase.auth.getSession();
-
-        if (sessionError) {
-          console.error('[Reset Password] Session error:', sessionError.message);
-          setError('Failed to verify reset link. Please request a new one.');
-          setIsValidating(false);
-          return;
-        }
-
-        if (existingSession) {
           setSessionEstablished(true);
           setIsValidating(false);
           return;
         }
 
-        setError('Could not establish session. Link may be expired or invalid. Please request a new password reset.');
+        // Otherwise accept a recovery session that was already established (e.g. by /api/auth/callback)
+        const sessionResponse = await fetch('/api/auth/me', { cache: 'no-store' });
+
+        if (sessionResponse.ok) {
+          setSessionEstablished(true);
+          setIsValidating(false);
+          return;
+        }
+
+        if (sessionResponse.status === 401) {
+          setError('Could not establish session. Link may be expired or invalid. Please request a new password reset.');
+        } else {
+          setError('Failed to verify reset link. Please request a new one.');
+        }
         setIsValidating(false);
 
       } catch (err) {
@@ -125,9 +118,10 @@ export default function ResetPasswordPage() {
     event.preventDefault();
     setError(null);
 
-    // Validation
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters long");
+    // Validation (same rules the server applies)
+    const passwordProblem = validateNewPassword(password);
+    if (passwordProblem) {
+      setError(passwordProblem);
       return;
     }
 
@@ -139,29 +133,21 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      const supabase = createClient();
-
-      // Verify we still have a valid session
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-      if (sessionError || !session) {
-        throw new Error('Session lost. Please try again or request a new password reset link.');
-      }
-
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: password,
+      // The server checks the recovery session, sets the password and ends every session
+      const response = await fetch('/api/auth/password-reset/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
       });
 
-      if (updateError) {
-        console.error('[Reset Password] Update error:', updateError.message);
-        throw updateError;
+      if (!response.ok) {
+        const result = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(result.error || 'Failed to reset password');
       }
 
       setSuccess(true);
-      
-      // Sign out after password reset for security
-      await supabase.auth.signOut();
-      
+      emitAuthEvent('logout');
+
       // Redirect to login after 2 seconds
       setTimeout(() => {
         router.push('/login?message=Password reset successful. Please login with your new password.');

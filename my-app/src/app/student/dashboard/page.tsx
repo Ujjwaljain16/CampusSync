@@ -5,6 +5,7 @@ import { CheckCircle, Clock, AlertCircle, Eye, Trash2, User2, Edit3, Building, C
 import LogoutButton from '../../../components/LogoutButton';
 import { toast } from '@/components/ui/toast';
 import { apiFetchJson, ApiError } from '@/lib/apiClient';
+import { CertificateFileLink } from '@/components/CertificateFileLink';
 
 interface Row {
   id: string;
@@ -551,15 +552,13 @@ export default function StudentDashboard() {
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-2">
                           {row.file_url && (
-                            <a
-                              href={row.file_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <CertificateFileLink
+                              certificateId={row.id}
                               className="p-2 text-blue-300 hover:text-blue-200 hover:bg-blue-500/20 rounded-lg transition-all duration-300 border border-transparent hover:border-blue-400/30 hover:scale-110"
                               title="View Certificate"
                             >
                               <Eye className="w-4 h-4" />
-                            </a>
+                            </CertificateFileLink>
                           )}
                           {row.verification_status === 'verified' && (
                             <a href={`/student/share?cert=${encodeURIComponent(row.id)}`} className="px-2 py-1 text-xs text-emerald-300 hover:text-emerald-200 underline" title="Share selected claims of this credential">Share</a>

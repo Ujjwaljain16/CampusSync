@@ -3,7 +3,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 
 const MIG = new URL('../migrations/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-const FILES = ['00_preflight', '01_expand', '02_integrity', '03_indexes', '04_policies_safe', '05_lock_audit_writes', '06_credentials_service_only', '07_default_pending', '08_contract'].map((n) => `${MIG}20261015_${n}.sql`);
+const FILES = ['00_preflight', '01_expand', '02_integrity', '03_indexes', '04_policies_safe', '05_lock_audit_writes', '06_credentials_service_only', '07_default_pending', '08_contract'].map((n) => `${MIG}20261015_${n}.sql`).concat(`${MIG}20261016_02_rate_limits.sql`);
 const LIVE = readFileSync(new URL('./live-schema.sql', import.meta.url), 'utf8');
 
 const OWNER = '00000000-0000-4000-8000-00000000a001';
@@ -24,11 +24,11 @@ export default async function ({ db, as, q, check, expectError }) {
 
   console.log('\n[final shape]');
   const tables = await names(`select table_name as n from information_schema.tables where table_schema = 'public' and table_type in ('BASE TABLE') `);
-  check('exactly the 13 intended tables remain', same(tables, ['allowed_domains', 'audit_logs', 'certificates', 'organization_domains', 'organizations', 'profiles', 'recruiter_contacts', 'recruiter_favorites', 'recruiter_pipeline', 'role_requests', 'trusted_issuers', 'user_roles', 'verifiable_credentials']), JSON.stringify(tables));
+  check('exactly the 14 intended tables remain (13 + rate_limits)', same(tables, ['allowed_domains', 'audit_logs', 'certificates', 'organization_domains', 'organizations', 'profiles', 'rate_limits', 'recruiter_contacts', 'recruiter_favorites', 'recruiter_pipeline', 'role_requests', 'trusted_issuers', 'user_roles', 'verifiable_credentials']), JSON.stringify(tables));
   const fns = await names(`select p.proname as n from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname <> 'uuid_generate_v4'`);   // uuid_generate_v4 is a shim of the test model
   check('exactly the intended functions remain (27 legacy ones gone)', same(fns, [
     'authz_actor_rank', 'authz_has_role_row', 'authz_is_super_admin', 'authz_role_rank', 'check_and_reserve_slug', 'generate_organization_slug',
-    'get_user_org_id', 'is_org_admin_no_rls', 'is_super_admin_no_rls', 'transfer_primary_admin',
+    'get_user_org_id', 'is_org_admin_no_rls', 'is_super_admin_no_rls', 'rate_limit_hit', 'transfer_primary_admin',
     'audit_logs_immutable', 'auto_designate_first_org_admin', 'certificates_before_write', 'guard_last_org_admin', 'guard_last_super_admin', 'organizations_guard',
     'profiles_guard', 'protect_primary_admin', 'set_updated_at', 'sync_org_domains', 'sync_org_primary_admin',
     'update_organizations_updated_at', 'update_recruiter_pipeline_updated_at', 'vc_before_write']), JSON.stringify(fns));
@@ -111,6 +111,91 @@ export default async function ({ db, as, q, check, expectError }) {
     check('assigning the first admin role works', true);
   });
   await expectError('the last super admin is still protected', () => db.exec(`delete from public.user_roles where user_id = '${OWNER}'`), /last super admin/);
+
+  console.log('\n[global rate limiter: rate_limits + rate_limit_hit]');
+  {
+    const hit = async (d, key, windowSeconds, limit) =>
+      (await d.query('select * from public.rate_limit_hit($1, $2, $3)', [key, windowSeconds, limit])).rows[0];
+    const asService = (fn) => as(STU1, fn, 'service_role');
+
+    const [{ rls, nPolicies }] = await q(`select c.relrowsecurity as rls, (select count(*)::int from pg_policies where tablename = 'rate_limits') as "nPolicies"
+                                          from pg_class c where c.oid = 'public.rate_limits'::regclass`);
+    check('RLS is enabled on rate_limits and it has no policies', rls === true && nPolicies === 0, `rls=${rls} policies=${nPolicies}`);
+    const [fn] = await q(`select prosecdef, proconfig from pg_proc where proname = 'rate_limit_hit'`);
+    check('rate_limit_hit is SECURITY DEFINER with a pinned search_path', fn.prosecdef === true && /search_path=public, pg_temp/.test((fn.proconfig ?? []).join(';')), JSON.stringify(fn));
+
+    // counter and flip to blocked
+    const rows = await asService(async (d) => {
+      const out = [];
+      for (let i = 0; i < 5; i++) out.push(await hit(d, 'k-flip', 3600, 3));
+      return out;
+    });
+    check('the counter increments on every call (remaining 2,1,0,0,0)', JSON.stringify(rows.map((r) => r.remaining)) === '[2,1,0,0,0]', JSON.stringify(rows));
+    check('allowed is true up to the limit and false after it', JSON.stringify(rows.map((r) => r.allowed)) === '[true,true,true,false,false]', JSON.stringify(rows));
+    check('reset_at is the end of the current window (in the future, within the window)', rows.every((r) => {
+      const ms = new Date(r.reset_at).getTime() - Date.now();
+      return ms > 0 && ms <= 3600 * 1000 + 1000;
+    }));
+
+    // keys are independent
+    await asService(async (d) => {
+      await hit(d, 'k-a', 60, 1);
+      const a2 = await hit(d, 'k-a', 60, 1);
+      const b1 = await hit(d, 'k-b', 60, 1);
+      check('another key has its own counter', a2.allowed === false && b1.allowed === true);
+    });
+
+    // a new window starts again at 1 and leaves the old window alone
+    await tx(async () => {
+      await db.exec(`insert into public.rate_limits (key, window_start, count) values ('k-win', to_timestamp(floor(extract(epoch from now()) / 60) * 60) - interval '60 seconds', 99)`);
+      const r = await hit(db, 'k-win', 60, 5);
+      const n = await q(`select count(*)::int as n from public.rate_limits where key = 'k-win'`);
+      const prev = await q(`select count from public.rate_limits where key = 'k-win' order by window_start limit 1`);
+      check('a new window resets the counter to 1 (old window untouched)', r.allowed === true && r.remaining === 4 && n[0].n === 2 && prev[0].count === 99, JSON.stringify([r, n, prev]));
+    });
+
+    // privileges
+    for (const role of ['anon', 'authenticated']) {
+      await expectError(`${role} cannot read the table`, () => as(STU1, (d) => d.query('select * from public.rate_limits'), role), /permission denied/);
+      await expectError(`${role} cannot insert into the table`, () => as(STU1, (d) => d.exec(`insert into public.rate_limits (key, window_start, count) values ('x', now(), 1)`), role), /permission denied/);
+      await expectError(`${role} cannot update the table`, () => as(STU1, (d) => d.exec('update public.rate_limits set count = 0'), role), /permission denied/);
+      await expectError(`${role} cannot delete from the table`, () => as(STU1, (d) => d.exec('delete from public.rate_limits'), role), /permission denied/);
+      await expectError(`${role} cannot execute rate_limit_hit`, () => as(STU1, (d) => hit(d, 'x', 60, 1), role), /permission denied for function/);
+    }
+    const [priv] = await q(`select has_function_privilege('service_role', 'public.rate_limit_hit(text, integer, integer)', 'execute') as svc,
+                                   has_function_privilege('public', 'public.rate_limit_hit(text, integer, integer)', 'execute') as pub`);
+    check('only the service role can execute rate_limit_hit', priv.svc === true && priv.pub === false);
+
+    // argument validation
+    const bad = [
+      ['empty key', ['', 60, 1]], ['null key', [null, 60, 1]], ['key over 200 characters', ['k'.repeat(201), 60, 1]],
+      ['window 0', ['k', 0, 1]], ['window over a day', ['k', 86401, 1]], ['null window', ['k', null, 1]],
+      ['limit 0', ['k', 60, 0]], ['limit over 100000', ['k', 60, 100001]], ['null limit', ['k', 60, null]],
+    ];
+    for (const [name, args] of bad) {
+      await expectError(`bad argument rejected: ${name}`, () => asService((d) => hit(d, ...args)), /rate_limit_hit:/);
+    }
+    await asService(async (d) => {
+      const edge = await hit(d, 'k'.repeat(200), 86400, 100000);
+      check('boundary arguments (200 chars, 86400 s, 100000) are accepted', edge.allowed === true && edge.remaining === 99999);
+    });
+
+    // cleanup of expired windows
+    await tx(async () => {
+      await db.exec(`insert into public.rate_limits (key, window_start, count)
+                     select 'old-' || g, now() - interval '2 days', 1 from generate_series(1, 30) g`);
+      await db.exec(`insert into public.rate_limits (key, window_start, count) values ('recent', now() - interval '2 hours', 1)`);
+      await hit(db, 'trigger', 60, 5);
+      const [{ n: afterOne }] = await q(`select count(*)::int as n from public.rate_limits where key like 'old-%'`);
+      check('one call removes a small batch (20) of expired windows, not all of them', afterOne === 10, `left ${afterOne}`);
+      await hit(db, 'trigger', 60, 5);
+      await hit(db, 'trigger', 60, 5);
+      const [{ n: afterAll }] = await q(`select count(*)::int as n from public.rate_limits where key like 'old-%'`);
+      check('further calls finish the cleanup', afterAll === 0, `left ${afterAll}`);
+      const [{ n: kept }] = await q(`select count(*)::int as n from public.rate_limits where key in ('recent', 'trigger')`);
+      check('windows younger than a day and the live counter are kept', kept === 2);
+    });
+  }
 
   console.log('\n[contract-step guard: refuses to drop a table that holds data]');
   {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
 import {
   extractDomain,
   domainMatchesAllowedList,
@@ -21,6 +22,8 @@ import {
 export async function POST(request: NextRequest) {
   const limited = enforceRateLimit(request, 'validate-email', { interval: 60 * 1000, uniqueTokenPerInterval: 20 });
   if (limited) return limited;
+  const globalLimited = await enforceGlobalRateLimit(request, 'validate-email', { limit: 20, windowSeconds: 60 });
+  if (globalLimited) return globalLimited;
 
   try {
     const { email } = await request.json();

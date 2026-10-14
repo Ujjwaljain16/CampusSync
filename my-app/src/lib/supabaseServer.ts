@@ -6,6 +6,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import type { User } from '@supabase/supabase-js'
+import { authCookieOptions } from '@/lib/supabase/cookieOptions'
 import { isApprovedRow, isKnownRole, pickHighestRow, type RoleRow } from '@/lib/api/utils/roles'
 
 /**
@@ -19,6 +20,8 @@ export async function createSupabaseServerClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // Session cookies are HttpOnly: the browser never reads them (see docs/SESSION-COOKIES.md)
+      cookieOptions: authCookieOptions(),
       cookies: {
         getAll() {
           return cookieStore.getAll()
