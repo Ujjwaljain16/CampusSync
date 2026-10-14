@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
+import { CertificateFileLink } from '@/components/CertificateFileLink';
 
 interface FlaggedCert {
   id: string;
@@ -207,7 +208,7 @@ export default function FacultyFlaggedPage() {
                         );
                       })() : <span className="text-white/50">-</span>}
                     </td>
-                    <td className="p-3">{r.file_url ? <a className="text-blue-300 underline" href={r.file_url} target="_blank" rel="noreferrer">View</a> : <span className="text-white/50">-</span>}</td>
+                    <td className="p-3">{r.file_url ? <CertificateFileLink certificateId={r.id} className="text-blue-300 underline">View</CertificateFileLink> : <span className="text-white/50">-</span>}</td>
                     <td className="p-3">
                       <div className="flex gap-2">
                         <button disabled={actioning} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-emerald-700 transition-all disabled:opacity-50" onClick={() => approveOne(r)}>Approve</button>

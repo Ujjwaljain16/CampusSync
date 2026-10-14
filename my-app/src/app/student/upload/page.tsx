@@ -61,6 +61,17 @@ export default function StudentUploadPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const uid = useId();
+  // The bucket is private: the preview is a local object URL of the selected file, never the storage URL
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
   // Submit-once guard: set synchronously so a double click cannot create two certificates
   const savingRef = useRef(false);
   const savedRef = useRef(false);
@@ -587,8 +598,9 @@ export default function StudentUploadPage() {
                     </div>
                     <div className="flex-1">
                       <p className="text-white font-semibold mb-1">Certificate uploaded successfully</p>
+                      {previewUrl && (
                       <a 
-                        href={publicUrl} 
+                        href={previewUrl} 
                         target="_blank" 
                         rel="noreferrer"
                         className="inline-flex items-center gap-2 text-blue-300 hover:text-blue-200 text-sm font-medium underline underline-offset-2 decoration-wavy decoration-blue-400/30 transition-colors group"
@@ -596,6 +608,7 @@ export default function StudentUploadPage() {
                         <span>View original file</span>
                         <Eye className="w-4 h-4 group-hover:scale-110 transition-transform" />
                       </a>
+                      )}
                     </div>
                   </div>
                 </div>
