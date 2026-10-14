@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { withRole } from '@/lib/api';
+import { getIssuerPublicJwk } from '@/lib/vc';
 
 /**
  * Detailed diagnostics (memory, env var names, table health). Not available in
@@ -74,6 +75,21 @@ const detailedHealth = withRole(['super_admin'], async () => {
     health.checks.environment = {
       status: missingEnvVars.length === 0 ? 'healthy' : 'unhealthy',
       missing_variables: missingEnvVars
+    };
+
+    // Optional integrations: booleans only, never values. The issuer key id (kid) is public.
+    let issuerKeyId: string | null = null;
+    try {
+      issuerKeyId = (await getIssuerPublicJwk()).kid ?? null;
+    } catch {
+      issuerKeyId = null;
+    }
+    health.checks.configuration = {
+      status: 'healthy',
+      alertWebhookConfigured: !!process.env.ALERT_WEBHOOK_URL,
+      geminiApiKeyConfigured: !!process.env.GEMINI_API_KEY,
+      vcIssuerJwkConfigured: !!process.env.VC_ISSUER_JWK,
+      issuerKeyId
     };
 
     // System resource checks
