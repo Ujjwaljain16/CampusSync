@@ -1,6 +1,6 @@
 # Migration tests
 
-Runs the schema-cleanup migrations (`../migrations/20261015_*.sql`) against a **model of the production database** in an
+Runs the schema-cleanup migrations (`../migrations/20261015_*.sql`) and the rate-limit migration (`20261016_02_rate_limits.sql`) against a **model of the production database** in an
 in-process PostgreSQL 18 ([PGlite](https://pglite.dev)) and asserts what they are meant to guarantee. No server, Docker or
 Supabase project is needed.
 
