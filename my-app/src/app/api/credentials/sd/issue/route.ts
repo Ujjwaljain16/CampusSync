@@ -9,6 +9,7 @@ import {
   isValidUUID,
   getOrganizationContext,
   getTargetOrganizationIds,
+  writeAudit,
 } from '@/lib/api';
 import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
 import { getIssuerJwk } from '@/lib/vc';
@@ -92,10 +93,10 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
   const admin = await createSupabaseAdminClient();
   const { data: vcRows, error: vcErr } = await admin
     .from('verifiable_credentials')
-    .select('id, status')
+    .select('id, status, organization_id')
+    .eq('certificate_id', cert.id)
     .eq('student_id', user.id)
     .eq('status', 'active')
-    .contains('credential', { credentialSubject: { certificateId: cert.id } })
     .order('issuance_date', { ascending: false })
     .limit(1);
   if (vcErr) {
@@ -156,18 +157,14 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
     /* accounting is best-effort */
   }
 
-  try {
-    await supabase.from('audit_logs').insert({
-      actor_id: user.id,
-      action: 'issue_sd_jwt',
-      entity_type: 'verifiable_credential',
-      entity_id: vcRow.id,
-      details: { sd_jti: issued.jti, certificateId: cert.id },
-      created_at: now,
-    });
-  } catch {
-    /* audit is best-effort */
-  }
+  await writeAudit(admin, {
+    actorId: user.id,
+    organizationId: vcRow.organization_id ?? cert.organization_id ?? null,
+    action: 'issue_sd_jwt',
+    targetType: 'credential',
+    targetId: vcRow.id,
+    details: { sd_jti: issued.jti, certificateId: cert.id },
+  });
 
   const res = success(
     {

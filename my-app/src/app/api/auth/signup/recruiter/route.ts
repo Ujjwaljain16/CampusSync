@@ -196,16 +196,19 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Create profile ONLY for new users (don't overwrite existing profile!)
+      // Create the profile ONLY for new users (never overwrite an existing user's profile).
+      // upsert, not insert: the auth.users signup trigger may already have created the row.
+      // No role column on profiles: the recruiter role lives in user_roles.
       const { error: profileError } = await adminClient
         .from('profiles')
-        .insert({
+        .upsert({
           id: userId,
           email,
           full_name,
-          role: 'recruiter',
+          company_name: String(company_name).trim(),
+          phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
           organization_id: null // No default org
-        });
+        }, { onConflict: 'id' });
 
       if (profileError) {
         console.error('[RECRUITER_SIGNUP] Profile creation failed:', profileError.message);

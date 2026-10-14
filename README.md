@@ -158,7 +158,6 @@ Key internal documentation that explains the app flows, DB query patterns, error
 
 ### **Cryptography & Security**
 - **VC Signing**: JWS via the JOSE library; the algorithm is set by the `alg` of the `VC_ISSUER_JWK` key you provide (RS256/RSA-2048 in the key tooling), not Ed25519
-- **Webhooks**: HMAC-SHA256 signature verification (`WEBHOOK_SECRET`)
 - **Key Management**: The issuer key is supplied through the `VC_ISSUER_JWK` environment variable; rotation is manual
 
 ### **Storage & CDN**
@@ -179,7 +178,7 @@ Key internal documentation that explains the app flows, DB query patterns, error
 ### 🔐 **Multi-Organization Management**
 - **Data Isolation**: `organization_id` filtering in API queries, backed by RLS in Supabase (verify your policies; see security notes)
 - **Org Admin Controls**: Primary admin designation, role delegation, member management
-- **Recruiter Access Model**: Cross-org recruitment with granular permissions via `recruiter_org_access` table
+- **Recruiter Access Model**: Cross-org recruitment: one approved `user_roles` row per organization the recruiter may access
 
 ### 🧠 **AI-Powered Certificate Verification**
 - **Gemini Vision Extraction**: Uploaded certificate images/PDFs are sent to Google Gemini, which returns title, institution, recipient, date and description. Extraction is not guaranteed accurate; a faculty member reviews every certificate
@@ -194,7 +193,7 @@ Key internal documentation that explains the app flows, DB query patterns, error
 ### 💼 **Recruiter Portal**
 - **Verified Talent Pool**: Browse students with cryptographically verified credentials
 - **Search**: Filter students by institution, skills and verification status
-- **Multi-Org Recruitment**: Access to multiple organization talent pools (permission-based, via `recruiter_org_access`)
+- **Multi-Org Recruitment**: Access to multiple organization talent pools (permission-based, via per-organization `user_roles` rows)
 - **Real-time**: Supabase realtime is used for approval-status updates on the waiting pages (`/waiting`, `/faculty/waiting`, `/recruiter/waiting`) and in the faculty approval manager component
 
 ### 🛡️ **Enterprise Security**

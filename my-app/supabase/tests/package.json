@@ -1,0 +1,12 @@
+{
+  "name": "campussync-migration-tests",
+  "private": true,
+  "type": "module",
+  "description": "Runs the SQL migrations against a model of the production schema in an in-process PostgreSQL (PGlite).",
+  "scripts": {
+    "test": "node run-all.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.10"
+  }
+}

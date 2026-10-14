@@ -5,8 +5,8 @@ import { RateLimitPresets } from '@/lib/rateLimit';
 import { recruiterRoute } from '@/lib/privacy/recruiterAccess';
 
 /**
- * Audit actions that are actually written for recruiter verification work
- * (see /api/recruiter/verify-certificate).
+ * Audit actions that count as recruiter verification work. (The route that wrote
+ * `recruiter_certificate_verification` was removed; nothing writes it today.)
  */
 const VERIFICATION_ACTIONS = ['recruiter_certificate_verification'];
 
@@ -51,7 +51,7 @@ export const GET = recruiterRoute(
         .from('audit_logs')
         .select('action, created_at, target_id, details, organization_id')
         .in('organization_id', orgIds)
-        .eq('user_id', user.id)
+        .eq('actor_id', user.id)
         .in('action', VERIFICATION_ACTIONS)
         .order('created_at', { ascending: false })
         .limit(10);

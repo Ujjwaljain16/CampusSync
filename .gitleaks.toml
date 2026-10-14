@@ -13,5 +13,7 @@ regexes = [
   # Obvious placeholder values used in docs / templates
   '''your[-_](supabase|gemini|openai|anthropic|smtp|api)[-_a-z]*''',
   '''replace-me''',
+  # Migration file names listed in supabase/tests/assert-final.mjs ("07_default_pending" trips generic-api-key)
+  '''[0-9]{2}_default_pending''',
   '''generate-a-long-random-string''',
 ]

@@ -84,7 +84,8 @@ describe('POST /api/profile/complete validation', () => {
     const year = new Date().getFullYear() + 10;
     const res = await post({ full_name: ' Asha ', gpa: '9.5', graduation_year: String(year), university: 'Uni', major: 'CS', location: 'Pune' });
     expect(res.status).toBe(200);
-    expect(payloads[0]).toMatchObject({ full_name: 'Asha', gpa: 9.5, graduation_year: year, university: 'Uni', major: 'CS', location: 'Pune', role: 'student', organization_id: ORG_A });
+    expect(payloads[0]).toMatchObject({ full_name: 'Asha', gpa: 9.5, graduation_year: year, university: 'Uni', major: 'CS', location: 'Pune', organization_id: ORG_A });
+    expect(payloads[0]).not.toHaveProperty('role');
     expect(Number.isNaN(payloads[0].gpa)).toBe(false);
     expect((await post({ full_name: 'A', gpa: 0, graduation_year: 1950 })).status).toBe(200);
     expect((await post({ full_name: 'A', gpa: 10 })).status).toBe(200);
@@ -93,13 +94,13 @@ describe('POST /api/profile/complete validation', () => {
   it('whitelists fields: role / organisation / id in the body are ignored', async () => {
     const { payloads } = setup();
     await post({ full_name: 'A', role: 'super_admin', organization_id: 'evil', id: 'someone-else', email: 'x@y.z', is_admin: true });
-    expect(Object.keys(payloads[0]).sort()).toEqual(['full_name', 'id', 'organization_id', 'role']);
-    expect(payloads[0].role).toBe('student');
+    expect(Object.keys(payloads[0]).sort()).toEqual(['full_name', 'id', 'organization_id']);
+    expect(payloads[0]).not.toHaveProperty('role');
     expect(payloads[0].organization_id).toBe(ORG_A);
     expect(payloads[0].id).not.toBe('someone-else');
   });
 
-  it("does not overwrite profiles.role when the caller's highest role is not student", async () => {
+  it('never writes profiles.role, whatever roles the caller holds', async () => {
     const { payloads } = setup({
       roles: [
         { role: 'student', organization_id: ORG_A, approval_status: 'approved' },

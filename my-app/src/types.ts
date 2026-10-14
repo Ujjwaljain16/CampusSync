@@ -36,10 +36,10 @@ export interface User {
   role: string;
 }
 
+// Mirrors the profiles table. There is no role column: roles live in user_roles.
 export interface Profile {
   id: string;
   full_name: string;
-  role: string;
   organization_id: string;
   created_at: string;
 }
@@ -58,7 +58,6 @@ export interface Organization {
   branding: OrganizationBranding;
   settings: OrganizationSettings;
   subscription: OrganizationSubscription;
-  usage_stats: OrganizationUsageStats;
   is_active: boolean;
   is_verified: boolean;
   verified_at?: string;
@@ -112,14 +111,6 @@ export interface OrganizationSubscription {
   started_at?: string;
   expires_at?: string;
   trial_ends_at?: string;
-}
-
-export interface OrganizationUsageStats {
-  total_users: number;
-  total_documents: number;
-  total_storage_bytes: number;
-  monthly_api_calls: number;
-  last_calculated_at?: string;
 }
 
 export interface UserWithOrganization extends User {

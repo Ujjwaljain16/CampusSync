@@ -218,9 +218,9 @@ export async function addOrgAdmin(admin: Db, p: AddOrgAdminParams): Promise<Outc
   };
 
   if (isNewUser) {
-    // profiles.role has a check constraint that does not accept 'org_admin'
+    // No role on the profile: profiles has no role column, the role lives in user_roles
     const { error: profileError } = await admin.from('profiles').upsert(
-      { id: userId, email, full_name: p.fullName, role: 'admin', organization_id: p.orgId },
+      { id: userId, email, full_name: p.fullName, organization_id: p.orgId },
       { onConflict: 'id' }
     );
     if (profileError) {

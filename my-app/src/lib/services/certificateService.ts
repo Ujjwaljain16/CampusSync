@@ -19,6 +19,7 @@ import { signCredential } from '@/lib/vc';
 import { allocateStatusEntry, markCredentialsRevoked, recordStatusColumns, type StatusListDb } from '@/lib/statusList';
 import { getIssuerDID } from '@/lib/envValidator';
 import { logger } from '@/lib/logger';
+import { writeAudit as writeAuditRow } from '@/lib/api/utils/audit';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,21 +127,15 @@ export async function resolveActor(db: SupabaseClient, userId: string): Promise<
 }
 
 // ---------------------------------------------------------------------------
-// Status columns / privileged writer
+// Privileged writer
 // ---------------------------------------------------------------------------
 
 /**
- * `certificates` has two CHECK-constrained status columns that must stay in sync:
- * verification_status (pending|verified|rejected) and status (pending|approved|rejected).
- */
-export function legacyStatusFor(s: CertificateStatus): 'pending' | 'approved' | 'rejected' {
-  return s === 'verified' ? 'approved' : s;
-}
-
-/**
  * Service-role client used for writes AFTER app-level authorization (the user-session
- * client is subject to RLS, which has no DELETE policy on certificates, makes
- * credential updates staff-only and does not cover super_admin on certificates).
+ * client is subject to RLS, which has no DELETE policy on certificates, and
+ * verifiable_credentials rows are written by the backend only).
+ * `certificates.verification_status` is the only status column; the legacy `status`
+ * mirror is gone and must not be read or written.
  */
 export async function getPrivilegedDb(): Promise<SupabaseClient> {
   const { createSupabaseAdminClient } = await import('@/lib/supabaseServer');
@@ -209,24 +204,19 @@ export interface AuditEntry {
 }
 
 /**
- * Insert an audit row using the column set shared by the certificate routes
- * (`actor_id, organization_id, action, target_id, details, created_at`).
- * Errors are logged, never thrown.
+ * Record an audit row for a certificate (`target_type` 'certificate', `target_id` the
+ * certificate id) through the shared audit writer (`@/lib/api/utils/audit`), which
+ * writes with the service role. Errors are logged there, never thrown.
  */
 export async function writeAudit(db: SupabaseClient, entry: AuditEntry): Promise<void> {
-  try {
-    const { error } = await db.from('audit_logs').insert({
-      actor_id: entry.actorId,
-      organization_id: entry.organizationId,
-      action: entry.action,
-      target_id: entry.targetId,
-      details: entry.details ?? {},
-      created_at: new Date().toISOString(),
-    });
-    if (error) logger.error('[certificateService] Audit log insert failed', error);
-  } catch (e) {
-    logger.error('[certificateService] Audit log insert threw', e);
-  }
+  await writeAuditRow(db, {
+    actorId: entry.actorId,
+    organizationId: entry.organizationId,
+    action: entry.action,
+    targetType: 'certificate',
+    targetId: entry.targetId,
+    details: entry.details,
+  });
 }
 
 export interface ReviewNotification {
@@ -279,8 +269,9 @@ export interface RevokeResult {
 
 /**
  * Revoke ALL active credentials issued for a certificate (no `.single()`).
- * Credentials are matched on `credential.credentialSubject.certificateId` (the
- * issue route stores no separate certificate_id column).
+ * Credentials are matched on the `certificate_id` column. `db` MUST be the
+ * service-role client: credential rows are written by the backend only, and every
+ * caller has already authorized the actor.
  */
 export async function revokeAllCredentialsForCertificate(
   db: SupabaseClient,
@@ -292,8 +283,8 @@ export async function revokeAllCredentialsForCertificate(
     db
       .from('verifiable_credentials')
       .update(values)
+      .eq('certificate_id', certificateId)
       .eq('status', 'active')
-      .contains('credential', { credentialSubject: { certificateId } })
       .select('id, credential');
 
   let { data, error } = await run({ status: 'revoked', revoked_at: now, revoked_reason: reason });
@@ -337,7 +328,6 @@ export interface ApplyParams {
   action: CertificateAction;
   actor: Actor;
   notes?: string;
-  metadataId?: string;
   /** 'batch' records batch_approve / batch_reject audit actions. */
   source?: 'single' | 'batch';
   notify?: Notifier;
@@ -372,7 +362,7 @@ export async function applyCertificateTransition(db: SupabaseClient, params: App
 
   const { data: cert, error: readErr } = await db
     .from('certificates')
-    .select('id, student_id, organization_id, verification_status, status, faculty_id, title, institution')
+    .select('id, student_id, organization_id, verification_status, faculty_id, title, institution')
     .eq('id', certificateId)
     .maybeSingle();
 
@@ -402,8 +392,9 @@ export async function applyCertificateTransition(db: SupabaseClient, params: App
     .from('certificates')
     .update({
       verification_status: decision.to,
-      status: legacyStatusFor(decision.to),
       faculty_id: reviewed ? actor.id : null,
+      // every approval through this service is a human review
+      ...(decision.to === 'verified' ? { verification_method: 'manual' } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq('id', certificateId)
@@ -433,12 +424,11 @@ export async function applyCertificateTransition(db: SupabaseClient, params: App
     );
     if (!revoke.ok) {
       // Compensate: never leave a non-verified certificate with live credentials.
-      const prev = cert as { status?: string | null; faculty_id?: string | null };
+      const prev = cert as { faculty_id?: string | null };
       const { data: restored, error: restoreErr } = await writer
         .from('certificates')
         .update({
           verification_status: decision.from,
-          status: prev.status ?? legacyStatusFor(decision.from),
           faculty_id: prev.faculty_id ?? null,
           updated_at: new Date().toISOString(),
         })
@@ -456,15 +446,6 @@ export async function applyCertificateTransition(db: SupabaseClient, params: App
     revokedCount = revoke.count;
   }
 
-  if (decision.to === 'verified' && typeof params.metadataId === 'string') {
-    const { error: metaErr } = await writer
-      .from('certificate_metadata')
-      .update({ verification_method: 'manual' })
-      .eq('id', params.metadataId)
-      .eq('certificate_id', certificateId);
-    if (metaErr) logger.error('[certificateService] Failed to update certificate metadata', metaErr);
-  }
-
   await writeAudit(db, {
     actorId: actor.id,
     organizationId: (cert as CertificateSnapshot).organization_id,
@@ -472,7 +453,6 @@ export async function applyCertificateTransition(db: SupabaseClient, params: App
     targetId: certificateId,
     details: {
       reason: params.notes ?? null,
-      metadataId: params.metadataId ?? null,
       previous_status: decision.from,
       new_status: decision.to,
       revoked_credentials: revokedCount,
@@ -547,12 +527,16 @@ export async function issueCredentialForCertificate(
     return { ok: false, status: 403, code: 'forbidden', error: 'Forbidden to issue for another user' };
   }
 
+  // Credential rows are written by the backend only: from here on every credential read and
+  // write uses the service-role client (authorization above already used the caller's client).
+  const writer = params.writeDb ?? (await getPrivilegedDb());
+
   const findActive = async () => {
-    const { data: rows, error } = await db
+    const { data: rows, error } = await writer
       .from('verifiable_credentials')
       .select('id, credential, created_at')
+      .eq('certificate_id', certificateId)
       .eq('status', 'active')
-      .contains('credential', { credentialSubject: { certificateId } })
       .order('created_at', { ascending: true });
     return { rows: (rows ?? []) as Array<{ id: string; credential: Record<string, unknown>; created_at?: string }>, error };
   };
@@ -591,9 +575,11 @@ export async function issueCredentialForCertificate(
   });
 
   const now = new Date().toISOString();
-  const { error: insertErr } = await db.from('verifiable_credentials').insert({
+  const { error: insertErr } = await writer.from('verifiable_credentials').insert({
     id: vc.id,
     student_id: cert.student_id, // the certificate owner, not the issuing actor
+    certificate_id: cert.id,
+    organization_id: cert.organization_id,
     issuer: vc.issuer,
     issuance_date: vc.issuanceDate,
     credential: vc,
@@ -601,6 +587,14 @@ export async function issueCredentialForCertificate(
     created_at: now,
   });
   if (insertErr) {
+    // 23505: a concurrent request already issued the one active credential of this certificate
+    // (partial unique index). Return that credential instead of failing.
+    if ((insertErr as { code?: string }).code === '23505') {
+      const winner = await findActive();
+      if (!winner.error && winner.rows.length > 0) {
+        return { ok: true, vc: { ...winner.rows[0].credential, id: winner.rows[0].id }, reused: true };
+      }
+    }
     logger.error('[certificateService] Failed to store credential', insertErr);
     return { ok: false, status: 500, code: 'db_error', error: 'Failed to store credential' };
   }
@@ -614,7 +608,6 @@ export async function issueCredentialForCertificate(
     );
     const winner = sorted[0];
     if (winner.id !== vc.id) {
-      const writer = params.writeDb ?? (await getPrivilegedDb());
       const { error: dupErr } = await writer
         .from('verifiable_credentials')
         .update({ status: 'revoked', revoked_at: now, revoked_reason: 'Duplicate issuance' })

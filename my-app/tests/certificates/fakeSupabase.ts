@@ -15,13 +15,23 @@ export interface FakeDb {
   log: string[];
   /** Inserted rows per table (in order). */
   inserts: Record<string, Row[]>;
-  /** `${op}:${table}` -> error message to return instead of performing the operation. */
-  errors: Record<string, string>;
+  /** `${op}:${table}` -> error (message, or {message, code}) to return instead of performing the operation. */
+  errors: Record<string, string | { message: string; code?: string }>;
+  /** Every write (insert / update / delete) with the client that issued it ('user' or 'admin'). */
+  writes: Array<{ client: string; op: 'insert' | 'update' | 'delete'; table: string; values?: Row }>;
+  /**
+   * Model of the one-active-credential-per-certificate partial unique index: inserting a second
+   * ACTIVE verifiable_credentials row for the same certificate_id fails with 23505.
+   */
+  uniqueActiveCredential: boolean;
   /** `${op}:${table}` -> perform no change and return zero rows (simulated RLS). */
   rlsBlocked: Set<string>;
   storageRemoved: string[];
   user: { id: string } | null;
+  /** The signed-in user's client (subject to RLS in production). */
   client: any;
+  /** The service-role client over the same data. */
+  adminClient: any;
 }
 
 function jsonContains(haystack: any, needle: any): boolean {
@@ -38,10 +48,13 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     log: [],
     inserts: {},
     errors: {},
+    writes: [],
+    uniqueActiveCredential: false,
     rlsBlocked: new Set(),
     storageRemoved: [],
     user: null,
     client: null,
+    adminClient: null,
   };
 
   class Query implements PromiseLike<any> {
@@ -53,7 +66,7 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     private limitN: number | null = null;
     private mode: 'many' | 'single' | 'maybe' = 'many';
 
-    constructor(private table: string) {}
+    constructor(private table: string, private label: string) {}
 
     select() {
       if (this.op !== 'select') this.returning = true;
@@ -92,11 +105,29 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     private execute() {
       const key = `${this.op}:${this.table}`;
       db.log.push(key);
-      if (db.errors[key]) return { data: null, error: { message: db.errors[key] } };
+      if (this.op !== 'select') {
+        db.writes.push({ client: this.label, op: this.op, table: this.table, values: this.op === 'delete' ? undefined : this.values });
+      }
+      const injected = db.errors[key];
+      if (injected) return { data: null, error: typeof injected === 'string' ? { message: injected } : { ...injected } };
       const rows = (db.tables[this.table] ??= []);
 
       if (this.op === 'insert') {
         const list = Array.isArray(this.values) ? this.values : [this.values];
+        if (db.uniqueActiveCredential && this.table === 'verifiable_credentials') {
+          const clash = list.some(
+            v =>
+              v.status === 'active' &&
+              v.certificate_id != null &&
+              rows.some(r => r.status === 'active' && r.certificate_id === v.certificate_id)
+          );
+          if (clash) {
+            return {
+              data: null,
+              error: { code: '23505', message: 'duplicate key value violates unique constraint "verifiable_credentials_one_active_per_certificate"' },
+            };
+          }
+        }
         (db.inserts[this.table] ??= []).push(...list.map(v => ({ ...v })));
         rows.push(...list.map(v => ({ ...v })));
         return this.returning ? this.shape(list.map(v => ({ ...v }))) : { data: null, error: null };
@@ -121,8 +152,8 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     }
   }
 
-  db.client = {
-    from: (table: string) => new Query(table),
+  const makeClient = (label: string) => ({
+    from: (table: string) => new Query(table, label),
     auth: {
       getUser: async () => ({
         data: { user: db.user },
@@ -138,7 +169,9 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
         },
       }),
     },
-  };
+  });
+  db.client = makeClient('user');
+  db.adminClient = makeClient('admin');
   return db;
 }
 

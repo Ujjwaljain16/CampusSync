@@ -120,7 +120,7 @@ describe('recruiter search-students', () => {
     await get('?q=asha');
     const audits = admin.callsFor('audit_logs');
     expect(audits).toHaveLength(1);
-    expect(audits[0].payload).toMatchObject({ user_id: userId, organization_id: ORG_A, action: 'recruiter_search_students' });
+    expect(audits[0].payload).toMatchObject({ actor_id: userId, organization_id: ORG_A, action: 'recruiter_search_students', target_type: 'student' });
   });
 
   it('POST: non-array / mistyped bodies are 400, never 500', async () => {

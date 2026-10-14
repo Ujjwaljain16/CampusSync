@@ -140,9 +140,10 @@ describe('GET /api/recruiter/student/[studentId]', () => {
     expect(audits).toHaveLength(1);
     expect(audits[0].action).toBe('insert');
     expect(audits[0].payload).toMatchObject({
-      user_id: userId,
+      actor_id: userId,
       organization_id: ORG_A,
       action: 'recruiter_view_student',
+      target_type: 'student',
       target_id: STUDENT_1,
     });
   });

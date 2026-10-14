@@ -12,7 +12,6 @@ interface ApproveBody {
   certificateId: string;
   /** 'verified' | 'rejected' (legacy 'approved' is accepted and mapped to 'verified'). */
   status: string;
-  metadataId?: string;
   notes?: string;
   approveReason?: string;
   rejectReason?: string;
@@ -42,7 +41,6 @@ export const POST = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], a
     action: target === 'verified' ? 'approve' : 'reject',
     actor,
     notes,
-    metadataId: typeof body.metadataId === 'string' ? body.metadataId : undefined,
   });
 
   if (!outcome.ok) {

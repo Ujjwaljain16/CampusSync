@@ -16,22 +16,10 @@ import { isPlainObject } from '@/lib/privacy/sanitize';
  *         Responds { ok: true, data: { ... }, warnings? }.
  */
 
-const ROLE_HIERARCHY = ['super_admin', 'org_admin', 'admin', 'faculty', 'recruiter', 'student'];
 const MAX_TEXT = 200;
 const MAX_NAME = 120;
 
 type RoleRow = { role: string | null; organization_id: string | null; approval_status?: string | null };
-
-function highestRole(rows: RoleRow[]): string {
-  let best: string | null = null;
-  for (const row of rows) {
-    if (!row.role) continue;
-    const idx = ROLE_HIERARCHY.indexOf(row.role);
-    if (idx === -1) continue;
-    if (best === null || idx < ROLE_HIERARCHY.indexOf(best)) best = row.role;
-  }
-  return best ?? 'student';
-}
 
 function optionalText(value: unknown, field: string): { value?: string; error?: string } {
   if (value === undefined || value === null || value === '') return {};
@@ -137,8 +125,8 @@ export async function POST(request: NextRequest) {
     const limited = enforceRateLimit(request, 'profile-complete-write', RateLimitPresets.standard, user.id);
     if (limited) return limited;
 
-    // Roles (a user may hold several): used for the organisation and to avoid
-    // clobbering profiles.role of staff accounts.
+    // Roles (a user may hold several): used only to find the organisation. profiles has no role column;
+    // authorization comes from user_roles alone.
     const { data: roleData, error: roleError } = await supabase
       .from('user_roles')
       .select('role, organization_id, approval_status')
@@ -149,11 +137,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unable to verify account' }, { status: 500 });
     }
     const roles = (roleData ?? []) as RoleRow[];
-    const isStudent = highestRole(roles) === 'student';
     const orgRow = roles.find((r) => r.role === 'student' && r.organization_id) ?? roles.find((r) => r.organization_id);
 
     const core: Record<string, unknown> = { id: user.id, full_name: full_name.trim() };
-    if (isStudent) core.role = 'student'; // never overwrite faculty/admin/recruiter profile roles
     if (orgRow?.organization_id) core.organization_id = orgRow.organization_id;
     if (university.value) core.university = university.value;
     if (major.value) core.major = major.value;

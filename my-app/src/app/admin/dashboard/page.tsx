@@ -11,7 +11,6 @@ interface UserWithRole {
   user_id: string;
   organization_id?: string | null;
   role: string;
-  is_super_admin?: boolean;
   is_primary_admin?: boolean;
   created_at: string;
   updated_at: string;
@@ -22,6 +21,9 @@ interface UserWithRole {
     full_name?: string | null;
   } | null;
 }
+
+// Derived from the role itself: user_roles carries no separate super-admin flag any more
+const isSuperAdminRole = (u: { role: string }) => u.role === 'super_admin';
 
 export default function AdminDashboardPage() {
   const [users, setUsers] = useState<UserWithRole[]>([]);
@@ -430,9 +432,9 @@ export default function AdminDashboardPage() {
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex items-center gap-2">
-                        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border backdrop-blur-sm ${getRoleColor(user.role, user.is_super_admin)}`}>
-                          {getRoleIcon(user.role, user.is_super_admin)}
-                          {getRoleDisplayName(user.role, user.is_super_admin)}
+                        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border backdrop-blur-sm ${getRoleColor(user.role, isSuperAdminRole(user))}`}>
+                          {getRoleIcon(user.role, isSuperAdminRole(user))}
+                          {getRoleDisplayName(user.role, isSuperAdminRole(user))}
                         </div>
                       </div>
                     </td>
@@ -453,7 +455,7 @@ export default function AdminDashboardPage() {
                           </div>
                         )}
                         {/* Show action buttons only if not current user, not primary admin, and not super admin */}
-                        {user.user_id !== currentUserId && !user.is_primary_admin && !user.is_super_admin && (
+                        {user.user_id !== currentUserId && !user.is_primary_admin && !isSuperAdminRole(user) && (
                           <>
                             {user.role !== 'admin' && (
                               <button
@@ -493,13 +495,13 @@ export default function AdminDashboardPage() {
                             )}
                           </>
                         )}
-                        {user.is_super_admin && (
+                        {isSuperAdminRole(user) && (
                           <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/30 text-yellow-300 rounded-xl text-sm font-semibold opacity-75 cursor-not-allowed backdrop-blur-sm">
                             <Lock className="w-4 h-4" />
                             Protected
                           </div>
                         )}
-                        {user.role !== 'student' && !user.is_super_admin && !user.is_primary_admin && user.user_id !== currentUserId && (
+                        {user.role !== 'student' && !isSuperAdminRole(user) && !user.is_primary_admin && user.user_id !== currentUserId && (
                           <button
                             onClick={() => removeUserRole(user)}
                             disabled={actioning === user.user_id}

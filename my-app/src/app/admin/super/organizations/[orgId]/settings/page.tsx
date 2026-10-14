@@ -104,7 +104,7 @@ export default function OrganizationSettingsPage() {
 
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this organization? This action cannot be undone!')) return;
-    if (!confirm('ALL DATA including users, certificates, and documents will be permanently deleted. Continue?')) return;
+    if (!confirm('ALL DATA including users and certificates will be permanently deleted. Continue?')) return;
 
     try {
       const res = await fetch(`/api/v2/admin/super/organizations/${orgId}`, {

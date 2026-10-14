@@ -47,7 +47,7 @@ Key points:
 | `withAuth(handler)` | `src/lib/api/middleware/auth.ts` | 401 when `auth.getUser()` fails. |
 | `withRole(roles, handler)` | same | 403 unless `requireRole(roles)` succeeds. |
 | `requireRole(roles)` | `src/lib/supabaseServer.ts` | Uses the user's highest-priority role across all organizations; rows with `approval_status` `pending`/`denied` are refused. |
-| `getOrganizationContext(user, orgId?)` | `src/lib/api/utils/organization.ts` | Resolves the organization (header `X-Organization-ID` / body `organization_id`, verified against `user_roles`); super admins may pick any, recruiters get their approved `recruiter_org_access` set. |
+| `getOrganizationContext(user, orgId?)` | `src/lib/api/utils/organization.ts` | Resolves the organization (header `X-Organization-ID` / body `organization_id`, verified against `user_roles`); super admins may pick any, recruiters get their approved per-organization `user_roles` set. |
 
 Roles (6): `student`, `faculty`, `admin`, `recruiter`, `org_admin`, `super_admin`.
 
@@ -74,7 +74,6 @@ applying). What the owner observed in production:
 
 - Public endpoints that are expensive or sensitive use the in-memory limiter in `src/lib/rateLimit.ts`
   (per instance; not a distributed limit).
-- Webhooks (`/api/webhooks/verification`) verify an HMAC-SHA256 signature with `WEBHOOK_SECRET`.
 - Redirect targets after login are validated by `src/lib/safeRedirect.ts`.
 - Credentials are signed with the key in `VC_ISSUER_JWK`; see SECURITY.md for rotation.
 

@@ -22,14 +22,16 @@ It prompts for email, password (min 8 chars), full name and optional phone, then
 
 - creates (or finds) the Supabase Auth user;
 - writes a `profiles` row and a `user_roles` row with role `super_admin`;
-- writes an entry to `super_admin_audit`.
+- writes an `audit_logs` entry (`superadmin_created` / `superadmin_upgraded`, target type `user`); a failed audit
+  insert is only a warning.
 
 Notes:
 
 - Existing users: if the email already exists the script offers to upgrade that user. The password is not changed.
 - A super admin can act across all organizations through the application's API routes (they check the role),
   and, because of how the service-role key is used by those routes, across all data.
-- The script requires the tables `profiles`, `user_roles` and `super_admin_audit` to exist. The schema is not
+- The script requires the tables `profiles`, `user_roles` and `audit_logs` to exist (it no longer uses `super_admin_audit`
+  or `profiles.role`). The schema is not
   in this repository; see `supabase/migrations/` for the draft/lockdown SQL that does exist.
 - Use a different super admin per environment and rotate/remove accounts you no longer need.
 

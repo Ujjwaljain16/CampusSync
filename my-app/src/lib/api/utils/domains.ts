@@ -74,8 +74,10 @@ type Db = Pick<SupabaseClient, 'from'>;
 
 /**
  * Domains claimed by organizations OTHER than `orgId`, from both stores:
- *  - allowed_domains (organization_id, domain)
- *  - organizations.settings.allowed_email_domains
+ *  - organization_domains (organization_id, domain): the authoritative table
+ *  - organizations.settings.allowed_email_domains: still read by the signup flow;
+ *    a database trigger mirrors it into the table, reading it here as well also
+ *    covers the window before that trigger/table exists in an environment.
  * Must be called with a client that can see every tenant (service role).
  */
 export async function getDomainsClaimedByOthers(
@@ -85,7 +87,7 @@ export async function getDomainsClaimedByOthers(
   const claimed: Array<{ domain: string; organization_id: string }> = [];
 
   const { data: rows, error } = await db
-    .from('allowed_domains')
+    .from('organization_domains')
     .select('domain, organization_id')
     .neq('organization_id', orgId);
   if (error) throw new Error(`domain lookup failed: ${error.message}`);
@@ -122,4 +124,81 @@ export async function findDomainConflict(
     if (others.some((o) => domainsOverlap(candidate, o.domain))) return { domain: candidate };
   }
   return null;
+}
+
+/** Postgres unique_violation (a domain already claimed by another organization). */
+export function isUniqueViolation(err: { code?: string } | null | undefined): boolean {
+  return err?.code === '23505';
+}
+
+/** Domains of one organization, from organization_domains, sorted. */
+export async function listOrgDomains(
+  db: Db,
+  orgId: string
+): Promise<{ rows: Array<{ id: string; domain: string; created_at: string | null }>; error: unknown }> {
+  const { data, error } = await db
+    .from('organization_domains')
+    .select('id, domain, created_at')
+    .eq('organization_id', orgId)
+    .order('domain', { ascending: true });
+  return {
+    rows: (data ?? []) as Array<{ id: string; domain: string; created_at: string | null }>,
+    error,
+  };
+}
+
+/**
+ * Rewrite organizations.settings.allowed_email_domains from the organization_domains
+ * table (merge: every other settings key is kept). The signup flow still reads this
+ * JSON; the database trigger then sees identical content and does nothing.
+ * Returns false when anything fails; the caller must then undo its table change.
+ */
+export async function syncOrgDomainSetting(db: Db, orgId: string): Promise<boolean> {
+  try {
+    const { rows, error } = await listOrgDomains(db, orgId);
+    if (error) {
+      console.error('Domain setting sync: reading organization_domains failed:', error);
+      return false;
+    }
+    const { data: org, error: fetchError } = await db
+      .from('organizations')
+      .select('settings')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (fetchError || !org) {
+      console.error('Domain setting sync: loading organization failed:', fetchError);
+      return false;
+    }
+    const current = (org as { settings?: Record<string, unknown> | null }).settings;
+    const settings = {
+      ...(current && typeof current === 'object' && !Array.isArray(current) ? current : {}),
+      allowed_email_domains: rows.map((r) => r.domain),
+    };
+    const { error: updateError } = await db.from('organizations').update({ settings }).eq('id', orgId);
+    if (updateError) {
+      console.error('Domain setting sync: updating organization failed:', updateError);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Domain setting sync failed:', err);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Global educational suffix list (allowed_domains): not organization data.
+// ---------------------------------------------------------------------------
+
+const SUFFIX_RE = /^\.?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
+
+/** Validate a global suffix entry: ".edu", "ac.in" or a plain domain; lowercase, at most 100 chars. */
+export function validateGlobalSuffix(input: unknown): DomainCheck {
+  if (typeof input !== 'string') return { ok: false, error: 'Domain must be a string' };
+  const domain = input.trim().toLowerCase();
+  if (!domain || domain.length > 100) return { ok: false, error: 'Suffix must be 1 to 100 characters' };
+  if (!SUFFIX_RE.test(domain)) {
+    return { ok: false, error: 'Suffix must be a plain domain or start with a single dot (for example ".edu" or "ac.in")' };
+  }
+  return { ok: true, domain, wildcard: false };
 }

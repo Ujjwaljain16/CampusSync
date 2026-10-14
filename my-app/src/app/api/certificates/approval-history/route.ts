@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { withRole, success, apiError } from '@/lib/api';
+import { withRole, success, apiError, resolveAdminOrg, rankOf } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export const GET = withRole(['faculty', 'admin'], async (req: NextRequest, { user }) => {
@@ -9,19 +9,12 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest, { use
   const limit = parseInt(url.searchParams.get('limit') || '20');
   const offset = (page - 1) * limit;
 
-  // Get user's organization
-  const { data: userRole } = await supabase
-    .from('user_roles')
-    .select('organization_id')
-    .eq('user_id', user.id)
-    .single();
+  // Resolve the organization from the caller's APPROVED roles (a user may hold several rows).
+  const requestedOrg = req.headers.get('X-Organization-ID') || url.searchParams.get('organization_id');
+  const scope = await resolveAdminOrg(user, requestedOrg, 'faculty');
+  const organizationId = scope.organizationId;
 
-  if (!userRole?.organization_id) {
-    console.error('[Approval History API] User organization not found for user:', user.id);
-    throw apiError.forbidden('User organization not found');
-  }
-
-  console.log('[Approval History API] Fetching history for org:', userRole.organization_id, 'page:', page, 'limit:', limit);
+  console.log('[Approval History API] Fetching history for org:', organizationId, 'page:', page, 'limit:', limit);
 
   // Get approval history filtered by organization
   const { data: approvals, error: approvalsError } = await supabase
@@ -29,14 +22,14 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest, { use
     .select(`
       id,
       actor_id,
-      target_user_id,
       action,
+      target_type,
       target_id,
       details,
       created_at,
       organization_id
     `)
-    .eq('organization_id', userRole.organization_id)
+    .eq('organization_id', organizationId)
     .in('action', ['manual_approve', 'manual_reject', 'batch_approve', 'batch_reject'])
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
@@ -93,7 +86,7 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest, { use
   const { count, error: countError } = await supabase
     .from('audit_logs')
     .select('*', { count: 'exact', head: true })
-    .eq('organization_id', userRole.organization_id)
+    .eq('organization_id', organizationId)
     .in('action', ['manual_approve', 'manual_reject', 'batch_approve', 'batch_reject']);
 
   if (countError) {
@@ -104,12 +97,22 @@ export const GET = withRole(['faculty', 'admin'], async (req: NextRequest, { use
   const approverIds = [...new Set(
     approvals?.map(a => a.actor_id).filter(Boolean) || []
   )];
-  const { data: users } = await supabase
-    .from('user_roles')
-    .select('user_id, role')
-    .in('user_id', approverIds);
+  // An approver may hold several rows; only approved ones in this organization (or platform level) count,
+  // and the highest-privilege one is shown.
+  const { data: users } = approverIds.length
+    ? await supabase
+        .from('user_roles')
+        .select('user_id, role, organization_id')
+        .eq('approval_status', 'approved')
+        .in('user_id', approverIds)
+    : { data: [] as Array<{ user_id: string; role: string; organization_id: string | null }> };
 
-  const userMap = new Map(users?.map(u => [u.user_id, u.role]) || []);
+  const userMap = new Map<string, string>();
+  for (const u of users ?? []) {
+    if (u.organization_id !== null && u.organization_id !== organizationId) continue;
+    const current = userMap.get(u.user_id);
+    if (!current || rankOf(u.role) > rankOf(current)) userMap.set(u.user_id, u.role);
+  }
 
   // Format the response
   const formattedApprovals = approvals?.map(approval => {

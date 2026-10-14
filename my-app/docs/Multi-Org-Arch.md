@@ -10,8 +10,8 @@ graph TD
     OA[org_admin / admin] -->|manages| O1
     F[faculty] -->|reviews certificates of| O1
     S[student] -->|owns certificates in| O1
-    R[recruiter<br/>user_roles.organization_id = NULL] -->|recruiter_org_access approved| O1
-    R -->|recruiter_org_access approved| O2
+    R[recruiter] -->|approved user_roles row| O1
+    R -->|approved user_roles row| O2
 ```
 
 ## Data model (as used by the code)
@@ -20,10 +20,17 @@ graph TD
 - `user_roles (user_id, role, organization_id, approval_status)`: one row per user per organization (unique on
   `(user_id, organization_id)`). `super_admin` and `recruiter` rows have `organization_id = NULL`. A user can hold
   roles in several organizations.
-- `recruiter_org_access (recruiter_id, organization_id, status)`: a recruiter must request access to each
+- A recruiter needs one approved `user_roles` row per organization (`role = 'recruiter'`): they must request access to each
   organization (`/api/recruiter/request-access`); an org admin approves or revokes
   (`/api/admin/org/access-requests`, `/api/admin/org/revoke-access`).
-- Tenant-owned data (`certificates`, `documents`, `audit_logs`, ...) carries `organization_id`.
+- Tenant-owned data (`certificates`, `audit_logs`, ...) carries `organization_id`.
+- `organization_domains (organization_id, domain, created_by)`: the domains an organization claims, `UNIQUE(domain)`.
+  `/api/admin/domains` and `/api/admin/organizations/[orgId]/domains` manage it; every write also rewrites
+  `settings.allowed_email_domains` (merge) because sign-up still reads that JSON, and a database trigger keeps the
+  two in sync (a domain claimed by another organization is rejected with 409). Wildcard overlaps (`*.x.edu` vs
+  `a.x.edu`) are checked in the application before the insert.
+- `allowed_domains`: the GLOBAL list of educational suffixes (`.edu`, `ac.in`), not organization data. Managed by
+  super admins only through `/api/admin/domains?scope=global`.
 - Sign-up for students/faculty requires an email domain listed in the organization's `settings.allowed_email_domains`;
   students are approved automatically, faculty become `pending` until an admin approves. Recruiters sign up with any
   email and need platform approval, then per-organization access.

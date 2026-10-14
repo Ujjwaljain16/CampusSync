@@ -12,13 +12,14 @@ const h = vi.hoisted(() => ({
   sendApproved: vi.fn(),
   sendRejected: vi.fn(),
   signed: [] as any[],
+  audits: [] as Array<{ client: any; entry: any }>,
 }));
 
 vi.mock('@/lib/supabaseServer', () => ({
   createSupabaseServerClient: async () => h.db.client,
   // service-role client: same in-memory DB, plus auth.admin
   createSupabaseAdminClient: async () => ({
-    ...h.db.client,
+    ...h.db.adminClient,
     auth: {
       admin: {
         getUserById: async () => ({
@@ -34,6 +35,14 @@ vi.mock('@/lib/supabaseServer', () => ({
     return allowed.includes(h.role)
       ? { user, role: h.role, authorized: true }
       : { user, role: h.role, authorized: false, message: 'Access denied' };
+  },
+}));
+
+// Record audit writes: the canonical entry shape is asserted here, the column mapping is the writer's job.
+vi.mock('@/lib/api/utils/audit', () => ({
+  writeAudit: async (client: any, entry: any) => {
+    h.audits.push({ client, entry });
+    return true;
   },
 }));
 
@@ -94,7 +103,6 @@ const cert = (over: Row = {}): Row => ({
   student_id: STUDENT,
   organization_id: ORG,
   verification_status: 'pending',
-  status: 'pending',
   faculty_id: null,
   title: 'Cloud 101',
   institution: 'MIT',
@@ -107,6 +115,8 @@ const cert = (over: Row = {}): Row => ({
 const vcRow = (id: string, certId: string, status = 'active', created = '2025-01-01T00:00:00.000Z'): Row => ({
   id,
   student_id: STUDENT,
+  certificate_id: certId,
+  organization_id: ORG,
   status,
   created_at: created,
   credential: { id, credentialSubject: { id: STUDENT, certificateId: certId } },
@@ -140,6 +150,7 @@ const json = async (res: Response) => ({ status: res.status, body: await res.jso
 beforeEach(() => {
   h.vcCounter = 0;
   h.signed = [];
+  h.audits = [];
   h.sendApproved.mockResolvedValue(true);
   h.sendRejected.mockResolvedValue(true);
   process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL;
@@ -151,6 +162,8 @@ beforeEach(() => {
 
 const certStatus = (id = CERT) => db.tables.certificates.find(c => c.id === id)?.verification_status;
 const vcStatuses = () => db.tables.verifiable_credentials.map(v => v.status);
+const writesTo = (table: string) => db.writes.filter(w => w.table === table);
+const auditEntries = () => h.audits.map(a => a.entry);
 
 // ===========================================================================
 describe('POST /api/certificates/approve', () => {
@@ -160,17 +173,38 @@ describe('POST /api/certificates/approve', () => {
     expect(status).toBe(200);
     expect(body.data).toMatchObject({ certificateId: CERT, status: 'verified' });
     expect(certStatus()).toBe('verified');
-    // both CHECK-constrained status columns stay consistent; reviewer recorded
-    expect(db.tables.certificates[0]).toMatchObject({ status: 'approved', faculty_id: FACULTY });
+    // reviewer recorded; verification_status is the only status column (no legacy `status`)
+    expect(db.tables.certificates[0]).toMatchObject({ verification_status: 'verified', faculty_id: FACULTY });
     expect(h.sendApproved).toHaveBeenCalledTimes(1);
     expect(h.sendRejected).not.toHaveBeenCalled();
-    expect(db.inserts.audit_logs).toHaveLength(1);
-    expect(db.inserts.audit_logs[0]).toMatchObject({
-      actor_id: FACULTY,
-      organization_id: ORG,
+    expect(auditEntries()).toHaveLength(1);
+    expect(auditEntries()[0]).toMatchObject({
+      actorId: FACULTY,
+      organizationId: ORG,
       action: 'manual_approve',
-      target_id: CERT,
+      targetType: 'certificate',
+      targetId: CERT,
     });
+  });
+
+  it('never writes the legacy status column, and records a manual verification_method', async () => {
+    asFaculty();
+    await approvePOST(req('POST', '/x', { certificateId: CERT, status: 'verified' }));
+    const certWrites = writesTo('certificates');
+    expect(certWrites.length).toBeGreaterThan(0);
+    for (const w of certWrites) expect(w.values).not.toHaveProperty('status');
+    expect(db.tables.certificates[0]).not.toHaveProperty('status');
+    expect(db.tables.certificates[0]).toMatchObject({ verification_method: 'manual' });
+  });
+
+  it('ignores a legacy metadataId and never touches certificate_metadata', async () => {
+    asFaculty();
+    const { status } = await json(
+      await approvePOST(req('POST', '/x', { certificateId: CERT, status: 'verified', metadataId: 'm1' }))
+    );
+    expect(status).toBe(200);
+    expect(db.log.filter(l => l.endsWith(':certificate_metadata'))).toEqual([]);
+    expect(auditEntries()[0].details).not.toHaveProperty('metadataId');
   });
 
   it('accepts the legacy "approved" status and writes "verified"', async () => {
@@ -193,7 +227,7 @@ describe('POST /api/certificates/approve', () => {
     const second = await json(await approvePOST(req('POST', '/x', { certificateId: CERT, status: 'verified' })));
     expect(second.status).toBe(409);
     expect(h.sendApproved).toHaveBeenCalledTimes(1);
-    expect(db.inserts.audit_logs).toHaveLength(1);
+    expect(auditEntries()).toHaveLength(1);
   });
 
   it('refuses self-approval', async () => {
@@ -202,7 +236,7 @@ describe('POST /api/certificates/approve', () => {
     expect(status).toBe(403);
     expect(certStatus()).toBe('pending');
     expect(h.sendApproved).not.toHaveBeenCalled();
-    expect(db.inserts.audit_logs ?? []).toHaveLength(0);
+    expect(auditEntries()).toHaveLength(0);
   });
 
   it('refuses a certificate from another organization (404) without writing', async () => {
@@ -237,7 +271,7 @@ describe('POST /api/certificates/approve', () => {
     const { status } = await json(await approvePOST(req('POST', '/x', { certificateId: CERT, status: 'verified' })));
     expect(status).toBe(409);
     expect(h.sendApproved).not.toHaveBeenCalled();
-    expect(db.inserts.audit_logs ?? []).toHaveLength(0);
+    expect(auditEntries()).toHaveLength(0);
   });
 
   it('scopes the update in the WHERE clause (conditional on current status + org)', async () => {
@@ -276,7 +310,8 @@ describe('POST /api/certificates/approve', () => {
     expect(status).toBe(200);
     expect(body.data.revokedCredentials).toBe(2);
     expect(certStatus()).toBe('rejected');
-    expect(db.tables.certificates[0]).toMatchObject({ status: 'rejected', faculty_id: FACULTY });
+    expect(db.tables.certificates[0]).toMatchObject({ verification_status: 'rejected', faculty_id: FACULTY });
+    expect(db.tables.certificates[0]).not.toHaveProperty('status');
     const byId = Object.fromEntries(db.tables.verifiable_credentials.map(v => [v.id, v.status]));
     expect(byId).toEqual({ 'vc-a': 'revoked', 'vc-b': 'revoked', 'vc-other': 'active' });
     // revocation_list does not exist in production: status on verifiable_credentials is the source of truth.
@@ -327,8 +362,8 @@ describe('POST /api/certificates/batch-approve', () => {
     expect(certStatus(CERT)).toBe('verified');
     expect(certStatus(CERT2)).toBe('verified');
     expect(db.tables.certificates.every(c => c.verification_status !== 'approved')).toBe(true);
-    expect(db.tables.certificates.every(c => c.status === 'approved' && c.faculty_id === FACULTY)).toBe(true);
-    expect(db.inserts.audit_logs.map(a => a.action)).toEqual(['batch_approve', 'batch_approve']);
+    expect(db.tables.certificates.every(c => c.faculty_id === FACULTY && !('status' in c))).toBe(true);
+    expect(auditEntries().map(a => a.action)).toEqual(['batch_approve', 'batch_approve']);
   });
 
   it('canonical {status:"rejected"} and alias action:"reject" write "rejected"', async () => {
@@ -398,10 +433,11 @@ describe('POST /api/certificates/revert-approval', () => {
     expect(status).toBe(200);
     expect(body.data).toMatchObject({ newStatus: 'pending', revokedCredentials: 2 });
     expect(certStatus()).toBe('pending');
-    expect(db.tables.certificates[0]).toMatchObject({ status: 'pending', faculty_id: null });
+    expect(db.tables.certificates[0]).toMatchObject({ faculty_id: null });
+    expect(db.tables.certificates[0]).not.toHaveProperty('status');
     expect(vcStatuses()).toEqual(['revoked', 'revoked']);
     expect(db.tables.verifiable_credentials[0].revoked_reason).toBe('oops');
-    expect(db.inserts.audit_logs[0]).toMatchObject({ action: 'revert_approval', target_id: CERT, actor_id: FACULTY });
+    expect(auditEntries()[0]).toMatchObject({ action: 'revert_approval', targetType: 'certificate', targetId: CERT, actorId: FACULTY });
   });
 
   it('refuses to revert a non-verified certificate (409)', async () => {
@@ -420,14 +456,17 @@ describe('POST /api/certificates/revert-approval', () => {
 
   it('if revocation fails the status change is rolled back (never pending with live credentials)', async () => {
     asFaculty({
-      certificates: [cert({ verification_status: 'verified', status: 'approved', faculty_id: uuid(88) })],
+      certificates: [cert({ verification_status: 'verified', faculty_id: uuid(88) })],
       verifiable_credentials: [vcRow('vc-a', CERT)],
     });
     db.errors['update:verifiable_credentials'] = 'db down';
     const { status } = await json(await revertPOST(req('POST', '/x', { certificateId: CERT })));
     expect(status).toBe(500);
     expect(certStatus()).toBe('verified');
-    expect(db.tables.certificates[0]).toMatchObject({ status: 'approved', faculty_id: uuid(88) });
+    expect(db.tables.certificates[0]).toMatchObject({ faculty_id: uuid(88) });
+    // the compensation write restores verification_status / faculty_id only, never the legacy column
+    for (const w of writesTo('certificates')) expect(w.values).not.toHaveProperty('status');
+    expect(db.tables.certificates[0]).not.toHaveProperty('status');
     expect(vcStatuses()).toEqual(['active']);
   });
 });
@@ -537,15 +576,12 @@ describe('POST /api/certificates/issue', () => {
 
 // ===========================================================================
 describe('DELETE /api/certificates/delete', () => {
-  const OWN_URL = `${SUPABASE_URL}/storage/v1/object/public/certificates/${STUDENT}/1_cert.pdf`;
   const asStudent = (tables: Record<string, Row[]> = {}) =>
     setup(
       {
         user_roles: [{ user_id: STUDENT, role: 'student', organization_id: ORG, approval_status: 'approved' }],
         certificates: [cert()],
-        certificate_metadata: [{ id: 'm1', certificate_id: CERT }],
         verifiable_credentials: [],
-        documents: [],
         ...tables,
       },
       { id: STUDENT },
@@ -604,7 +640,6 @@ describe('DELETE /api/certificates/delete', () => {
       {
         user_roles: [{ user_id: FACULTY, role: 'admin', organization_id: ORG, approval_status: 'approved' }],
         certificates: [cert({ verification_status: 'verified' })],
-        certificate_metadata: [],
         verifiable_credentials: [vcRow('vc-a', CERT), vcRow('vc-b', CERT)],
       },
       { id: FACULTY },
@@ -614,7 +649,7 @@ describe('DELETE /api/certificates/delete', () => {
     expect(status).toBe(200);
     expect(vcStatuses()).toEqual(['revoked', 'revoked']);
     expect(db.tables.certificates).toHaveLength(0);
-    expect(db.inserts.audit_logs[0]).toMatchObject({ action: 'delete_certificate', target_id: CERT });
+    expect(auditEntries()[0]).toMatchObject({ action: 'delete_certificate', targetType: 'certificate', targetId: CERT, actorId: FACULTY });
   });
 
   it('an admin of ANOTHER org is refused', async () => {
@@ -646,12 +681,6 @@ describe('DELETE /api/certificates/delete', () => {
     asStudent();
     expect((await deleteDELETE(req('DELETE', '/x', { certificateId: uuid(404) }))).status).toBe(404);
     expect((await deleteDELETE(req('DELETE', '/x', { certificateId: 'x' }))).status).toBe(400);
-  });
-
-  it('falls back to the documents table with the same ownership rules', async () => {
-    asStudent({ documents: [{ id: uuid(30), student_id: STUDENT, organization_id: ORG, verification_status: 'pending', file_url: OWN_URL }] });
-    expect((await deleteDELETE(req('DELETE', '/x', { certificateId: uuid(30) }))).status).toBe(200);
-    expect(db.tables.documents).toHaveLength(0);
   });
 });
 

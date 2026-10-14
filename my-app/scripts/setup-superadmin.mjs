@@ -7,7 +7,7 @@
  * upgrades an existing user to superadmin.
  * Superadmins have system-wide access across all organizations and can:
  * - Manage all organizations
- * - Access super_admin_audit logs
+ * - Review the audit_logs trail
  * - Manage system settings
  *
  * Usage:
@@ -96,6 +96,23 @@ function isValidPassword(password) {
     /[a-z]/.test(password) &&
     /[0-9]/.test(password)
   );
+}
+
+// Canonical audit_logs row (actor_id, organization_id, action, target_type, target_id, details, created_at).
+// A failed audit insert is only a warning: the account itself is already set up.
+async function writeSetupAudit(admin, userId, action, email) {
+  const { error } = await admin.from('audit_logs').insert({
+    actor_id: userId,
+    organization_id: null,
+    action,
+    target_type: 'user',
+    target_id: userId,
+    details: { email, via: 'setup-script', target_type: 'user' },
+    created_at: new Date().toISOString(),
+  });
+  if (error) {
+    log(`   Warning: Failed to create audit log: ${error.message}`, 'yellow');
+  }
 }
 
 // Paginated lookup: auth.admin.listUsers() only returns one page at a time
@@ -213,7 +230,7 @@ async function setupSuperadmin() {
       const { error: profileError } = await supabaseAdmin
         .from('profiles')
         .update({
-          role: 'super_admin',
+          // No role here: profiles has no role column; the super_admin row in user_roles is the authority
           organization_id: null, // Superadmins are not bound to any organization
           updated_at: new Date().toISOString(),
         })
@@ -223,18 +240,7 @@ async function setupSuperadmin() {
         throw new Error(`Failed to update profile: ${profileError.message}`);
       }
 
-      const { error: auditError } = await supabaseAdmin.from('super_admin_audit').insert({
-        admin_id: existingUser.id,
-        action: 'UPGRADE_TO_SUPERADMIN',
-        target_type: 'user',
-        target_id: existingUser.id,
-        details: { email: existingUser.email, upgraded_via_script: true },
-        created_at: new Date().toISOString(),
-      });
-
-      if (auditError) {
-        log(`   Warning: Failed to create audit log: ${auditError.message}`, 'yellow');
-      }
+      await writeSetupAudit(supabaseAdmin, existingUser.id, 'superadmin_upgraded', existingUser.email ?? email);
 
       log('\nUser successfully upgraded to superadmin.', 'green');
       displaySuccessInfo(email, existingUser.id);
@@ -281,10 +287,7 @@ async function setupSuperadmin() {
           email,
           full_name: fullName,
           phone: phone || null,
-          role: 'super_admin',
           organization_id: null,
-          email_verified: true,
-          status: 'active',
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'id' }
@@ -300,18 +303,7 @@ async function setupSuperadmin() {
 
       log('   Role assigned', 'green');
 
-      const { error: auditError } = await supabaseAdmin.from('super_admin_audit').insert({
-        admin_id: userId,
-        action: 'SUPERADMIN_CREATED',
-        target_type: 'user',
-        target_id: userId,
-        details: { email, created_via_script: true },
-        created_at: new Date().toISOString(),
-      });
-
-      if (auditError) {
-        log(`   Warning: Failed to create audit log: ${auditError.message}`, 'yellow');
-      }
+      await writeSetupAudit(supabaseAdmin, userId, 'superadmin_created', email);
 
       log('\nSuperadmin user created successfully.', 'green');
       displaySuccessInfo(email, userId);
@@ -325,7 +317,7 @@ async function setupSuperadmin() {
     log('\nSecurity Reminder:', 'yellow');
     log('   - Store these credentials securely', 'yellow');
     log('   - Consider enabling 2FA after first login', 'yellow');
-    log('   - Regularly review super_admin_audit logs', 'yellow');
+    log('   - Regularly review the audit_logs trail', 'yellow');
 
     log('\nSetup completed successfully.\n', 'green');
   } catch (error) {

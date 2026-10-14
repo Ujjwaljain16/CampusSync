@@ -118,7 +118,7 @@ describe('POST /api/portfolio/export-pdf authorisation', () => {
     expect(await isPdf(res)).toBe(true);
     expect(drawn.join('\n')).not.toContain('asha@uni.edu');
     expect(drawn.join('\n')).not.toContain('SECRET OCR');
-    expect(admin.callsFor('audit_logs')[0].payload).toMatchObject({ user_id: callerId, action: 'portfolio_pdf_export', target_id: TARGET });
+    expect(admin.callsFor('audit_logs')[0].payload).toMatchObject({ actor_id: callerId, action: 'portfolio_pdf_export', target_type: 'student', target_id: TARGET });
   });
 
   it('reviewer may opt in to personal info', async () => {

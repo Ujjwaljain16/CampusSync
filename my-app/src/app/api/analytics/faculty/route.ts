@@ -1,263 +1,138 @@
-import { withRole, success, resolveAdminOrg } from '@/lib/api';
+import { withRole, success, apiError, resolveAdminOrg } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { loadAnalyticsCertificates, detectMethod, scoreOf, dayKey, mean } from '@/lib/analytics/certificates';
 
 export const GET = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], async (req, { user }) => {
   const supabase = await createSupabaseServerClient();
   // Caller must hold at least faculty IN the organization (not merely somewhere)
   const requestedOrg = req.headers.get('X-Organization-ID') || new URL(req.url).searchParams.get('organization_id');
   const scope = await resolveAdminOrg(user, requestedOrg, 'faculty');
-  const targetOrgIds = [scope.organizationId];
-  const orgContext = { isSuperAdmin: scope.isSuperAdmin && !scope.requested };
+  const allOrgs = scope.isSuperAdmin && !scope.requested;
 
-    // Get all certificates with their confidence scores and metadata (org-filtered)
-    let certQuery = supabase
-      .from('certificates')
-      .select('id, verification_status, created_at, student_id, confidence_score, auto_approved, verification_method, fields');
+  // The only data source: certificates (confidence_score, auto_approved,
+  // verification_method and the verification_details jsonb), org-filtered.
+  let certs;
+  try {
+    certs = await loadAnalyticsCertificates(supabase, { orgIds: allOrgs ? null : [scope.organizationId] });
+  } catch (err) {
+    console.error('Faculty analytics: certificates query failed:', err);
+    return apiError.internal('Failed to fetch analytics data');
+  }
 
-    if (!orgContext.isSuperAdmin) {
-      certQuery = certQuery.in('organization_id', targetOrgIds);
+  const totalCerts = certs.length;
+  const pendingCerts = certs.filter(c => c.verification_status === 'pending').length;
+  const verifiedCerts = certs.filter(c => c.verification_status === 'verified').length;
+  const rejectedCerts = certs.filter(c => c.verification_status === 'rejected').length;
+
+  // Certificates that carry a confidence score
+  const scored = certs
+    .map(c => ({ cert: c, score: scoreOf(c) }))
+    .filter((x): x is { cert: (typeof certs)[number]; score: number } => x.score !== null);
+  const scores = scored.map(x => x.score);
+
+  const confidenceDistribution = {
+    high: scores.filter(s => s >= 0.9).length,
+    medium: scores.filter(s => s >= 0.7 && s < 0.9).length,
+    low: scores.filter(s => s < 0.7).length,
+  };
+
+  const autoApprovedCerts = certs.filter(c => c.auto_approved === true).length;
+
+  const verificationMethods = {
+    qr_verified: 0,
+    logo_match: 0,
+    template_match: 0,
+    ai_confidence: 0,
+    manual_review: 0,
+  };
+  for (const c of certs) {
+    const detected = detectMethod(c.verification_method, c.verification_details);
+    if (detected) {
+      verificationMethods[detected]++;
+    } else if ((scoreOf(c) ?? 0) >= 0.7) {
+      verificationMethods.ai_confidence++;
+    } else {
+      verificationMethods.manual_review++;
     }
+  }
 
-    const { data: allCertificates } = await certQuery;
+  // Daily activity, last 7 days
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const dailyActivity: Record<string, { total: number; verified: number; pending: number; rejected: number }> = {};
+  for (const cert of certs) {
+    if (new Date(cert.created_at) < sevenDaysAgo) continue;
+    const date = dayKey(cert.created_at);
+    const day = (dailyActivity[date] ??= { total: 0, verified: 0, pending: 0, rejected: 0 });
+    day.total++;
+    const status = cert.verification_status;
+    if (status === 'verified' || status === 'pending' || status === 'rejected') day[status]++;
+  }
 
-    const totalCerts = allCertificates?.length || 0;
+  // Share of ALL certificates that were auto-approved
+  const autoApprovalRate = totalCerts > 0 ? (autoApprovedCerts / totalCerts) * 100 : 0;
 
-    // Get pending, verified, and rejected counts
-    const pendingCerts = allCertificates?.filter(c => c.verification_status === 'pending').length || 0;
-    const verifiedCerts = allCertificates?.filter(c => c.verification_status === 'verified').length || 0;
-    const rejectedCerts = allCertificates?.filter(c => c.verification_status === 'rejected').length || 0;
+  // null when nothing has a confidence score (not a made-up 0)
+  const avgConfidence = mean(scores);
 
-    // Get document metadata for OCR confidence scores (primary source for new system)
-    const certificateIds = allCertificates?.map(c => c.id) || [];
-    const { data: documentMetadata } = certificateIds.length > 0
-      ? await supabase
-          .from('document_metadata')
-          .select('document_id, ai_confidence_score, verification_details, created_at')
-          .in('document_id', certificateIds)
-      : { data: [] };
+  const institutionCounts: Record<string, number> = {};
+  for (const cert of certs) {
+    if (!cert.institution) continue;
+    institutionCounts[cert.institution] = (institutionCounts[cert.institution] || 0) + 1;
+  }
+  const topInstitutions = Object.entries(institutionCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([institution, count]) => ({ institution, count }));
 
-    // Also get certificate metadata (primary source for older certificates)
-    const { data: certMetadata } = certificateIds.length > 0
-      ? await supabase
-          .from('certificate_metadata')
-          .select('certificate_id, ai_confidence_score, verification_details, created_at')
-          .in('certificate_id', certificateIds)
-      : { data: [] };
-
-    // Build a map of certificate IDs to metadata for easy lookup
-    const metadataMap = new Map<string, {
-      score: number | null;
-      details: Record<string, unknown>;
-      created_at: string;
-    }>();
-
-    // Add certificate metadata (for older certificates)
-    (certMetadata || []).forEach(cm => {
-      if (cm.ai_confidence_score != null) {
-        metadataMap.set(cm.certificate_id, {
-          score: cm.ai_confidence_score,
-          details: cm.verification_details,
-          created_at: cm.created_at
-        });
-      }
-    });
-
-    // Add document metadata (for newer documents)
-    (documentMetadata || []).forEach(dm => {
-      if (dm.ai_confidence_score != null) {
-        metadataMap.set(dm.document_id, {
-          score: dm.ai_confidence_score,
-          details: dm.verification_details,
-          created_at: dm.created_at
-        });
-      }
-    });
-
-    // Combine certificates with their metadata
-    const allMetadata: Array<{
-      id: string;
-      score: number | null;
-      details: Record<string, unknown>;
-      created_at: string;
-      auto_approved?: boolean;
-      verification_method?: string;
-    }> = (allCertificates || [])
-      .map(cert => {
-        const metadata = metadataMap.get(cert.id);
-        return {
-          id: cert.id,
-          score: cert.confidence_score || metadata?.score || null,
-          details: metadata?.details || cert.fields || {},
-          created_at: cert.created_at,
-          auto_approved: cert.auto_approved,
-          verification_method: cert.verification_method
-        };
-      })
-      .filter(item => item.score != null); // Only include items with confidence scores
-
-    // Calculate confidence distribution based on OCR extraction confidence
-    const confidenceDistribution = {
-      high: allMetadata.filter(m => (m.score || 0) >= 0.9).length,
-      medium: allMetadata.filter(m => (m.score || 0) >= 0.7 && (m.score || 0) < 0.9).length,
-      low: allMetadata.filter(m => (m.score || 0) < 0.7).length,
-    };
-
-    // Count auto-approved certificates (only those explicitly marked as auto_approved)
-    // Note: Auto-approval is a future feature - currently all certificates are manually approved
-    const autoApprovedCerts = allMetadata.filter(m => m.auto_approved === true).length;
-
-    // Get verification method distribution from metadata
-    const verificationMethods = {
-      qr_verified: 0,
-      logo_match: 0,
-      template_match: 0,
-      ai_confidence: 0,
-      manual_review: 0,
-    };
-
-    allMetadata.forEach(m => {
-      const details = m.details || {};
-      const method = m.verification_method;
-      
-      // Check verification method from certificates table first
-      if (method === 'qr_verification') {
-        verificationMethods.qr_verified++;
-      } else if (method === 'logo_match') {
-        verificationMethods.logo_match++;
-      } else if (method === 'template_match') {
-        verificationMethods.template_match++;
-      } else if ((details.qr_verification as Record<string, unknown>)?.verified) {
-        verificationMethods.qr_verified++;
-      } else if (((details.logo_match as Record<string, unknown>)?.score as number) > 0.8) {
-        verificationMethods.logo_match++;
-      } else if (((details.template_match as Record<string, unknown>)?.score as number) > 0.6) {
-        verificationMethods.template_match++;
-      } else if ((m.score || 0) >= 0.7) {
-        verificationMethods.ai_confidence++;
-      } else {
-        verificationMethods.manual_review++;
-      }
-    });
-
-    // Get recent activity (last 7 days)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    const recentActivity = allCertificates?.filter(cert => 
-      new Date(cert.created_at) >= sevenDaysAgo
-    ) || [];
-
-    // Calculate daily activity
-    const dailyActivity = recentActivity.reduce((acc, cert) => {
-      const date = new Date(cert.created_at).toISOString().split('T')[0];
-      if (!acc[date]) {
-        acc[date] = { total: 0, verified: 0, pending: 0, rejected: 0 };
-      }
-      acc[date].total++;
-      const status = cert.verification_status as 'verified' | 'pending' | 'rejected';
-      if (status === 'verified' || status === 'pending' || status === 'rejected') {
-        acc[date][status]++;
-      }
-      return acc;
-    }, {} as Record<string, { total: number; verified: number; pending: number; rejected: number }>);
-
-    // Calculate auto-approval rate based on high confidence scores
-    const autoApprovalRate = totalCerts && totalCerts > 0 
-      ? ((autoApprovedCerts || 0) / totalCerts) * 100 
-      : 0;
-
-    // Calculate average OCR confidence score from actual extractions
-    const avgConfidence = allMetadata.length > 0
-      ? allMetadata.reduce((sum: number, m) => sum + (m.score || 0), 0) / allMetadata.length
-      : 0;
-
-    // Get top institutions (org-filtered)
-    let instQuery = supabase
-      .from('certificates')
-      .select('institution')
-      .not('institution', 'is', null);
-
-    if (!orgContext.isSuperAdmin) {
-      instQuery = instQuery.in('organization_id', targetOrgIds);
-    }
-
-    const { data: institutionData } = await instQuery;
-
-    const institutionCounts = institutionData?.reduce((acc, cert) => {
-      const inst = cert.institution;
-      acc[inst] = (acc[inst] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>) || {};
-
-    const topInstitutions = Object.entries(institutionCounts)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 5)
-      .map(([institution, count]) => ({ institution, count }));
-
-    // Calculate OCR extraction quality metrics
-    const ocrMetrics = {
-      totalExtractions: allMetadata.length,
-      highQuality: allMetadata.filter(m => (m.score || 0) >= 0.9).length,
-      mediumQuality: allMetadata.filter(m => (m.score || 0) >= 0.7 && (m.score || 0) < 0.9).length,
-      lowQuality: allMetadata.filter(m => (m.score || 0) < 0.7).length,
+  // Quality / percentile / trend sections only exist when there are scores to describe
+  let ocrMetrics;
+  let confidencePercentiles;
+  if (scores.length > 0 && avgConfidence !== null) {
+    ocrMetrics = {
+      totalExtractions: scores.length,
+      highQuality: confidenceDistribution.high,
+      mediumQuality: confidenceDistribution.medium,
+      lowQuality: confidenceDistribution.low,
       averageScore: Math.round(avgConfidence * 1000) / 1000,
-      successRate: allMetadata.length > 0 
-        ? Math.round((allMetadata.filter(m => (m.score || 0) >= 0.7).length / allMetadata.length) * 100 * 100) / 100
-        : 0,
+      successRate: Math.round(((confidenceDistribution.high + confidenceDistribution.medium) / scores.length) * 100 * 100) / 100,
     };
+    const sorted = [...scores].sort((a, b) => a - b);
+    const pick = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+    confidencePercentiles = { p25: pick(0.25), p50: pick(0.5), p75: pick(0.75), p90: pick(0.9) };
+  }
 
-    // Calculate confidence score percentiles for better insights
-    const sortedScores = allMetadata.map(m => m.score || 0).sort((a, b) => a - b);
-    const confidencePercentiles = {
-      p25: sortedScores[Math.floor(sortedScores.length * 0.25)] || 0,
-      p50: sortedScores[Math.floor(sortedScores.length * 0.50)] || 0,
-      p75: sortedScores[Math.floor(sortedScores.length * 0.75)] || 0,
-      p90: sortedScores[Math.floor(sortedScores.length * 0.90)] || 0,
-    };
+  // Confidence trend over the last 30 days
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const confidenceTrend: Record<string, { scores: number[]; avgScore: number; count: number }> = {};
+  for (const { cert, score } of scored) {
+    if (new Date(cert.created_at) < thirtyDaysAgo) continue;
+    const date = dayKey(cert.created_at);
+    const day = (confidenceTrend[date] ??= { scores: [], avgScore: 0, count: 0 });
+    day.scores.push(score);
+    day.count++;
+  }
+  for (const day of Object.values(confidenceTrend)) {
+    day.avgScore = mean(day.scores) ?? 0;
+  }
 
-    // Calculate confidence trend over last 30 days
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
-    const recentMetadata = allMetadata.filter(m => 
-      new Date(m.created_at) >= thirtyDaysAgo
-    );
-
-    const confidenceTrend = recentMetadata.reduce((acc, m) => {
-      const date = new Date(m.created_at).toISOString().split('T')[0];
-      if (!acc[date]) {
-        acc[date] = { scores: [], avgScore: 0, count: 0 };
-      }
-      acc[date].scores.push(m.score || 0);
-      acc[date].count++;
-      return acc;
-    }, {} as Record<string, { scores: number[]; avgScore: number; count: number }>);
-
-    // Calculate average for each day
-    Object.keys(confidenceTrend).forEach(date => {
-      const dayData = confidenceTrend[date];
-      dayData.avgScore = dayData.scores.reduce((sum, s) => sum + s, 0) / dayData.scores.length;
-    });
-
-    return success({
-      overview: {
-        totalCertificates: totalCerts || 0,
-        autoApproved: autoApprovedCerts || 0,
-        pending: pendingCerts || 0,
-        verified: verifiedCerts || 0,
-        rejected: rejectedCerts || 0,
-        autoApprovalRate: Math.round(autoApprovalRate * 100) / 100,
-        averageConfidence: Math.round(avgConfidence * 1000) / 1000,
-      },
-      confidenceDistribution,
-      verificationMethods,
-      dailyActivity,
-      topInstitutions,
-      ocrMetrics,
-      confidencePercentiles,
-      confidenceTrend,
-    });
+  return success({
+    overview: {
+      totalCertificates: totalCerts,
+      autoApproved: autoApprovedCerts,
+      pending: pendingCerts,
+      verified: verifiedCerts,
+      rejected: rejectedCerts,
+      autoApprovalRate: Math.round(autoApprovalRate * 100) / 100,
+      averageConfidence: avgConfidence === null ? null : Math.round(avgConfidence * 1000) / 1000,
+    },
+    confidenceDistribution,
+    verificationMethods,
+    dailyActivity,
+    topInstitutions,
+    ocrMetrics,
+    confidencePercentiles,
+    confidenceTrend,
   });
-
-
-
+});

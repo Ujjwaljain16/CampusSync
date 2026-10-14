@@ -62,7 +62,7 @@ beforeEach(() => {
   seedRole(ADMIN_A, 'admin', ORG_A);
   seedRole(ORGADMIN_A, 'org_admin', ORG_A, { is_primary_admin: true });
   seedRole(ADMIN_B, 'admin', ORG_B);
-  harness.db.seed('allowed_domains', [{ id: uuid(900), domain: 'b.edu', organization_id: ORG_B }]);
+  harness.db.seed('organization_domains', [{ id: uuid(900), domain: 'b.edu', organization_id: ORG_B }]);
 });
 
 describe('recruiter access lives in user_roles', () => {
@@ -282,14 +282,14 @@ describe('allowed domains', () => {
     harness.db.seed('organizations', [{ id: uuid(3), name: 'C', settings: { allowed_email_domains: ['c.edu'] } }]);
     res = await domainsPOST(req('/api/admin/domains', { method: 'POST', body: { domain: 'c.edu' } }));
     expect(res.status).toBe(409);
-    expect(harness.db.rows('allowed_domains').filter((d) => d.organization_id === ORG_A)).toHaveLength(0);
+    expect(harness.db.rows('organization_domains').filter((d) => d.organization_id === ORG_A)).toHaveLength(0);
   });
 
   it('POST adds an org-scoped domain; GET only lists the caller\'s org', async () => {
     harness.signIn(ADMIN_A);
     let res = await domainsPOST(req('/api/admin/domains', { method: 'POST', body: { domain: 'A.edu', description: 'main' } }));
     expect(res.status).toBe(201);
-    expect(harness.db.rows('allowed_domains').find((d) => d.domain === 'a.edu')).toMatchObject({ organization_id: ORG_A });
+    expect(harness.db.rows('organization_domains').find((d) => d.domain === 'a.edu')).toMatchObject({ organization_id: ORG_A });
     res = await domainsGET(req('/api/admin/domains'));
     const list = (await json(res)).data.domains;
     expect(list.map((d: any) => d.domain)).toEqual(['a.edu']);
