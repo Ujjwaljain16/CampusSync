@@ -30,7 +30,7 @@ The URL must start with `https://`. Anything else is ignored and no alerts are s
 - Expected client errors: a thrown `Response` with a 4xx status, or any error carrying a 4xx `status`. Validation failures, 401/403/404 and rate-limit responses are not incidents.
 - `redirect()` and `notFound()` control flow.
 - `logger.warn`, `logger.log` and `logger.security` events (login failures can be noisy; they stay in the logs).
-- Errors that a route catches and turns into a 500 response without going through `logger.error`. In particular the `withAuth` / `withRole` wrappers currently log with `console.error('[withAuth] Error: ...')`, which does not reach the alert hook. A one-line follow-up (replace that `console.error` with `logger.error`) would alert on those too. Until then, a wave of such 500s is caught by the uptime monitor only if it breaks `/api/health?deep=1`; otherwise find them in the Vercel logs.
+- Errors that a route catches and turns into a 500 response without going through `logger.error`. The `withAuth` / `withRole` wrappers log unexpected exceptions through `logger.error`, so those do alert; a thrown 4xx `Response` does not.
 - Browser-side errors. Alerts are sent from the server only.
 - Anything while the webhook is unreachable. Delivery is fire-and-forget with a 2 second timeout; a failed delivery is dropped silently.
 

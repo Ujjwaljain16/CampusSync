@@ -21,11 +21,9 @@ treated as compromised and rotated (see below). Credentials signed with the old 
 untrustworthy. CI runs gitleaks over the full history; findings from the old commits are expected until the keys
 are rotated (and, optionally, the history is rewritten).
 
-Rotation status: on 2026-10-15 the Gemini API key was replaced and the Supabase API keys were migrated to the new
-publishable / secret keys, with the legacy JWT-based keys disabled. **Rotation of the credential-signing key
-(`VC_ISSUER_JWK`) has not been done yet** (owner action pending); until it is, treat credentials signed with the current
-key as exposed. The SMTP password and any other secret ever used with the project should be rotated too if that has not
-been done.
+The Gemini API key and the Supabase API keys have been replaced (the Supabase legacy JWT-based keys are disabled).
+The credential-signing key (`VC_ISSUER_JWK`) and the SMTP password, and any other secret ever used with the project,
+should be rotated if that has not been done for your deployment.
 
 ## Key rotation
 

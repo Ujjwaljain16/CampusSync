@@ -104,10 +104,8 @@ is written. The full runbook (new key, previous key listed, dry run, real run, c
 Supabase keys checklist) is in [KEY-ROTATION.md](./KEY-ROTATION.md). It re-signs the stored W3C credentials only, not
 SD-JWT credentials or earlier signed tree heads.
 
-> **Status:** the tool is implemented, but the production issuer key has **not been rotated yet** (owner action
-> pending; the Supabase API keys and the Gemini key were already replaced on 2026-10-15). Until it is, credentials in
-> production are still signed with the original key, which appears in the early git history (see
-> [SECURITY.md](../../SECURITY.md)).
+> Any issuer key that was ever committed or shared must be replaced; see [SECURITY.md](../../SECURITY.md) and
+> [KEY-ROTATION.md](./KEY-ROTATION.md).
 
 ## did:web
 

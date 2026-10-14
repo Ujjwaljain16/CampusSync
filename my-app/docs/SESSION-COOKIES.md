@@ -66,8 +66,7 @@ login/logout signal in `src/lib/authEvents.ts` (same tab, and other tabs through
   Both link styles work. The PKCE-code style only works if the link is opened in the **same browser** that asked for
   the reset (the verifier cookie is there).
 
-`docs/Password-reset.md` describes the previous browser-side flow and is out of date; this file replaces its
-"Summary" and "Steps" sections.
+`docs/Password-reset.md` describes the same server-side flow in more detail.
 
 ## Existing sessions
 

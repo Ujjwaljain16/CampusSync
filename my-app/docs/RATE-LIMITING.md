@@ -29,7 +29,7 @@ In the routes the cheap in-memory check runs first, then the global one.
 | `sd-issue` | `POST /api/credentials/sd/issue` | user id | 10 / 1 min |
 | `sd-verify` | `POST /api/credentials/sd/verify` | client | 30 / 1 min |
 
-"Client" is the identity the in-memory limiter uses (`getClientIp`: `x-vercel-forwarded-for`, then `x-real-ip`, then the first `x-forwarded-for` entry). There is no password-reset route in the application (Supabase Auth handles it), so nothing to wire there.
+"Client" is the identity the in-memory limiter uses (`getClientIp`: `x-vercel-forwarded-for`, then `x-real-ip`, then the first `x-forwarded-for` entry). The password-reset routes (`/api/auth/password-reset/*`) and `/api/auth/login` are limited by the in-memory limiter only; they are not wired to the global limiter.
 
 Windows are fixed and aligned to the epoch (`floor(now / window) * window`), so a client can burst up to twice the limit across a window boundary; that is the accepted trade-off for a single atomic upsert.
 

@@ -182,8 +182,7 @@ Related helper usage: `writeAudit` in 26 route files, `enforceRateLimit` (in-mem
 4. **Key rotation.** `POST /api/admin/vcs/resign` (super admin only, rate limited, dry run available) re-signs the
    stored active credentials with the current key so the previous public key can be dropped from
    `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` (`src/lib/vcResign.ts`; revoked credentials and the payload are untouched). The
-   procedure is in [KEY-ROTATION.md](KEY-ROTATION.md). The production issuer key has **not been rotated yet** (owner
-   action pending).
+   procedure is in [KEY-ROTATION.md](KEY-ROTATION.md).
 5. **Optional features, off by default.** A revocation status list (`VC_STATUS_LIST_ENABLED`), a transparency log
    (`TRANSPARENCY_LOG_ENABLED`) and SD-JWT selective disclosure (`SD_JWT_ENABLED`) are implemented and unit-tested.
    They are **not enabled in the production deployment** and their tables (`vc_status_lists`, `tlog_entries`,
@@ -273,8 +272,7 @@ browser; a test fails if such a name contains `SERVICE`, `SECRET` or `PRIVATE`.
 - AI extraction is advisory and can be wrong; certificates are sent to Google's API.
 - Credentials are bearer tokens (no holder binding); key rotation keeps old credentials verifiable only while the
   previous public key stays listed in `VC_ISSUER_PREVIOUS_PUBLIC_JWKS`, unless they are re-signed with the rotation
-  tool. The production issuer key has not been rotated yet (owner action pending; the Supabase API keys and the Gemini
-  key were already replaced on 2026-10-15).
+  tool.
 - The revocation status list, transparency log and SD-JWT are implemented but not enabled in the production deployment.
 - Certificate files: the code uses signed URLs only, but the bucket stays public until the owner applies
   `20261016_01_private_certificates_bucket.sql` after deploying the code. A signed URL is a bearer link for up to five

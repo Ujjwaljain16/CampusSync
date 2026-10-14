@@ -119,7 +119,6 @@ baseline dump of the original schema; only the policies they create or rewrite a
   ([MONITORING.md](./MONITORING.md)).
 - Redirect targets after login are validated by `src/lib/safeRedirect.ts`.
 - Credentials are signed with the key in `VC_ISSUER_JWK`; see SECURITY.md and [KEY-ROTATION.md](./KEY-ROTATION.md).
-  The production issuer key has not been rotated yet (owner action pending).
 - `next.config.ts` sets security headers (HSTS, `X-Frame-Options: DENY`, `nosniff`, a Content-Security-Policy that still
   allows `'unsafe-inline'` scripts, and others). Header values are configuration, not a guarantee of XSS safety.
 

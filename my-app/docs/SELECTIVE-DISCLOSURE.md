@@ -106,7 +106,7 @@ Protected against:
   `oct` keys are never used as verification keys), `typ` allow-list, `kid` selection, `exp`/`nbf`.
 * **Server logs and proxies seeing the presentation on page load**: it lives in the URL fragment.
   (The verify page POSTs it to the verification endpoint, which neither stores nor logs it.)
-* **Enumeration/abuse**: both routes are rate limited (in-memory, per instance, best effort).
+* **Enumeration/abuse**: both routes are rate limited (the in-memory limiter plus the global limiter, scopes `sd-issue` and `sd-verify`).
 * **Issuance abuse**: only the certificate owner can mint an SD-JWT, only for a verified certificate in
   their organisation with an active credential.
 
