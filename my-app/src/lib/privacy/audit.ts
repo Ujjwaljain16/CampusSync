@@ -1,12 +1,14 @@
 /**
  * Audit trail for reads of student PII by recruiters/staff.
  *
- * Uses the column set shared by the majority of existing `audit_logs` inserts:
- * user_id, organization_id, action, target_id, details, created_at.
+ * Writes the canonical audit_logs shape (actor_id, organization_id, action,
+ * target_type, target_id, details, created_at) with the service-role client;
+ * the `client` argument is accepted for call-site compatibility only.
  * Failures are logged but never fail the request.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 
 export type PiiAuditAction =
   | 'recruiter_search_students'
@@ -19,17 +21,26 @@ export interface PiiAuditEntry {
   organizationId: string | null;
   action: PiiAuditAction;
   targetId?: string | null;
+  /** What the target is; defaults to 'student'. */
+  targetType?: string;
   details?: Record<string, unknown>;
 }
 
-export async function recordPiiRead(client: SupabaseClient, entry: PiiAuditEntry): Promise<void> {
+export async function recordPiiRead(
+  // Kept for signature compatibility; the write always goes through the admin client.
+  _client: SupabaseClient | null | undefined,
+  entry: PiiAuditEntry
+): Promise<void> {
   try {
-    const { error } = await client.from('audit_logs').insert({
-      user_id: entry.userId,
+    const admin = await createSupabaseAdminClient();
+    const targetType = entry.targetType ?? 'student';
+    const { error } = await admin.from('audit_logs').insert({
+      actor_id: entry.userId,
       organization_id: entry.organizationId,
       action: entry.action,
-      target_id: entry.targetId ?? null,
-      details: entry.details ?? {},
+      target_type: targetType,
+      target_id: entry.targetId == null ? null : String(entry.targetId),
+      details: { ...(entry.details ?? {}), target_type: targetType },
       created_at: new Date().toISOString(),
     });
     if (error) {

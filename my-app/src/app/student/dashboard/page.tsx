@@ -27,7 +27,6 @@ interface Profile {
   major?: string;
   location?: string;
   gpa?: number;
-  role: string;
   created_at: string;
 }
 

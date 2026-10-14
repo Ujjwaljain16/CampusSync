@@ -33,7 +33,7 @@ export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (req, {
 
   const { data: recentActivity } = await supabase
     .from('audit_logs')
-    .select('action, created_at, user_id, actor_id')
+    .select('action, created_at, actor_id')
     .match(orgFilter)
     .order('created_at', { ascending: false })
     .limit(10);

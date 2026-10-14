@@ -78,7 +78,7 @@ describe('POST /api/recruiter/export', () => {
     expect(data.data[0].email).toBe('asha@uni.edu');
     const audits = admin.callsFor('audit_logs');
     expect(audits).toHaveLength(1);
-    expect(audits[0].payload).toMatchObject({ action: 'recruiter_export_students', organization_id: ORG_A });
+    expect(audits[0].payload).toMatchObject({ actor_id: expect.any(String), action: 'recruiter_export_students', organization_id: ORG_A, target_type: 'student' });
   });
 
   it('queries certificates as verified-only', async () => {

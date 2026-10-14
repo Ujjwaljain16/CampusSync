@@ -299,9 +299,7 @@ export async function POST(request: NextRequest) {
         id: userId,
         email,
         full_name,
-        // profiles.role is user-editable and must never be used for authorization;
-        // keep it at 'student' until a faculty role is actually approved.
-        role: 'student',
+        // No role here: profiles has no role column; authorization comes from user_roles only.
         organization_id,
         university: university || null,
         major: major || null,

@@ -18,7 +18,6 @@ type UserRoleRow = {
   role?: string;
   organization_id?: string | null;
   approval_status?: string | null;
-  is_super_admin?: boolean;
   is_primary_admin?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -51,7 +50,7 @@ export const GET = withRole(ADMIN_ROLES, async (request, { user }) => {
 
   let query = adminSupabase
     .from('user_roles')
-    .select('user_id, role, organization_id, approval_status, is_super_admin, is_primary_admin, created_at, updated_at, assigned_by')
+    .select('user_id, role, organization_id, approval_status, is_primary_admin, created_at, updated_at, assigned_by')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 

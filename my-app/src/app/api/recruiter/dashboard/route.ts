@@ -51,7 +51,7 @@ export const GET = recruiterRoute(
         .from('audit_logs')
         .select('action, created_at, target_id, details, organization_id')
         .in('organization_id', orgIds)
-        .eq('user_id', user.id)
+        .eq('actor_id', user.id)
         .in('action', VERIFICATION_ACTIONS)
         .order('created_at', { ascending: false })
         .limit(10);
