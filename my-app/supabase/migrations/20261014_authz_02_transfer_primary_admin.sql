@@ -1,4 +1,4 @@
--- DRAFT — review against live schema before applying
+-- DRAFT - review against live schema before applying
 --
 -- Fixed transfer_primary_admin.
 --

@@ -1,4 +1,4 @@
--- DRAFT — review against the live schema before applying; idempotent
+-- DRAFT - review against the live schema before applying; idempotent
 -- (everything below is commented out: inspect first, then decide)
 --
 -- OBSERVED (2026-10-14): the storage bucket `certificates` is PUBLIC. Anyone who knows or guesses an
@@ -37,7 +37,7 @@
 --   -- server routes that check org membership and then create short-lived signed URLs
 --   -- (supabase.storage.from('certificates').createSignedUrl(path, 60)) with the service role.
 --
--- 3) Application impact — making the bucket private breaks any code/DB row that stores or renders a
+-- 3) Application impact - making the bucket private breaks any code/DB row that stores or renders a
 --    permanent public URL (getPublicUrl). Before flipping `public = false`:
 --      - grep for getPublicUrl / '/storage/v1/object/public/certificates' and stored file URLs;
 --      - migrate to storing the object path and generating signed URLs on demand;

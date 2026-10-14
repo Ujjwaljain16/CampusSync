@@ -1,4 +1,4 @@
--- DRAFT — review against live schema before applying
+-- DRAFT - review against live schema before applying
 --
 -- Function hardening:
 --   * is_super_admin(uuid): pin search_path (SECURITY DEFINER functions without a

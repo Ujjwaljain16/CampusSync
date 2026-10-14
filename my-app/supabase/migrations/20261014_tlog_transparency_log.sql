@@ -1,4 +1,4 @@
--- DRAFT — review before applying; idempotent
+-- DRAFT - review before applying; idempotent
 --
 -- Transparency log for credential events (issue / revoke): an append-only list of
 -- entries plus signed tree heads (Merkle roots signed with the issuer key).

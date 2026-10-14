@@ -1,4 +1,4 @@
--- DRAFT — review against live schema before applying
+-- DRAFT - review against live schema before applying
 --
 -- Per-student privacy switches used by the recruiter routes, the public
 -- portfolio and the PDF export (see src/lib/privacy/visibility.ts).

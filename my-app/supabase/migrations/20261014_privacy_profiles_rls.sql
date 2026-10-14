@@ -1,4 +1,4 @@
--- DRAFT — apply only after Wave 1 is deployed, because some pages may read other
+-- DRAFT - apply only after Wave 1 is deployed, because some pages may read other
 -- users' profiles with the user-session client. Candidates to verify/move to the
 -- service-role client first (found by grep of `.from('profiles')`):
 --   src/app/api/admin/analytics, admin/dashboard, admin/org/access-requests,

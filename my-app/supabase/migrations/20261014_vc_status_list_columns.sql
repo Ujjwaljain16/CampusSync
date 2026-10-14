@@ -1,4 +1,4 @@
--- DRAFT — review before applying; idempotent
+-- DRAFT - review before applying; idempotent
 --
 -- Informational copy of a credential's status-list slot. The authoritative copy is the signed
 -- `credentialStatus` entry inside the stored credential JSON, and the application works without

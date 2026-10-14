@@ -1,4 +1,4 @@
--- DRAFT — review before applying
+-- DRAFT - review before applying
 --
 -- Selective-disclosure (SD-JWT) issuance accounting. OPTIONAL: the application
 -- tolerates this table not existing (undefined-table errors 42P01 / PGRST205 are

@@ -1,4 +1,4 @@
--- DRAFT — review against the live schema before applying. Idempotent; runs in one transaction.
+-- DRAFT - review against the live schema before applying. Idempotent; runs in one transaction.
 -- Part b of 3 (split so each piece fits comfortably in the Supabase SQL editor). Run after 05a: user_roles policies.
 --
 -- Role hierarchy mirrored from the API (src/lib/api/utils/roles.ts):

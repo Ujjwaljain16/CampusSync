@@ -1,9 +1,9 @@
--- DRAFT — review against the live schema before applying; idempotent
+-- DRAFT - review against the live schema before applying; idempotent
 --
 -- PROPOSAL: normalize `audit_logs` so every insert in the app resolves.
 -- Routes currently write the actor under two different names (`user_id` in some, `actor_id` in others)
 -- and the subject under `target_id`, `entity_id` or `resource_id`. Because PostgREST rejects unknown
--- columns, an insert using a column the table lacks fails — and most call sites ignore the error, so
+-- columns, an insert using a column the table lacks fails - and most call sites ignore the error, so
 -- audit rows are silently lost. First, inspect what the live table has:
 --
 --   select column_name, data_type, is_nullable

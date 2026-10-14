@@ -1,4 +1,4 @@
--- DRAFT — review against live schema before applying
+-- DRAFT - review against live schema before applying
 --
 -- Integrity trigger on user_roles:
 --   * an organization can never lose its LAST approved org_admin/admin

@@ -1,4 +1,4 @@
--- DRAFT — review against the live schema before applying; idempotent
+-- DRAFT - review against the live schema before applying; idempotent
 --
 -- Application code (/api/vcs/revoke, /api/vcs/verify, /api/certificates/revert-approval,
 -- /api/documents/revoke) reads/writes verifiable_credentials.status, revoked_at and revoked_reason.

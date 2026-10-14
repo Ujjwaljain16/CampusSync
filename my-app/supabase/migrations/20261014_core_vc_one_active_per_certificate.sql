@@ -1,4 +1,4 @@
--- DRAFT — review against the live schema before applying; idempotent
+-- DRAFT - review against the live schema before applying; idempotent
 --
 -- Goal: at most ONE active verifiable credential per certificate.
 -- Today `verifiable_credentials` has only a primary key (and a student_id FK), so concurrent
@@ -7,7 +7,7 @@
 -- Credential shape assumed (as written by /api/certificates/issue):
 --   credential -> 'credentialSubject' ->> 'certificateId'
 --
--- STEP 1 — find existing duplicates (run this first; the index below FAILS if any exist):
+-- STEP 1 - find existing duplicates (run this first; the index below FAILS if any exist):
 --
 --   select credential->'credentialSubject'->>'certificateId' as certificate_id,
 --          count(*)                                           as active_count,
@@ -17,7 +17,7 @@
 --   group by 1
 --   having count(*) > 1;
 --
--- STEP 2 — data fix suggestion (NOT run automatically; review each group by hand).
+-- STEP 2 - data fix suggestion (NOT run automatically; review each group by hand).
 -- (Assumes a `created_at` column; adjust the ORDER BY to whatever the live table has.)
 -- Keep the newest active VC per certificate and revoke the older ones. Requires the columns from
 -- 20261014_core_vc_status_columns.sql (revoked_at / revoked_reason) to exist first.
@@ -37,7 +37,7 @@
 --   ) d
 --   where v.id = d.id and d.rn > 1;
 --
--- STEP 3 — the constraint itself:
+-- STEP 3 - the constraint itself:
 
 create unique index if not exists verifiable_credentials_one_active_per_certificate
   on public.verifiable_credentials ((credential->'credentialSubject'->>'certificateId'))

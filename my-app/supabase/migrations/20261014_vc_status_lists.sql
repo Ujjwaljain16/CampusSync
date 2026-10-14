@@ -1,4 +1,4 @@
--- DRAFT — review before applying; idempotent
+-- DRAFT - review before applying; idempotent
 --
 -- Revocation status lists for src/lib/statusList.ts (only used when VC_STATUS_LIST_ENABLED=true).
 -- The application degrades gracefully while this migration is NOT applied: issuance and
