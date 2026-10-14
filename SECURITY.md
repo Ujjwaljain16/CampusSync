@@ -18,8 +18,11 @@ Commits early in this repository's history (notably around `2e9bc97`) contained 
 the Supabase service-role key and the Verifiable Credential issuer private key. History has not been rewritten, so
 anyone with a clone or fork can read them. All of them, and any other secret ever used with this project, must be
 treated as compromised and rotated (see below). Credentials signed with the old issuer key should be considered
-untrustworthy. CI runs gitleaks over the full history to catch new leaks; findings from the old commits are
-expected until the keys are rotated (and, optionally, the history is rewritten).
+untrustworthy. CI runs gitleaks over the full history; findings from the old commits are expected until the keys
+are rotated (and, optionally, the history is rewritten).
+
+Rotation status: the Gemini API key was rotated on 2026-10-15. Rotation of the credential-signing key is still
+pending. For the Supabase keys, follow the instructions below if they have not been rotated since those commits.
 
 ## Key rotation
 
@@ -27,14 +30,18 @@ Rotate on suspicion of exposure, when someone with access leaves, and at least y
 
 ### VC issuer key (`VC_ISSUER_JWK`)
 
-1. Generate a new key pair for the environment (do not reuse any key that was ever committed). The algorithm is taken
-   from the JWK's `alg`; keep `kid` unique per key.
+The step-by-step runbook, including how to check the result, is in
+[`my-app/docs/VERIFIABLE-CREDENTIALS.md`](my-app/docs/VERIFIABLE-CREDENTIALS.md#key-rotation). In short:
+
+1. Generate a new key for the environment with `node scripts/generate-issuer-key.mjs` (run in `my-app/`; do not reuse
+   any key that was ever committed). The algorithm is taken from the JWK's `alg` (EdDSA, ES256 or RS256).
 2. Set `VC_ISSUER_JWK` (single-line JSON JWK including the private fields) in your host's secret store, never in git.
-   Update `NEXT_PUBLIC_ISSUER_VERIFICATION_METHOD` if the key id changed.
 3. Redeploy. New credentials are signed with the new key.
-4. **Existing credentials stop verifying**: verification uses the single configured key. Re-issue credentials that
-   should remain valid, or revoke them (`verifiable_credentials.status = 'revoked'`). If the old key was
-   compromised, assume credentials signed with it could be forged and re-issue everything after rotation.
+4. **Routine rotation:** put the old key's *public* JWK into `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` (a JSON array of public
+   keys only) so credentials it signed keep verifying; keep it listed until those credentials have expired.
+   **If the old key was compromised:** do not list it. Credentials it signed then stop verifying (`unknown_key`);
+   re-issue the ones that must survive, or revoke them (`verifiable_credentials.status = 'revoked'`). Listing a
+   compromised key would keep anything signed with it valid.
 5. Destroy the old private key everywhere (local `.env` files, password managers, CI).
 
 ### Supabase
@@ -46,20 +53,25 @@ Rotate on suspicion of exposure, when someone with access leaves, and at least y
 
 ### Other API keys and secrets
 
-- `GEMINI_API_KEY` (and `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` if set): revoke in the provider console, create a new
-  key, update the host secret.
+- `GEMINI_API_KEY`: revoke in the provider console, create a new key, update the host secret. (Any other provider key
+  you may have set for local experiments should be treated the same way; the application reads only the Gemini key.)
 - `SMTP_PASS`: change at the mail provider, update the host secret.
-- `WEBHOOK_SECRET`: generate a new random value and update both this app and the system that signs webhooks.
+- `TRANSPARENCY_LOG_SALT` (only if the optional transparency log is enabled): it pseudonymises student ids in log
+  entries; changing it makes new entries unlinkable to old ones, so rotate it deliberately.
 - After rotating, redeploy and confirm the old values no longer work.
 
-## Database security model (observed 2026-10-14)
+## Database security model
 
-- Row-Level Security is enabled on `certificates`, `profiles`, `role_requests`, `user_roles` and
-  `verifiable_credentials`. The policies are not stored in this repository.
-- The database policy set was reviewed and tightened by the SQL in `my-app/supabase/migrations/` (drafts: review against the live schema before applying). Specifics are intentionally not described in this public repository.
+- The schema cleanup in `my-app/supabase/migrations/20261015_*` (steps 00 to 08) has been applied to the production
+  database and the matching application code is deployed. Design, the row-level-security model and the per-step notes:
+  [`my-app/docs/DATABASE-SCHEMA.md`](my-app/docs/DATABASE-SCHEMA.md); which migrations are applied: its "Migration status"
+  section.
+- The migration files are versioned patches, not a complete baseline dump of the original schema (which is not in the
+  repository). Run a migration on a staging copy first, and keep the applied SQL in version control.
+- Authorization comes only from `user_roles`. `audit_logs` is append-only and written only by the backend; credentials
+  (`verifiable_credentials`) are issued and revoked only by the backend after authorization checks.
 - The `certificates` storage bucket is public.
-- The migration files are drafts. Review them against the live schema, apply in a transaction on a staging copy first,
-  and keep the applied SQL in version control.
+- Specifics of individual policies are intentionally not described in this public repository.
 
 ## Security-relevant design notes
 
@@ -69,8 +81,11 @@ Rotate on suspicion of exposure, when someone with access leaves, and at least y
 - Rate limiting is in-memory per instance.
 - The service-role key bypasses RLS; it must remain server-side (a test checks it is not read in pages/components).
 - Uploaded certificates are sent to Google's Gemini API for extraction.
+- The revocation status list, the transparency log and SD-JWT selective disclosure are implemented but switched off by
+  default, and not enabled in the production deployment.
 
 ## Automated checks
 
-GitHub Actions run typecheck, lint, tests, `npm audit --omit=dev --audit-level=high`, gitleaks (full history) and
-CodeQL; Dependabot proposes weekly dependency updates.
+GitHub Actions run typecheck, lint, tests, a dependency audit gate (`node scripts/audit-check.mjs`: fails on high or
+critical advisories in production dependencies unless listed with a reason and review date in
+`my-app/audit-allowlist.json`), gitleaks (full history) and CodeQL; Dependabot proposes weekly dependency updates.

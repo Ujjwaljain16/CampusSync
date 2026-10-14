@@ -21,19 +21,26 @@ Routes return JSON through helpers in `src/lib/api/utils/response.ts`:
 Wrappers in `src/lib/api/middleware/`:
 
 - `withAuth(handler)` returns 401 when there is no authenticated user and converts a thrown `Response` into the response.
+  Any other thrown error becomes a 500 whose message is prefixed with `Authentication error:` and carries the error text.
 - `withRole(roles, handler)` returns 403 unless the caller holds one of the roles (see
-  [Security-Auth-flow.md](./Security-Auth-flow.md) for the exact semantics) and converts a thrown `Response`.
+  [Security-Auth-flow.md](./Security-Auth-flow.md) for the exact semantics) and converts a thrown `Response`. Any other
+  thrown error becomes a 500 prefixed with `Authorization error:`.
+- `withSession(handler)` / `withSuperAdmin(handler)` (`routeAuth.ts`) return 401 when unauthenticated (`withSuperAdmin`
+  adds a 403 unless the caller has an approved `super_admin` row), pass Next.js route params to the handler, return a
+  thrown `Response` as is and turn any other error into a generic `Internal server error` 500 (details are logged only).
+- `recruiterRoute(options, handler)` (`src/lib/privacy/recruiterAccess.ts`) does the same containment for recruiter routes
+  (stable generic 500) and adds approval checks and a per-user rate limit.
 - `withErrorHandler(handler)` catches any thrown error, logs it with `console.error` and maps it to a response by
   message pattern (`JWT`/`token` to 401, `not found` to 404, `duplicate`/`unique` to 422, anything else to 500 with
   the error message). `compose(...)` combines wrappers.
 
 Important:
 
-- **These wrappers are opt-in. Not every route uses them** (at the time of writing `withErrorHandler` is used by no
-  route file; `withAuth` by 10 and `withRole` by 37 of the 100 route files). Routes without a wrapper handle their own
-  errors, and an uncaught exception results in Next.js's default 500.
-- `withErrorHandler` returns `err.message` for unknown errors; that can leak internal details to clients. Prefer a
-  generic message for 5xx responses.
+- **These wrappers are opt-in. Not every route uses them.** Of the 93 route files, `withRole` is used by 23,
+  `withSuperAdmin` by 13, `withSession` by 12, `recruiterRoute` by 9, `withAuth` by 8 and `withErrorHandler` by none.
+  Routes without a wrapper handle their own errors, and an uncaught exception results in Next.js's default 500.
+- 5xx messages differ by wrapper: `withErrorHandler` (unused), `withAuth` and `withRole` include the error text,
+  `withSession` and `recruiterRoute` return a generic message. New routes should prefer the generic form.
 - The test `tests/security/route-inventory.test.ts` lists every route that has no recognised auth guard.
 
 ## Monitoring

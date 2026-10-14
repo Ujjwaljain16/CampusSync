@@ -8,7 +8,10 @@ Anyone can check, without trusting the CampusSync server:
 2. that the log **only ever appended** between two tree heads they have seen (Merkle consistency proof), and
 3. that the tree heads were **signed by the issuer key** published at `/.well-known/jwks.json`.
 
-Status: **off by default** (`TRANSPARENCY_LOG_ENABLED`), database objects are a **DRAFT migration**.
+Status: **implemented and unit-tested, off by default** (`TRANSPARENCY_LOG_ENABLED`), and **not enabled in the
+production deployment**: its tables (`tlog_entries`, `tlog_tree_heads`) have not been created there and
+`/api/transparency/*` answers 404 (see [section 5](#5-enabling-it) for what to run). The database objects come from an
+optional migration.
 "Modelled on RFC 6962/9162" means the hash tree and the proof generation/verification algorithms are
 implemented and tested against a brute-force reference; it does **not** mean full compliance (no TLS wire
 formats, no SCTs, no CT-style log list/policy). There is no blockchain involved.
@@ -122,7 +125,7 @@ to sign the same size both succeed (the loser re-reads the winner's head).
 | Student identification from the log | Keyed HMAC pseudonym, no names/e-mails; unknown fields dropped | Anyone holding the salt (operator) can link; ids of credentials/certificates/orgs are public |
 | Right to erasure | Entries cannot be deleted by design; destroying/rotating the salt makes old pseudonyms unlinkable ("crypto-shredding") | Credential/certificate ids remain; take legal advice before enabling |
 | Scraping / DoS of public API | `enforceRateLimit` (30 req/min/IP, in-memory per instance), strict numeric validation, CDN cache headers, limit <= 100 | In-memory limiter is per serverless instance |
-| Key rotation | Verifier looks up `kid` in the JWKS | JWKS currently exposes only the current key; keep retired public keys published if you rotate |
+| Key rotation | Verifier looks up `kid` in the JWKS, which lists the current key and the keys in `VC_ISSUER_PREVIOUS_PUBLIC_JWKS` | Heads signed by a retired key verify only while its public key stays listed |
 
 ## 4. Configuration
 
@@ -136,7 +139,8 @@ Also required: a real `VC_ISSUER_JWK` (alg EdDSA/ES256/RS256, not the dev placeh
 
 ## 5. Enabling it
 
-1. Review and apply `supabase/migrations/20261014_tlog_transparency_log.sql` (DRAFT, idempotent). It creates
+1. Apply `supabase/migrations/20261014_tlog_transparency_log.sql` (optional, idempotent; not applied in production, see
+   [DATABASE-SCHEMA.md](./DATABASE-SCHEMA.md) "Migration status"). It creates
    `tlog_entries`, `tlog_tree_heads` (+ `frontier jsonb` column), the append-only triggers, RLS enabled with **no
    policies** (service role only), and `tlog_append(entry jsonb, leaf_hash text) returns bigint`.
    It has not been run against a live database by the author of this change: test it on a copy first.

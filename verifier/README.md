@@ -25,7 +25,8 @@ the signature verified.
 
 ```sh
 cd verifier && npm install        # installs jose
-node bin/campussync-verify.mjs <jws | file> [--jwks <file|url>] [--did <file|url>] [--issuer <did>] [--no-status] [--json]
+node bin/campussync-verify.mjs <jws | file> [--jwks <file|url>] [--did <file|url>] [--issuer <did>] [--no-status]
+                                [--max-status-age <seconds>] [--json]
 ```
 
 * `<file>` may contain a bare JWS or a credential JSON with `proof.jws` (also inside a `data` envelope).
@@ -75,7 +76,11 @@ Decoded status lists are capped at 8 MiB so a malicious list cannot expand witho
   how you obtained the JWKS file.
 * **Revocation is only checkable offline for credentials issued with a `credentialStatus` entry.** Older
   credentials can only be checked against the issuer's server. A status list is a snapshot: the answer is as fresh
-  as the list you hold (`maxStatusListAgeSec` lets you enforce a limit).
+  as the list you hold (`maxStatusListAgeSec` lets you enforce a limit). The status list is an optional,
+  off-by-default feature of the CampusSync server and is not enabled in the production deployment, so credentials
+  issued there currently carry no status entry; the verifier then reports `revoked: null` and a `status` check noting
+  that revocation cannot be checked offline. Check such credentials against the issuer's server
+  (`GET /api/vcs/verify?vcId=<credential id>`).
 * The status list format is *inspired by* the W3C Bitstring Status List draft (same entry fields, 131072-bit lists,
   most-significant-bit-first indexing, GZIP + multibase base64url); the credentials are JWS-encoded with the
   VC 1.1 context, not VC 2.0. This package is **not** certified against any W3C or IETF conformance suite and does

@@ -16,14 +16,17 @@ graph TB
 
 ## Rules of thumb used in the code
 
-1. **Authenticate first** (`withAuth`, `withRole`, or `supabase.auth.getUser()`); `/api/*` is not covered by middleware.
-2. **Resolve the organization** for multi-tenant data with `getOrganizationContext(user, requestedOrgId)` and filter
-   by `organization_id` (`getTargetOrganizationIds(context)` returns the list; recruiters may have several).
+1. **Authenticate first** (`withAuth`, `withRole`, `withSession`, `withSuperAdmin`, `recruiterRoute`, or
+   `supabase.auth.getUser()`); `/api/*` is not covered by middleware.
+2. **Resolve the organization** for multi-tenant data with `getOrganizationContext(user, requestedOrgId)` (or check an
+   approved role in a given organization with `authorizeOrg`) and filter by `organization_id`
+   (`getTargetOrganizationIds(context)` returns the list; recruiters may have several).
 3. **User-bound client** (`createSupabaseServerClient`): queries run as the signed-in user, so RLS policies are the
    second line of defence.
-4. **Admin client** (35 route files): used for operations that RLS would block (creating users, role changes,
-   cross-organization admin views, storage cleanup, audit writes). Nothing but the route's own checks protects these
-   queries, so each such route must verify the caller's role and the target's organization itself.
+4. **Admin client** (41 route files call `createSupabaseAdminClient()`; shared helpers such as `writeAudit` and
+   `recruiterRoute` use it too): used for operations that RLS would block (creating users, role changes,
+   cross-organization admin views, storage cleanup, credential issue/revoke, audit writes). Nothing but the route's own
+   checks protects these queries, so each such route must verify the caller's role and the target's organization itself.
 5. Prefer small, explicit `select(...)` column lists over `select('*')` for responses that reach other users.
 
 ## Query example (organization-scoped list)
@@ -43,13 +46,14 @@ export const GET = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], as
 
 ## What RLS covers
 
-RLS is enabled in production on `certificates`, `profiles`, `role_requests`, `user_roles` and
-`verifiable_credentials`. The policies themselves are not stored in this repository, so this document does not
-list or count them. The hardening drafts live in `supabase/migrations/` and must be reviewed against the live schema
-before they are applied. Other tables referenced by the code may have no RLS at all; check with
+The schema cleanup (`supabase/migrations/20261015_*`) is applied in production; the policy model per table is in
+[DATABASE-SCHEMA.md](./DATABASE-SCHEMA.md) (section 6), and its "Migration status" section lists which migrations are
+applied. The migrations are versioned patches, not a complete baseline dump of the original schema, so only the
+policies they create or rewrite are in this repository, and this document does not list or count policies. To check
+which tables have RLS enabled in a given database:
 `select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r';`.
 
 ## Tables the code touches
 
-See the list in [ARCHITECTURE.md](./ARCHITECTURE.md#data-stores). `revocation_list` is referenced by two routes but
-does not exist in production.
+See the list in [ARCHITECTURE.md](./ARCHITECTURE.md#data-stores). There is no `revocation_list` table: revocation
+state lives on `verifiable_credentials`.
