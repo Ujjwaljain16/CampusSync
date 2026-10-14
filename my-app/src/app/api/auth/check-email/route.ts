@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
 import { extractDomain, domainMatchesAllowedList } from '@/lib/emailValidation';
 
 /**
@@ -15,6 +16,8 @@ import { extractDomain, domainMatchesAllowedList } from '@/lib/emailValidation';
 export async function POST(request: NextRequest) {
   const limited = enforceRateLimit(request, 'check-email', { interval: 60 * 1000, uniqueTokenPerInterval: 20 });
   if (limited) return limited;
+  const globalLimited = await enforceGlobalRateLimit(request, 'check-email', { limit: 20, windowSeconds: 60 });
+  if (globalLimited) return globalLimited;
 
   try {
     const body = await request.json();

@@ -6,6 +6,7 @@ import { withAuth, success, apiError, error as apiErrorResponse } from '@/lib/ap
 import { createSupabaseServerClient, getServerUserWithRole } from '@/lib/supabaseServer';
 import { logger } from '@/lib/logger';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
 import { config } from '@/lib/envValidator';
 import {
 	checkUpload,
@@ -117,6 +118,10 @@ export const POST = withAuth(async (request: NextRequest, { user }) => {
 	if (limited) return limited;
 	const dailyLimited = enforceRateLimit(request, 'ocr-gemini-daily', DAILY_LIMIT, user.id);
 	if (dailyLimited) return dailyLimited;
+	const globalLimited = await enforceGlobalRateLimit(request, 'ocr-gemini', { limit: 6, windowSeconds: 60 }, user.id);
+	if (globalLimited) return globalLimited;
+	const globalDailyLimited = await enforceGlobalRateLimit(request, 'ocr-gemini-daily', { limit: 50, windowSeconds: 24 * 60 * 60 }, user.id);
+	if (globalDailyLimited) return globalDailyLimited;
 
 	// Reject oversized bodies BEFORE they are buffered by formData()
 	const contentLength = Number(request.headers.get('content-length'));

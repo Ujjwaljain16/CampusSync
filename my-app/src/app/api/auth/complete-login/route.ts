@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { apiError, parseAndValidateBody } from '@/lib/api';
+import { enforceGlobalRateLimit } from '@/lib/rateLimitGlobal';
 
 function getRedirectForRole(role: string | null | undefined): string {
 	if (role === 'student') return '/student/dashboard';
@@ -16,6 +17,10 @@ interface LoginBody {
 }
 
 async function handlePost(request: NextRequest) {
+	// Generous per-IP ceiling (campus networks share addresses); the global counter makes it hold across instances
+	const limited = await enforceGlobalRateLimit(request, 'complete-login', { limit: 60, windowSeconds: 60 });
+	if (limited) return limited;
+
 	const result = await parseAndValidateBody<LoginBody>(request, ['access_token', 'refresh_token']);
 	if (result.error) return result.error;
 	
