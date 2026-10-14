@@ -14,7 +14,7 @@ import { join } from 'node:path';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const migrationsDir = join(here, '..', 'migrations');
 const migration = (prefix) => {
-  const f = readdirSync(migrationsDir).find((n) => n.startsWith(`20261015_${prefix}`));
+  const f = readdirSync(migrationsDir).find((n) => n.startsWith(`20261015_${prefix}_`));
   if (!f) throw new Error(`migration ${prefix} not found`);
   return join(migrationsDir, f);
 };
@@ -72,8 +72,8 @@ async function scenario(title, prefixes, assertFile) {
   await mod.default({ db, as, q, check, expectError });
 }
 
-await scenario('steps 01-03: data and constraints', ['01', '02', '03'], 'assert-expand.mjs');
-await scenario('steps 00-08: final state', ['00', '01', '02', '03', '04', '05', '06', '07', '08'], 'assert-final.mjs');
+await scenario('steps 01-03: data and constraints', ['01', '02', '03', '03b'], 'assert-expand.mjs');
+await scenario('steps 00-08: final state', ['00', '01', '02', '03', '03b', '04', '05', '06', '07', '08'], 'assert-final.mjs');
 
 console.log(`\n${totalChecks - totalBad}/${totalChecks} checks passed`);
 process.exit(totalBad ? 1 : 0);
