@@ -1,8 +1,17 @@
 import { NextRequest } from 'next/server';
-import { withRole, success, apiError, parseAndValidateBody, getOrganizationContext, getTargetOrganizationIds, isRecruiterContext } from '@/lib/api';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import {
+  withRole,
+  success,
+  apiError,
+  error as errorResponse,
+  parseAndValidateBody,
+  resolveAdminOrg,
+  writeAudit,
+} from '@/lib/api';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { validateDomain, findDomainConflict } from '@/lib/api/utils/domains';
 
-// Allowed email domains control who can sign up into an organization: admins only
+// Allowed e-mail domains control who can sign up into an organization: admins only
 const ADMIN_ROLES = ['admin', 'org_admin', 'super_admin'];
 
 interface AddDomainBody {
@@ -10,92 +19,126 @@ interface AddDomainBody {
   description?: string;
 }
 
-// GET - Fetch allowed domains (for user's organization)
-export const GET = withRole(ADMIN_ROLES, async (_req, { user }) => {
-  const supabase = await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-  
-  const { data: domains, error } = await supabase
+function requestedOrg(req: NextRequest): string | null {
+  return req.headers.get('X-Organization-ID') || new URL(req.url).searchParams.get('organization_id');
+}
+
+// GET - Fetch allowed domains of ONE organization the caller administers
+export const GET = withRole(ADMIN_ROLES, async (req, { user }) => {
+  const scope = await resolveAdminOrg(user, requestedOrg(req), 'admin');
+  const admin = await createSupabaseAdminClient();
+
+  const { data: domains, error } = await admin
     .from('allowed_domains')
-    .select('*')
-    .in('organization_id', targetOrgIds) // Multi-org filter
+    .select('id, domain, description, organization_id, created_at')
+    .eq('organization_id', scope.organizationId)
     .order('domain', { ascending: true });
 
   if (error) {
     console.error('Error fetching domains:', error);
-    throw apiError.internal(error.message);
+    return apiError.internal('Failed to fetch domains');
   }
 
   return success({ domains });
 });
 
-// POST - Add new domain (to user's organization)
+// POST - Add a new domain to the caller's organization
 export const POST = withRole(ADMIN_ROLES, async (req: NextRequest, { user }) => {
   const result = await parseAndValidateBody<AddDomainBody>(req, ['domain']);
   if (result.error) return result.error;
 
-  const { domain, description } = result.data;
-  if (typeof domain !== 'string' || !/^([*][.])?([a-z0-9-]+[.])+[a-z]{2,}$/i.test(domain.trim())) {
-    throw apiError.badRequest('Invalid domain');
+  const check = validateDomain(result.data.domain);
+  if (!check.ok) return apiError.badRequest(check.error);
+
+  const description =
+    typeof result.data.description === 'string' ? result.data.description.slice(0, 500) : '';
+
+  const scope = await resolveAdminOrg(user, requestedOrg(req), 'admin');
+  const organizationId = scope.organizationId;
+  const admin = await createSupabaseAdminClient();
+
+  // Anti-squatting: another organization already claims this (or an overlapping) domain
+  let conflict;
+  try {
+    conflict = await findDomainConflict(admin, organizationId, [check.domain]);
+  } catch (err) {
+    console.error('Domain conflict check failed:', err);
+    return apiError.internal('Failed to validate domain');
   }
-  const supabase = await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user);
-
-  // Get organization ID - for recruiters use first accessible org or selected org
-  const organizationId = isRecruiterContext(orgContext)
-    ? (orgContext.selectedOrganization || orgContext.accessibleOrganizations[0])
-    : orgContext.organizationId;
-
-  if (!organizationId) {
-    throw apiError.badRequest('No organization context available');
+  if (conflict) {
+    return errorResponse('This domain is already claimed by another organization', 409);
   }
 
-  const { data, error } = await supabase
+  // Already present in this organization?
+  const { data: existing } = await admin
+    .from('allowed_domains')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('domain', check.domain)
+    .limit(1);
+  if (existing && existing.length > 0) {
+    return errorResponse('Domain already added', 409);
+  }
+
+  const { data, error } = await admin
     .from('allowed_domains')
     .insert({
-      domain: domain.toLowerCase().trim(),
-      description: description || '',
-      organization_id: organizationId, // Multi-org field
-      created_at: new Date().toISOString()
+      domain: check.domain,
+      description,
+      organization_id: organizationId,
+      created_at: new Date().toISOString(),
     })
-    .select()
+    .select('id, domain, description, organization_id, created_at')
     .single();
 
   if (error) {
+    if (error.code === '23505') return errorResponse('This domain is already claimed', 409);
     console.error('Error adding domain:', error);
-    throw apiError.internal(error.message);
+    return apiError.internal('Failed to add domain');
   }
+
+  await writeAudit(admin, {
+    actorId: user.id,
+    action: 'domain_add',
+    targetType: 'allowed_domain',
+    targetId: data?.id ?? null,
+    organizationId,
+    details: { domain: check.domain },
+  });
 
   return success(data, 'Domain added successfully', 201);
 });
 
-// DELETE - Remove domain (from user's organization)
+// DELETE - Remove a domain from the caller's organization
 export const DELETE = withRole(ADMIN_ROLES, async (req: NextRequest, { user }) => {
   const { searchParams } = new URL(req.url);
-  const domain = searchParams.get('domain');
+  const domain = searchParams.get('domain')?.trim().toLowerCase();
 
-  if (!domain) {
-    throw apiError.badRequest('Domain is required');
-  }
+  if (!domain) return apiError.badRequest('Domain is required');
 
-  const supabase = await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
+  const scope = await resolveAdminOrg(user, requestedOrg(req), 'admin');
+  const admin = await createSupabaseAdminClient();
 
-  const { error } = await supabase
+  const { data: removed, error } = await admin
     .from('allowed_domains')
     .delete()
     .eq('domain', domain)
-    .in('organization_id', targetOrgIds); // Multi-org filter
+    .eq('organization_id', scope.organizationId)
+    .select('id');
 
   if (error) {
     console.error('Error deleting domain:', error);
-    throw apiError.internal(error.message);
+    return apiError.internal('Failed to remove domain');
   }
+  if (!removed || removed.length === 0) return apiError.notFound('Domain not found');
+
+  await writeAudit(admin, {
+    actorId: user.id,
+    action: 'domain_remove',
+    targetType: 'allowed_domain',
+    organizationId: scope.organizationId,
+    details: { domain },
+  });
 
   return success({ message: 'Domain removed successfully' });
 });
-
-
-

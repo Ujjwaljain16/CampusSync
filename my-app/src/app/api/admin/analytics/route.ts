@@ -1,35 +1,35 @@
 // Admin analytics API
-import { withRole, success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { withRole, success, apiError, resolveAdminOrg } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (_req, { user }) => {
+export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (req, { user }) => {
   const supabase = await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-  
-  // Build queries with organization filter - super admins see all, org admins see only their org
-  let profilesQuery = supabase.from('profiles').select('id, role, created_at');
+  const requestedOrg = req.headers.get('X-Organization-ID') || new URL(req.url).searchParams.get('organization_id');
+  const scope = await resolveAdminOrg(user, requestedOrg, 'admin');
+  const allOrgs = scope.isSuperAdmin && !scope.requested;
+
+  // Role distribution comes from user_roles (authoritative), not profiles.role
+  let rolesQuery = supabase.from('user_roles').select('user_id, role, approval_status').eq('approval_status', 'approved');
   let certsQuery = supabase.from('certificates').select('id, verification_status, created_at');
   let roleReqQuery = supabase.from('role_requests').select('id, status, created_at');
-  
-  if (!orgContext.isSuperAdmin) {
-    profilesQuery = profilesQuery.in('organization_id', targetOrgIds);
-    certsQuery = certsQuery.in('organization_id', targetOrgIds);
-    roleReqQuery = roleReqQuery.in('organization_id', targetOrgIds);
+
+  if (!allOrgs) {
+    rolesQuery = rolesQuery.eq('organization_id', scope.organizationId);
+    certsQuery = certsQuery.eq('organization_id', scope.organizationId);
+    roleReqQuery = roleReqQuery.eq('organization_id', scope.organizationId);
   }
 
   const [
     { data: users, error: usersError },
     { data: certificates, error: certsError },
     { data: roleRequests, error: roleError }
-  ] = await Promise.all([profilesQuery, certsQuery, roleReqQuery]);
+  ] = await Promise.all([rolesQuery, certsQuery, roleReqQuery]);
 
   if (usersError || certsError || roleError) {
     console.error('Analytics errors:', { usersError, certsError, roleError });
-    throw apiError.internal('Failed to fetch analytics data');
+    return apiError.internal('Failed to fetch analytics data');
   }
 
-  // Calculate analytics
   const totalUsers = users?.length || 0;
   const totalCertificates = certificates?.length || 0;
   const pendingRoleRequests = roleRequests?.filter(r => r.status === 'pending').length || 0;
@@ -42,7 +42,7 @@ export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (_req, 
         student: users?.filter(u => u.role === 'student').length || 0,
         faculty: users?.filter(u => u.role === 'faculty').length || 0,
         recruiter: users?.filter(u => u.role === 'recruiter').length || 0,
-        admin: users?.filter(u => u.role === 'admin').length || 0
+        admin: users?.filter(u => u.role === 'admin' || u.role === 'org_admin').length || 0
       }
     },
     certificates: {
@@ -54,13 +54,13 @@ export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (_req, 
     roleRequests: {
       pending: pendingRoleRequests
     },
+    // Process uptime of a serverless instance is not a meaningful platform metric
     system: {
-      uptime: process.uptime(),
+      available: false,
+      uptime: null,
       timestamp: new Date().toISOString()
     }
   };
 
   return success(analytics);
 });
-
-

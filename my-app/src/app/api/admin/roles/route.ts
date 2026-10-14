@@ -1,254 +1,196 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
-import { withRole, success, apiError, parseAndValidateBody, getRequestedOrgId, getOrganizationContext, isRecruiterContext } from '@/lib/api';
+import {
+  withRole,
+  success,
+  apiError,
+  parseAndValidateBody,
+  resolveAdminOrg,
+  assertSuperAdmin,
+  isUuid,
+  isKnownRole,
+  writeAudit,
+} from '@/lib/api';
+import { applyRoleChange } from '@/lib/api/utils/roleMutations';
 
 type UserRoleRow = {
   user_id: string;
   role?: string;
   organization_id?: string | null;
+  approval_status?: string | null;
   is_super_admin?: boolean;
+  is_primary_admin?: boolean;
   created_at?: string;
   updated_at?: string;
   assigned_by?: string;
 };
 
-type ProfileRow = { id: string; full_name?: string };
+type ProfileRow = { id: string; full_name?: string | null; email?: string | null; created_at?: string | null };
 
-type AuthList = { users: Array<{ id: string; email?: string; created_at?: string; user_metadata?: Record<string, unknown> }> };
+const ADMIN_ROLES = ['admin', 'org_admin', 'super_admin'];
+const MAX_PAGE = 500;
+
+/** Organization the caller asks to act on: header first, then query string. */
+function requestedOrgFrom(request: NextRequest): string | null {
+  return request.headers.get('X-Organization-ID') || new URL(request.url).searchParams.get('organization_id');
+}
 
 /**
  * GET /api/admin/roles
- * List all users and their roles (Admin only)
+ * List users and their roles. Admin-class only, scoped to ONE organization the
+ * caller administers. A super_admin without an explicit organization sees all.
  */
-export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (request, { user }) => {
+export const GET = withRole(ADMIN_ROLES, async (request, { user }) => {
   const adminSupabase = await createSupabaseAdminClient();
 
-  // Determine requested organization (header or query/body)
-  const requestedOrgId = await getRequestedOrgId(request);
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
+  const scope = await resolveAdminOrg(user, requestedOrgFrom(request), 'admin');
 
-  // Build query according to context: super_admin can view across orgs; org_admin/admin only their org
-  const query = adminSupabase
+  const { searchParams } = new URL(request.url);
+  const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '200', 10) || 200, 1), MAX_PAGE);
+  const offset = Math.max(parseInt(searchParams.get('offset') || '0', 10) || 0, 0);
+
+  let query = adminSupabase
     .from('user_roles')
-    .select(`
-      user_id,
-      role,
-      organization_id,
-      is_super_admin,
-      created_at,
-      updated_at,
-      assigned_by
-    `)
-    .order('created_at', { ascending: false });
+    .select('user_id, role, organization_id, approval_status, is_super_admin, is_primary_admin, created_at, updated_at, assigned_by')
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
 
-  if (orgContext && !isRecruiterContext(orgContext) && !orgContext.isSuperAdmin) {
-    // Restrict to the caller's organization
-    query.eq('organization_id', orgContext.organizationId);
-  } else if (orgContext && orgContext.isSuperAdmin && requestedOrgId) {
-    // If super admin requested a specific org, filter to that org
-    query.eq('organization_id', requestedOrgId);
+  if (!(scope.isSuperAdmin && !scope.requested)) {
+    query = query.eq('organization_id', scope.organizationId);
   }
 
-  const { data: users, error } = await query;
-
-  if (error) return apiError.internal(error.message);
-
-  // Get full_name from profiles table (primary source)
-  const userIds = (users as UserRoleRow[] | undefined)?.map(u => u.user_id) || [];
-  const { data: profiles } = await adminSupabase
-    .from('profiles')
-    .select('id, full_name')
-    .in('id', userIds);
-  
-  const profileMap = new Map(((profiles || []) as ProfileRow[]).map(p => [p.id, p.full_name]));
-
-  // Get user details from auth
-  const authResult = await adminSupabase.auth.admin.listUsers();
-  const authUsers = authResult.data as AuthList | undefined;
-  const authError = authResult.error;
-
-  if (authError) {
-    console.error('Error fetching auth users:', authError);
-    // Return users without email details if auth fetch fails
-    return success(users);
+  const { data, error } = await query;
+  if (error) {
+    console.error('[admin/roles GET] query failed:', error);
+    return apiError.internal('Failed to load roles');
   }
+  const users = (data ?? []) as UserRoleRow[];
 
-  // Merge user roles with auth user data and profile data
-  const usersWithAuth = (users as UserRoleRow[] | undefined)?.map(userRole => {
-    const authUser = (authUsers?.users || []).find(au => au.id === userRole.user_id);
-    const profileFullName = profileMap.get(userRole.user_id);
-    const metadata = authUser?.user_metadata as { full_name?: string; name?: string } | undefined;
-    const full_name = profileFullName || metadata?.full_name || metadata?.name;
-    
+  const userIds = users.map((u) => u.user_id);
+  const { data: profiles } = userIds.length
+    ? await adminSupabase.from('profiles').select('id, full_name, email, created_at').in('id', userIds)
+    : { data: [] as ProfileRow[] };
+  const profileMap = new Map(((profiles ?? []) as ProfileRow[]).map((p) => [p.id, p]));
+
+  // Emails come from profiles; only fall back to Auth for the few rows without one
+  const missing = userIds.filter((id) => !profileMap.get(id)?.email).slice(0, 50);
+  const authMap = new Map<string, { email?: string; created_at?: string; name?: string }>();
+  await Promise.all(
+    missing.map(async (id) => {
+      const { data: au } = await adminSupabase.auth.admin.getUserById(id);
+      if (au?.user) {
+        const meta = au.user.user_metadata as { full_name?: string; name?: string } | undefined;
+        authMap.set(id, { email: au.user.email, created_at: au.user.created_at, name: meta?.full_name || meta?.name });
+      }
+    })
+  );
+
+  const result = users.map((userRole) => {
+    const profile = profileMap.get(userRole.user_id);
+    const au = authMap.get(userRole.user_id);
+    const email = profile?.email || au?.email;
     return {
       ...userRole,
-      auth_users: authUser ? {
-        email: authUser.email,
-        created_at: authUser.created_at,
-        full_name: full_name || null
-      } : null
+      auth_users: email
+        ? {
+            email,
+            created_at: au?.created_at ?? profile?.created_at ?? userRole.created_at,
+            full_name: profile?.full_name || au?.name || null,
+          }
+        : null,
     };
-  }) || [];
+  });
 
-  return success(usersWithAuth);
+  return success(result);
 });
 
 /**
  * POST /api/admin/roles
- * Assign or update user role (Admin only)
+ * Assign or update a user's role inside ONE organization.
+ * The caller must outrank both the target's current and the new role.
  */
-export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (request, { user, role: callerRole }) => {
+export const POST = withRole(ADMIN_ROLES, async (request, { user }) => {
   const { data: body, error: validationError } = await parseAndValidateBody<{
     user_id: string;
     role: string;
     organization_id?: string | null;
   }>(request, ['user_id', 'role']);
-  
   if (validationError) return validationError;
 
-  const allowedRoles = ['student', 'faculty', 'admin', 'recruiter', 'org_admin'];
-  // Only super_admin can assign super_admin
-  if (body.role === 'super_admin' && callerRole !== 'super_admin') {
-    return apiError.forbidden('Only super_admin can assign super_admin role');
-  }
+  if (!isUuid(body.user_id)) return apiError.validation('Invalid user_id');
+  if (!isKnownRole(body.role)) return apiError.validation('Invalid role');
 
-  if (!allowedRoles.includes(body.role) && body.role !== 'super_admin') {
-    return apiError.validation('Invalid role');
-  }
-
-  // Determine organization scope
   const adminSupabase = await createSupabaseAdminClient();
-  const requestedOrgId = body.organization_id ?? (await getRequestedOrgId(request));
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
 
-  // If caller is org_admin or admin they can only assign within their organization
-  if (callerRole === 'org_admin' || callerRole === 'admin') {
-    if (isRecruiterContext(orgContext)) {
-      return apiError.forbidden('Recruiters cannot assign roles');
-    }
-    if (!requestedOrgId || requestedOrgId !== orgContext.organizationId) {
-      return apiError.forbidden('Insufficient permissions to assign roles outside your organization');
-    }
+  // super_admin is a platform-level (NULL organization) role
+  const platformLevel = body.role === 'super_admin';
+  const requestedOrg = body.organization_id || requestedOrgFrom(request);
+  if (platformLevel && requestedOrg) {
+    return apiError.validation('super_admin is a platform-level role and takes no organization_id');
   }
 
-  // For org_admin role, organization_id is required
-  if (body.role === 'org_admin' && !requestedOrgId) {
-    return apiError.validation('organization_id is required to assign org_admin role');
-  }
-
-  // Prevent admins from demoting themselves if they only have a single admin role
-  if (body.user_id === user.id && body.role !== 'admin' && callerRole === 'admin') {
-    return apiError.forbidden('Admins cannot demote themselves');
-  }
-
-  // Check if user exists in that organization
-  const { data: existingRole, error: userError } = await adminSupabase
-    .from('user_roles')
-    .select('user_id')
-    .eq('user_id', body.user_id)
-    .eq('organization_id', requestedOrgId ?? null)
-    .single();
-
-  if (userError && userError.code !== 'PGRST116') {
-    return apiError.internal(userError.message);
-  }
-
-  const now = new Date().toISOString();
-
-  if (existingRole) {
-    const { error } = await adminSupabase
-      .from('user_roles')
-      .update({ role: body.role, assigned_by: user.id, updated_at: now })
-      .eq('user_id', body.user_id)
-      .eq('organization_id', requestedOrgId ?? null);
-
-    if (error) return apiError.internal(error.message);
+  let actorRole = 'super_admin';
+  let orgId: string | null = null;
+  if (platformLevel) {
+    await assertSuperAdmin(user);
   } else {
-    const { error } = await adminSupabase
-      .from('user_roles')
-      .insert({
-        user_id: body.user_id,
-        role: body.role,
-        organization_id: requestedOrgId ?? null,
-        assigned_by: user.id,
-        created_at: now,
-        updated_at: now
-      });
-
-    if (error) return apiError.internal(error.message);
+    const scope = await resolveAdminOrg(user, requestedOrg, 'admin');
+    actorRole = scope.role;
+    orgId = scope.organizationId;
   }
 
-  return success({ user_id: body.user_id, role: body.role, organization_id: requestedOrgId ?? null }, 'Role updated successfully');
+  const result = await applyRoleChange(adminSupabase, {
+    actorId: user.id,
+    actorRole,
+    orgId,
+    targetUserId: body.user_id,
+    newRole: body.role,
+  });
+  if (!result.ok) return result.response;
+
+  await writeAudit(adminSupabase, {
+    actorId: user.id,
+    action: 'role_assign',
+    targetType: 'user_role',
+    targetId: body.user_id,
+    organizationId: orgId,
+    details: { old_role: result.oldRole, new_role: body.role },
+  });
+
+  return success({ user_id: body.user_id, role: body.role, organization_id: orgId }, 'Role updated successfully');
 });
 
-// DELETE /api/admin/roles - Remove user role (revert to default student)
-export const DELETE = withRole(['admin', 'org_admin', 'super_admin'], async (req: NextRequest, { user, role: callerRole }) => {
-
+/**
+ * DELETE /api/admin/roles?user_id=...&organization_id=...
+ * Remove a user's role in ONE organization.
+ */
+export const DELETE = withRole(ADMIN_ROLES, async (req: NextRequest, { user }) => {
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get('user_id');
-  const organizationId = searchParams.get('organization_id');
-  
-  if (!userId) {
-    throw apiError.badRequest('Missing user_id parameter');
-  }
 
-  // Prevent removing your own role
-  if (userId === user.id) {
-    throw apiError.forbidden('Admins cannot remove their own role');
-  }
+  if (!userId) return apiError.badRequest('Missing user_id parameter');
+  if (!isUuid(userId)) return apiError.validation('Invalid user_id');
 
+  const scope = await resolveAdminOrg(user, requestedOrgFrom(req), 'admin');
   const adminSupabase = await createSupabaseAdminClient();
 
-  // Determine organization scope: if caller is org_admin/admin they can only remove roles in their org
-  const orgContext = await getOrganizationContext(user, organizationId || undefined);
-  if ((callerRole === 'org_admin' || callerRole === 'admin') && orgContext && !isRecruiterContext(orgContext) && !orgContext.isSuperAdmin) {
-    if (!organizationId || organizationId !== orgContext.organizationId) {
-      return apiError.forbidden('Insufficient permissions to remove roles outside your organization');
-    }
-  }
+  const result = await applyRoleChange(adminSupabase, {
+    actorId: user.id,
+    actorRole: scope.role,
+    orgId: scope.organizationId,
+    targetUserId: userId,
+    newRole: null,
+  });
+  if (!result.ok) return result.response;
 
-  // If deleting an admin-like role, ensure org will still have at least one admin/org_admin/super_admin
-  const { data: targetRoleRow, error: targetErr } = await adminSupabase
-    .from('user_roles')
-    .select('role, organization_id')
-    .eq('user_id', userId)
-    .maybeSingle();
+  await writeAudit(adminSupabase, {
+    actorId: user.id,
+    action: 'role_remove',
+    targetType: 'user_role',
+    targetId: userId,
+    organizationId: scope.organizationId,
+    details: { old_role: result.oldRole },
+  });
 
-  if (targetErr) {
-    return apiError.internal('Failed to lookup target user role');
-  }
-
-  const targetRole = targetRoleRow?.role || null;
-  const targetOrg = organizationId ?? targetRoleRow?.organization_id ?? null;
-
-  if (['admin', 'org_admin'].includes(targetRole || '')) {
-    // Count admin+org_admin+super_admin in that organization (or system-wide if null)
-    const roleCountQuery = adminSupabase
-      .from('user_roles')
-      .select('user_id', { count: 'exact', head: true })
-      .in('role', ['org_admin', 'admin', 'super_admin']);
-
-    if (targetOrg) {
-      roleCountQuery.eq('organization_id', targetOrg);
-    }
-
-    const { count: adminCount, error: countError } = await roleCountQuery;
-
-    if (countError) return apiError.internal('Failed to check admin count');
-
-    if (adminCount && adminCount <= 1) {
-      return apiError.forbidden('Cannot remove role: At least one admin must remain for the organization');
-    }
-  }
-
-  // Delete the specific role row (optionally scoped to organization)
-  const deleteQuery = adminSupabase.from('user_roles').delete().eq('user_id', userId);
-  if (organizationId !== null) deleteQuery.eq('organization_id', organizationId as string);
-
-  const { error } = await deleteQuery;
-
-  if (error) return apiError.internal(error.message);
-
-  return success({ user_id: userId, message: 'Role removed, user reverted to default student role' });
+  return success({ user_id: userId, organization_id: scope.organizationId, message: 'Role removed' });
 });
-

@@ -47,15 +47,18 @@ export async function getRecruiterContext(
   const supabase = await createSupabaseServerClient();
 
   // 1. Verify user is a recruiter with NULL organization_id
-  const { data: recruiterRole, error: roleError } = await supabase
+  // The platform-level row must be APPROVED: a recruiter whose platform
+  // access is pending/denied has no access, even if org rows exist.
+  const { data: recruiterRoles, error: roleError } = await supabase
     .from('user_roles')
-    .select('role, organization_id')
+    .select('role, organization_id, approval_status')
     .eq('user_id', user.id)
     .is('organization_id', null)
     .eq('role', 'recruiter')
-    .single();
+    .eq('approval_status', 'approved')
+    .limit(1);
 
-  if (roleError || !recruiterRole) {
+  if (roleError || !recruiterRoles || recruiterRoles.length === 0) {
     throw apiError.forbidden('User is not a recruiter');
   }
 
@@ -104,21 +107,24 @@ export async function getRecruiterContext(
 export async function getRecruiterOrganizations(userId: string) {
   const supabase = await createSupabaseServerClient();
 
+  // Single source of truth: per-org recruiter rows in user_roles
+  // (the legacy recruiter_org_access table no longer drives access).
   const { data, error } = await supabase
-    .from('recruiter_org_access')
+    .from('user_roles')
     .select(`
       organization_id,
-      status,
-      requested_at,
+      approval_status,
+      created_at,
       approved_at,
       organizations!inner (
         id,
         name,
-        domain,
         website
       )
     `)
-    .eq('recruiter_user_id', userId)
+    .eq('user_id', userId)
+    .eq('role', 'recruiter')
+    .not('organization_id', 'is', null)
     .order('approved_at', { ascending: false });
 
   if (error) {
@@ -126,7 +132,13 @@ export async function getRecruiterOrganizations(userId: string) {
     throw apiError.internal('Failed to fetch organizations');
   }
 
-  return data;
+  return (data ?? []).map((r) => ({
+    organization_id: r.organization_id,
+    status: r.approval_status,
+    requested_at: r.created_at,
+    approved_at: r.approved_at,
+    organizations: r.organizations,
+  }));
 }
 
 /**
@@ -157,12 +169,13 @@ export async function hasRecruiterAccess(
   const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
-    .from('recruiter_org_access')
-    .select('id')
-    .eq('recruiter_user_id', userId)
+    .from('user_roles')
+    .select('user_id')
+    .eq('user_id', userId)
+    .eq('role', 'recruiter')
     .eq('organization_id', organizationId)
-    .eq('status', 'approved')
-    .single();
+    .eq('approval_status', 'approved')
+    .limit(1);
 
-  return !error && !!data;
+  return !error && !!data && data.length > 0;
 }

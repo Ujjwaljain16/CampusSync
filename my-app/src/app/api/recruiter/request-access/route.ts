@@ -1,185 +1,82 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { NextResponse } from 'next/server';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { withSession, apiError, isUuid } from '@/lib/api';
+import { createRecruiterAccessRequest } from '@/lib/api/utils/recruiterAccess';
+
+/**
+ * Thin alias of /api/recruiter/access-requests.
+ * Both create / read the SAME per-organization `user_roles` recruiter rows,
+ * which is what every recruiter data route and the org admins' approve /
+ * revoke endpoints use. (The legacy recruiter_org_access table is not used.)
+ */
 
 /**
  * POST /api/recruiter/request-access
- * 
- * Recruiter requests access to an organization.
+ * Body: { organization_id, notes? }
  */
-export async function POST(request: NextRequest) {
+export const POST = withSession(async (request, { user }) => {
+  let body: { organization_id?: unknown; notes?: unknown };
   try {
-    const supabase = await createSupabaseServerClient();
-
-    // Check authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Verify user is a recruiter
-    const { data: userRole, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .is('organization_id', null)
-      .single();
-
-    if (roleError || userRole?.role !== 'recruiter') {
-      return NextResponse.json(
-        { error: 'Only recruiters can request organization access' },
-        { status: 403 }
-      );
-    }
-
-    const body = await request.json();
-    const { organization_id, notes } = body;
-
-    if (!organization_id) {
-      return NextResponse.json(
-        { error: 'organization_id is required' },
-        { status: 400 }
-      );
-    }
-
-    // Verify organization exists
-    const { data: org, error: orgError } = await supabase
-      .from('organizations')
-      .select('id, name')
-      .eq('id', organization_id)
-      .eq('is_active', true)
-      .single();
-
-    if (orgError || !org) {
-      return NextResponse.json(
-        { error: 'Organization not found' },
-        { status: 404 }
-      );
-    }
-
-    // Check if request already exists
-    const { data: existingRequest } = await supabase
-      .from('recruiter_org_access')
-      .select('id, status')
-      .eq('recruiter_user_id', user.id)
-      .eq('organization_id', organization_id)
-      .maybeSingle();
-
-    if (existingRequest) {
-      if (existingRequest.status === 'pending') {
-        return NextResponse.json(
-          { error: 'You already have a pending request for this organization' },
-          { status: 409 }
-        );
-      }
-      if (existingRequest.status === 'approved') {
-        return NextResponse.json(
-          { error: 'You already have access to this organization' },
-          { status: 409 }
-        );
-      }
-      // If denied or revoked, allow creating a new request
-      // Delete old request first
-      await supabase
-        .from('recruiter_org_access')
-        .delete()
-        .eq('id', existingRequest.id);
-    }
-
-    // Create access request
-    const { data: newRequest, error: insertError } = await supabase
-      .from('recruiter_org_access')
-      .insert({
-        recruiter_user_id: user.id,
-        organization_id,
-        status: 'pending',
-        notes: notes || null
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error('[REQUEST_ACCESS] Failed to create request:', insertError);
-      return NextResponse.json(
-        { error: 'Failed to create access request' },
-        { status: 500 }
-      );
-    }
-
-    // Log audit event
-    await supabase.from('audit_logs').insert({
-      user_id: user.id,
-      action: 'recruiter_access_requested',
-      resource_type: 'organization',
-      resource_id: organization_id,
-      metadata: { request_id: newRequest.id, organization_name: org.name }
-    });
-
-    return NextResponse.json({
-      success: true,
-      requestId: newRequest.id,
-      status: 'pending',
-      message: `Access request sent to ${org.name}. You'll be notified when it's reviewed.`
-    }, { status: 201 });
-
-  } catch (error: unknown) {
-    console.error('[REQUEST_ACCESS] Error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    body = await request.json();
+  } catch {
+    return apiError.badRequest('Invalid JSON body');
   }
-}
+  const organization_id = body.organization_id;
+  const notes = typeof body.notes === 'string' ? body.notes.slice(0, 1000) : null;
+
+  if (!organization_id) return apiError.badRequest('organization_id is required');
+  if (typeof organization_id !== 'string' || !isUuid(organization_id)) {
+    return apiError.validation('Invalid organization_id');
+  }
+
+  const admin = await createSupabaseAdminClient();
+  const outcome = await createRecruiterAccessRequest(admin, user.id, organization_id, notes);
+  return NextResponse.json(outcome.body, { status: outcome.status });
+});
 
 /**
  * GET /api/recruiter/request-access
- * 
- * Get all access requests for the logged-in recruiter.
+ * The logged-in recruiter's access requests (same shape as before).
  */
-export async function GET() {
-  try {
-    const supabase = await createSupabaseServerClient();
+export const GET = withSession(async (_request, { user }) => {
+  const admin = await createSupabaseAdminClient();
 
-    // Check authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const { data: rows, error } = await admin
+    .from('user_roles')
+    .select('organization_id, approval_status, created_at, approved_at, approval_notes')
+    .eq('user_id', user.id)
+    .eq('role', 'recruiter')
+    .not('organization_id', 'is', null)
+    .order('created_at', { ascending: false });
 
-    // Get all access requests for this recruiter
-    const { data: requests, error } = await supabase
-      .from('recruiter_org_access')
-      .select(`
-        id,
-        status,
-        requested_at,
-        reviewed_at,
-        notes,
-        review_notes:reviewed_by,
-        organization:organization_id (
-          id,
-          name,
-          slug,
-          type
-        )
-      `)
-      .eq('recruiter_user_id', user.id)
-      .order('requested_at', { ascending: false });
-
-    if (error) {
-      console.error('[GET_REQUESTS] Error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch requests' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ requests });
-
-  } catch (error: unknown) {
+  if (error) {
     console.error('[GET_REQUESTS] Error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return apiError.internal('Failed to fetch requests');
   }
-}
+
+  const list = (rows ?? []) as Array<{
+    organization_id: string;
+    approval_status: string;
+    created_at: string;
+    approved_at: string | null;
+    approval_notes: string | null;
+  }>;
+  const orgIds = list.map((r) => r.organization_id);
+  const { data: orgs } = orgIds.length
+    ? await admin.from('organizations').select('id, name, slug, type').in('id', orgIds)
+    : { data: [] };
+  type Org = { id: string; name: string; slug: string; type: string };
+  const orgMap = new Map(((orgs ?? []) as Org[]).map((o) => [o.id, o]));
+
+  const requests = list.map((r) => ({
+    id: r.organization_id,
+    organization_id: r.organization_id,
+    status: r.approval_status,
+    requested_at: r.created_at,
+    reviewed_at: r.approved_at,
+    notes: r.approval_notes,
+    organization: orgMap.get(r.organization_id) ?? null,
+  }));
+
+  return NextResponse.json({ requests });
+});

@@ -1,167 +1,186 @@
 import { NextRequest } from 'next/server';
-import { withRole, isValidEmail, success, apiError, parseAndValidateBody, getOrganizationContext, isRecruiterContext } from '@/lib/api';
-import { createSupabaseAdminClient, createSupabaseServerClient } from '@/lib/supabaseServer';
+import {
+  withRole,
+  isValidEmail,
+  success,
+  apiError,
+  parseAndValidateBody,
+  resolveAdminOrg,
+  isKnownRole,
+  checkRoleChange,
+  findAuthUserByEmail,
+  writeAudit,
+} from '@/lib/api';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { getTargetRoleRow } from '@/lib/api/utils/roleIntegrity';
+import { applyRoleChange } from '@/lib/api/utils/roleMutations';
 
 interface InviteBody {
   email: string;
   role: string;
   organizationId?: string; // Optional: invite to specific organization
+  organization_id?: string;
 }
 
-// POST /api/admin/invite - Send admin invitation email
+const PLACEHOLDER_TARGET = '00000000-0000-0000-0000-00000000ffff';
+
+/**
+ * POST /api/admin/invite
+ *
+ * Invite a person to ONE organization the caller administers.
+ *  - caller must be admin-class in that organization and outrank the invited role
+ *  - never touches a role row in any other organization
+ *  - new members are recorded as `pending` until the invitation is accepted /
+ *    approved (an invite must not create live privileges by itself)
+ *  - an existing member of the organization gets a regular, guarded role change
+ */
 export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (req: NextRequest, { user }) => {
   const result = await parseAndValidateBody<InviteBody>(req, ['email', 'role']);
   if (result.error) return result.error;
 
-  const { email, role, organizationId } = result.data;
+  const { role } = result.data;
+  const requestedOrg = result.data.organizationId || result.data.organization_id || req.headers.get('X-Organization-ID');
+  const email = typeof result.data.email === 'string' ? result.data.email.trim().toLowerCase() : '';
 
-  if (!['student', 'faculty', 'admin', 'org_admin', 'recruiter'].includes(role)) {
-    throw apiError.badRequest('Invalid role');
+  if (!isKnownRole(role) || role === 'super_admin') {
+    return apiError.badRequest('Invalid role');
   }
-  if (typeof email !== 'string' || !isValidEmail(email)) {
-    throw apiError.badRequest('Invalid email');
-  }
-
-  // Get organization context for multi-tenancy
-  await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user, organizationId);
-  
-  // Get organization ID for single-org contexts
-  const contextOrgId = isRecruiterContext(orgContext) 
-    ? orgContext.selectedOrganization || orgContext.accessibleOrganizations[0]
-    : orgContext.organizationId;
-  
-  // Verify user has permission to invite to this organization
-  if (organizationId && organizationId !== contextOrgId && !orgContext.isSuperAdmin) {
-    throw apiError.forbidden('You do not have permission to invite users to this organization');
+  if (!email || !isValidEmail(email)) {
+    return apiError.badRequest('Invalid email');
   }
 
-  const targetOrgId = organizationId || contextOrgId;
-  const adminSupabase = await createSupabaseAdminClient();
-  
-  // Check if user already exists using listUsers
-  const { data: usersData, error: listError } = await adminSupabase.auth.admin.listUsers({
-    page: 1,
-    perPage: 1000
+  const scope = await resolveAdminOrg(user, requestedOrg, 'admin');
+  const orgId = scope.organizationId;
+
+  // The caller must outrank the role being handed out
+  const decision = checkRoleChange({
+    actorRole: scope.role,
+    actorId: user.id,
+    targetUserId: PLACEHOLDER_TARGET,
+    targetCurrentRole: null,
+    newRole: role,
   });
-  
-  if (listError) {
-    console.error('Error listing users:', listError);
-    throw apiError.internal(listError.message);
+  if (!decision.ok) return apiError.forbidden(decision.message);
+
+  const adminSupabase = await createSupabaseAdminClient();
+
+  let existingUser;
+  try {
+    existingUser = await findAuthUserByEmail(adminSupabase, email);
+  } catch (err) {
+    console.error('[admin/invite] user lookup failed:', err);
+    return apiError.internal('Failed to look up user');
   }
-  
-  const existingUser = usersData.users.find((u: { email?: string }) => u.email === email);
-  
+
+  const now = new Date().toISOString();
+
   if (existingUser) {
-    // User exists, check if they already have a role
-    const { data: existingRole, error: roleCheckError } = await adminSupabase
-      .from('user_roles')
-      .select('role, organization_id')
-      .eq('user_id', existingUser.id)
-      .single();
-    
-    if (roleCheckError && roleCheckError.code !== 'PGRST116') {
-      console.error('Error checking role:', roleCheckError);
-      throw apiError.internal(roleCheckError.message);
-    }
-    
-    if (existingRole) {
-      // Tenant isolation: never modify a user who belongs to a different organization
-      if (!orgContext.isSuperAdmin && existingRole.organization_id !== targetOrgId) {
-        throw apiError.forbidden('User belongs to a different organization');
-      }
+    // ONLY the (user, this organization) row is considered. Rows in other
+    // organizations are none of this admin's business and are never modified.
+    const existingRow = await getTargetRoleRow(adminSupabase, existingUser.id, orgId);
 
-      // User already has a role, update it
-      const { error: updateError } = await adminSupabase
-        .from('user_roles')
-        .update({
-          role,
-          assigned_by: user.id,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', existingUser.id);
-      
-      if (updateError) {
-        console.error('Error updating role:', updateError);
-        throw apiError.internal(updateError.message);
-      }
-      
-      return success({ 
-        message: `Role updated to '${role}' for existing user ${email}`,
-        user_id: existingUser.id,
-        previous_role: existingRole.role
+    if (existingRow) {
+      const change = await applyRoleChange(adminSupabase, {
+        actorId: user.id,
+        actorRole: scope.role,
+        orgId,
+        targetUserId: existingUser.id,
+        newRole: role,
       });
-    } else {
-      // User exists but has no role, insert new role with organization
-      const { error: insertError } = await adminSupabase
-        .from('user_roles')
-        .insert({
-          user_id: existingUser.id,
-          organization_id: targetOrgId, // Multi-org support
-          role,
-          assigned_by: user.id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-      
-      if (insertError) {
-        console.error('Error inserting role:', insertError);
-        throw apiError.internal(insertError.message);
-      }
-      
-      // Update profile with organization if needed
-      await adminSupabase
-        .from('profiles')
-        .upsert({
-          id: existingUser.id,
-          organization_id: targetOrgId,
-          role: role,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' });
-      
-      return success({ 
-        message: `Role '${role}' assigned to existing user ${email}`,
+      if (!change.ok) return change.response;
+
+      await writeAudit(adminSupabase, {
+        actorId: user.id,
+        action: 'invite_role_update',
+        targetType: 'user_role',
+        targetId: existingUser.id,
+        organizationId: orgId,
+        details: { old_role: change.oldRole, new_role: role },
+      });
+
+      return success({
+        message: `Role updated to '${role}' for existing member ${email}`,
         user_id: existingUser.id,
-        organization_id: targetOrgId
+        organization_id: orgId,
+        previous_role: change.oldRole,
       });
     }
-  } else {
-    // User doesn't exist, send invitation
-    const { data: inviteData, error: inviteError } = await adminSupabase.auth.admin.inviteUserByEmail(
-      email,
-      {
-        data: {
-          invited_role: role,
-          invited_by: user.id,
-          organization_id: targetOrgId // Multi-org support
-        }
-      }
-    );
-    
-    if (inviteError) {
-      console.error('Error sending invitation:', inviteError);
-      throw apiError.internal(inviteError.message);
+
+    const { error: insertError } = await adminSupabase.from('user_roles').insert({
+      user_id: existingUser.id,
+      organization_id: orgId,
+      role,
+      approval_status: 'pending',
+      assigned_by: user.id,
+      created_at: now,
+      updated_at: now,
+    });
+    if (insertError) {
+      console.error('[admin/invite] pending role insert failed:', insertError);
+      return apiError.internal('Failed to record the invitation');
     }
-    
-    // Pre-create user_role entry for invited user
-    if (inviteData.user?.id) {
-      await adminSupabase
-        .from('user_roles')
-        .insert({
-          user_id: inviteData.user.id,
-          organization_id: targetOrgId, // Multi-org support
-          role,
-          assigned_by: user.id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-    }
-    
-    return success({ 
-      message: `Invitation sent to ${email} with role '${role}'`,
-      user_id: inviteData.user?.id,
-      organization_id: targetOrgId
-    }, 'Invitation sent successfully');
+
+    await writeAudit(adminSupabase, {
+      actorId: user.id,
+      action: 'invite_existing_user',
+      targetType: 'user_role',
+      targetId: existingUser.id,
+      organizationId: orgId,
+      details: { role, status: 'pending' },
+    });
+
+    return success({
+      message: `Invitation recorded for existing user ${email}; the '${role}' role is pending approval`,
+      user_id: existingUser.id,
+      organization_id: orgId,
+      status: 'pending',
+    });
   }
-});
 
+  // New person: send the invitation e-mail, record a PENDING role
+  const { data: inviteData, error: inviteError } = await adminSupabase.auth.admin.inviteUserByEmail(email, {
+    data: {
+      invited_role: role,
+      invited_by: user.id,
+      organization_id: orgId,
+    },
+  });
+
+  if (inviteError || !inviteData?.user?.id) {
+    console.error('[admin/invite] invitation failed:', inviteError);
+    return apiError.internal('Failed to send invitation');
+  }
+
+  const { error: roleError } = await adminSupabase.from('user_roles').insert({
+    user_id: inviteData.user.id,
+    organization_id: orgId,
+    role,
+    approval_status: 'pending',
+    assigned_by: user.id,
+    created_at: now,
+    updated_at: now,
+  });
+  if (roleError) {
+    console.error('[admin/invite] pending role insert failed:', roleError);
+    return apiError.internal('Invitation sent but the role could not be recorded');
+  }
+
+  await writeAudit(adminSupabase, {
+    actorId: user.id,
+    action: 'invite_sent',
+    targetType: 'user_role',
+    targetId: inviteData.user.id,
+    organizationId: orgId,
+    details: { role, status: 'pending' },
+  });
+
+  return success(
+    {
+      message: `Invitation sent to ${email} with role '${role}' (pending acceptance)`,
+      user_id: inviteData.user.id,
+      organization_id: orgId,
+      status: 'pending',
+    },
+    'Invitation sent successfully'
+  );
+});

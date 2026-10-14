@@ -38,7 +38,8 @@ const PUBLIC_ROUTES: Record<string, string> = {
   'diagnose': 'Connectivity diagnostics; public (review: consider restricting in production).',
   'health': 'Liveness probe for uptime monitors.',
   'recruiter/bulk-verify': 'Retired: returns 410 Gone and never touches the database (recruiters must not change verification status).',
-  'ping-supabase':'Keep-alive ping for external uptime monitors; no user data.',
+  'notifications/role-approval': 'Retired: every method returns 410 Gone, no logic and no data access.',
+  'ping-supabase': 'Keep-alive ping for external uptime monitors; no user data.',
   'public/portfolio/[userId]': 'Public student portfolio by design (review: expose only opted-in fields).',
   'recruiter/verify-credential': 'Public credential verification by JWS/VC (rate limited).',
   'vcs/verify': 'Public credential verification endpoint (rate limited).',
@@ -51,6 +52,11 @@ const GUARDS: RegExp[] = [
   /withErrorHandler\(/,
   /requireRole\(/,
   /recruiterRoute\(/, // src/lib/privacy/recruiterAccess.ts: auth + approved recruiter + org access + rate limit
+  /withSession(?:<[^>]*>)?\(/, // src/lib/api/middleware/routeAuth.ts: authenticated session (+ route params)
+  /withSuperAdmin(?:<[^>]*>)?\(/, // same wrapper plus an approved super_admin row
+  /authorizeOrg\(/, // per-organization role check on approved rows only
+  /resolveAdminOrg\(/, // per-organization admin check
+  /assertSuperAdmin\(/,
   /getServerUserWithRole\(/,
   /supabase\.auth\.getUser\(/i, // also matches authSupabase.auth.getUser(
   /WEBHOOK_SECRET/,

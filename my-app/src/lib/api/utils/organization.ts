@@ -7,6 +7,14 @@ import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import type { User } from '@supabase/supabase-js';
 import { apiError } from './response';
 import { getRecruiterContext, type RecruiterContext } from './recruiter';
+import { isUuid } from './validation';
+import {
+  isApprovedRow,
+  isKnownRole,
+  pickHighestRow,
+  ORG_ADMIN_ROLES,
+  type RoleRow,
+} from './roles';
 
 export interface OrganizationContext {
   organizationId: string;
@@ -30,13 +38,13 @@ export function isRecruiterContext(context: OrganizationContext | RecruiterConte
  * Helper to get organization IDs from any context type
  * For regular users: returns single org ID in array
  * For recruiters: returns all accessible org IDs or selected org
- * 
+ *
  * @param context - Organization or Recruiter context
  * @returns Array of organization IDs to query
  */
 export function getTargetOrganizationIds(context: OrganizationContext | RecruiterContext): string[] {
   if (isRecruiterContext(context)) {
-    return context.selectedOrganization 
+    return context.selectedOrganization
       ? [context.selectedOrganization]
       : context.accessibleOrganizations;
   }
@@ -46,19 +54,32 @@ export function getTargetOrganizationIds(context: OrganizationContext | Recruite
 /**
  * Get the user's current organization context
  * This should be called in every multi-tenant API route
- * 
+ *
  * FOR RECRUITERS: Use this function - it will automatically detect and handle recruiter multi-org access
- * 
+ *
+ * Resolution rules (deterministic):
+ *  - Only APPROVED user_roles rows count. Pending / denied rows are ignored.
+ *  - super_admin (any approved super_admin row) -> may use any organization.
+ *  - With `requestedOrgId`: the user must hold an approved row IN THAT ORG; the
+ *    role reported is the highest-privilege approved role they hold there
+ *    (several rows are fine). `isOrgAdmin` is computed from that role, so an
+ *    admin of org A who is a student in org B is NOT an org admin for B.
+ *  - Without `requestedOrgId`: the highest-privilege approved row wins
+ *    (ties: oldest created_at). It is no longer "whichever row was created first".
+ *
+ * NOTE: this does not enforce a minimum role. For admin-only actions call
+ * `authorizeOrg` (or check `isOrgAdmin` of the returned context).
+ *
  * @param user - The authenticated user from withAuth/withRole
  * @param requestedOrgId - Optional: specific org ID from request params/body or X-Organization-ID header
  * @returns Organization context with role information (or RecruiterContext for recruiters)
- * 
+ *
  * @example
  * ```ts
  * export const GET = withAuth(async (request, { user }) => {
  *   const requestedOrgId = request.headers.get('X-Organization-ID');
  *   const orgContext = await getOrganizationContext(user, requestedOrgId);
- *   
+ *
  *   // For recruiters with multi-org access, check if it's a RecruiterContext
  *   if ('isRecruiter' in orgContext && orgContext.isRecruiter) {
  *     // Handle recruiter with multiple orgs
@@ -81,10 +102,10 @@ export async function getOrganizationContext(
 ): Promise<OrganizationContext | RecruiterContext> {
   const supabase = await createSupabaseServerClient();
 
-  // Get user's roles first to check what type of user they are
+  // All of the user's rows (a user may hold several), oldest first
   const { data: userRoles, error: rolesError } = await supabase
     .from('user_roles')
-    .select('role, organization_id')
+    .select('role, organization_id, approval_status, created_at')
     .eq('user_id', user.id)
     .order('created_at', { ascending: true });
 
@@ -92,23 +113,23 @@ export async function getOrganizationContext(
     throw apiError.forbidden('User is not assigned to any organization');
   }
 
-  const primaryRole = userRoles[0];
-
-  // [NEW] HANDLE RECRUITER - NULL organization_id, use recruiter multi-org system
-  if (primaryRole.role === 'recruiter' && primaryRole.organization_id === null) {
-    return await getRecruiterContext(user, requestedOrgId);
+  // Only APPROVED rows grant anything. Pending / denied rows are ignored.
+  const approved = (userRoles as RoleRow[]).filter(
+    (r) => isKnownRole(r.role) && isApprovedRow(r)
+  );
+  if (approved.length === 0) {
+    throw apiError.forbidden('Your access is awaiting approval or was denied');
   }
 
-  // [NEW] HANDLE SUPER ADMIN - NULL organization_id, can access all orgs
-  if (primaryRole.role === 'super_admin' && primaryRole.organization_id === null) {
-    // If a specific org is requested, allow it (super admin can access any org)
+  // SUPER ADMIN - can access every organization
+  if (approved.some((r) => r.role === 'super_admin')) {
     if (requestedOrgId) {
-      // Verify org exists
+      if (!isUuid(requestedOrgId)) throw apiError.badRequest('Invalid organization id');
       const { data: org } = await supabase
         .from('organizations')
         .select('id')
         .eq('id', requestedOrgId)
-        .single();
+        .maybeSingle();
 
       if (!org) {
         throw apiError.notFound('Organization not found');
@@ -123,14 +144,14 @@ export async function getOrganizationContext(
       };
     }
 
-    // For super admin without requested org, return first available org or throw error
+    // No org requested: fall back to the first active org
     const { data: firstOrg } = await supabase
       .from('organizations')
       .select('id')
       .eq('is_active', true)
       .order('created_at', { ascending: true })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (!firstOrg) {
       throw apiError.notFound('No organizations available. Please specify organization ID via X-Organization-ID header.');
@@ -145,37 +166,51 @@ export async function getOrganizationContext(
     };
   }
 
-  // Regular user with organization_id - standard flow
-  // If a specific organization is requested, verify user has access
-  if (requestedOrgId) {
-    const { data: userRole, error } = await supabase
-      .from('user_roles')
-      .select('role, organization_id')
-      .eq('user_id', user.id)
-      .eq('organization_id', requestedOrgId)
-      .single();
+  // RECRUITER - platform-level (NULL org) row + per-org access rows
+  const hasPlatformRecruiterRow = approved.some(
+    (r) => r.role === 'recruiter' && r.organization_id === null
+  );
 
-    if (error || !userRole) {
+  if (requestedOrgId) {
+    if (!isUuid(requestedOrgId)) throw apiError.badRequest('Invalid organization id');
+
+    const best = pickHighestRow(approved.filter((r) => r.organization_id === requestedOrgId));
+
+    if (!best || best.role === 'recruiter') {
+      // Recruiters go through the multi-org recruiter system (throws 403 without access)
+      if (hasPlatformRecruiterRow) {
+        return await getRecruiterContext(user, requestedOrgId);
+      }
+    }
+    if (!best) {
       throw apiError.forbidden('You do not have access to this organization');
     }
 
     return {
       organizationId: requestedOrgId,
-      role: userRole.role,
-      isSuperAdmin: userRole.role === 'super_admin',
-      isOrgAdmin: ['org_admin', 'super_admin', 'admin'].includes(userRole.role),
+      role: best.role,
+      isSuperAdmin: false,
+      isOrgAdmin: ORG_ADMIN_ROLES.includes(best.role),
       isRecruiter: false,
     };
   }
 
-  // Check if user is a super admin (from their roles)
-  const isSuperAdmin = userRoles.some(r => r.role === 'super_admin');
+  // No org requested: deterministic - highest-privilege approved row, ties by created_at
+  const best = pickHighestRow(approved)!;
+
+  if (best.role === 'recruiter' && hasPlatformRecruiterRow) {
+    return await getRecruiterContext(user, requestedOrgId);
+  }
+
+  if (!best.organization_id) {
+    throw apiError.forbidden('User is not assigned to any organization');
+  }
 
   return {
-    organizationId: primaryRole.organization_id,
-    role: primaryRole.role,
-    isSuperAdmin,
-    isOrgAdmin: ['org_admin', 'super_admin', 'admin'].includes(primaryRole.role),
+    organizationId: best.organization_id,
+    role: best.role,
+    isSuperAdmin: false,
+    isOrgAdmin: ORG_ADMIN_ROLES.includes(best.role),
     isRecruiter: false,
   };
 }
@@ -183,7 +218,7 @@ export async function getOrganizationContext(
 /**
  * Get organization ID from request headers or body
  * Checks X-Organization-ID header first, then falls back to body
- * 
+ *
  * @param request - NextRequest object
  * @returns Organization ID if found, undefined otherwise
  */
@@ -207,9 +242,9 @@ export async function getRequestedOrgId(request: Request): Promise<string | unde
 }
 
 /**
- * Verify user has access to multiple organizations (for super admins)
- * Useful for admin endpoints that need to query across organizations
- * 
+ * Organizations the user can act in (approved rows only).
+ * Super admins can access every active organization.
+ *
  * @param user - The authenticated user
  * @returns Array of organization IDs the user can access
  */
@@ -218,18 +253,17 @@ export async function getUserAccessibleOrganizations(user: User): Promise<string
 
   const { data: userRoles, error } = await supabase
     .from('user_roles')
-    .select('organization_id, role')
+    .select('organization_id, role, approval_status')
     .eq('user_id', user.id);
 
   if (error || !userRoles || userRoles.length === 0) {
     return [];
   }
 
+  const approved = (userRoles as RoleRow[]).filter((r) => isKnownRole(r.role) && isApprovedRow(r));
+
   // If super admin, they can access all organizations
-  const isSuperAdmin = userRoles.some(r => r.role === 'super_admin');
-  
-  if (isSuperAdmin) {
-    // Fetch all organization IDs
+  if (approved.some((r) => r.role === 'super_admin')) {
     const { data: allOrgs } = await supabase
       .from('organizations')
       .select('id')
@@ -238,12 +272,12 @@ export async function getUserAccessibleOrganizations(user: User): Promise<string
     return (allOrgs || []).map(org => org.id);
   }
 
-  // Otherwise, return only the organizations they belong to
-  return userRoles.map(r => r.organization_id);
+  // Otherwise, return only the organizations they belong to (no NULLs, no duplicates)
+  return [...new Set(approved.map((r) => r.organization_id).filter((id): id is string => !!id))];
 }
 
 /**
- * Check if user is a super admin
+ * Check if user is a super admin (approved super_admin row, any number of rows)
  * @param user - The authenticated user
  * @returns boolean
  */
@@ -255,13 +289,15 @@ export async function isSuperAdmin(user: User): Promise<boolean> {
     .select('role')
     .eq('user_id', user.id)
     .eq('role', 'super_admin')
-    .single();
+    .eq('approval_status', 'approved')
+    .limit(1);
 
-  return !!data;
+  return !!data && data.length > 0;
 }
 
 /**
- * Check if user is an org admin for a specific organization
+ * Check if user is an (approved) org admin for a specific organization.
+ * Super admins are admins of every organization.
  * @param user - The authenticated user
  * @param organizationId - The organization ID to check
  * @returns boolean
@@ -271,11 +307,13 @@ export async function isOrgAdmin(user: User, organizationId: string): Promise<bo
 
   const { data } = await supabase
     .from('user_roles')
-    .select('role')
+    .select('role, organization_id')
     .eq('user_id', user.id)
-    .eq('organization_id', organizationId)
-    .in('role', ['org_admin', 'super_admin', 'admin'])
-    .single();
+    .eq('approval_status', 'approved')
+    .in('role', ['org_admin', 'super_admin', 'admin']);
 
-  return !!data;
+  return (data ?? []).some(
+    (r: { role: string; organization_id: string | null }) =>
+      r.role === 'super_admin' || r.organization_id === organizationId
+  );
 }

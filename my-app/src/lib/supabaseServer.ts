@@ -6,6 +6,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import type { User } from '@supabase/supabase-js'
+import { isApprovedRow, isKnownRole, pickHighestRow, type RoleRow } from '@/lib/api/utils/roles'
 
 /**
  * Create a Supabase client for server-side operations with user context
@@ -77,14 +78,14 @@ export async function getServerUserWithRole(): Promise<{
   }
   
   // Fetch user roles (user may have multiple roles across orgs)
-  // Prioritize: super_admin > org_admin > admin > faculty/recruiter > student
-  const roleHierarchy = ['super_admin', 'org_admin', 'admin', 'faculty', 'recruiter', 'student'];
-  
+  // Deterministic: highest-privilege APPROVED row wins (ties: oldest first).
+  // super_admin > org_admin > admin > faculty > recruiter > student
   const { data: roles, error: roleError } = await supabase
     .from('user_roles')
-    .select('role, approval_status, organization_id')
+    .select('role, approval_status, organization_id, created_at')
     .eq('user_id', user.id)
-  
+    .order('created_at', { ascending: true })
+
   if (roleError) {
     console.error('[getServerUserWithRole] Error fetching roles:', roleError)
     return {
@@ -105,21 +106,22 @@ export async function getServerUserWithRole(): Promise<{
     }
   }
   
-  // Find the highest priority role
-  let highestRole = roles[0];
-  for (const role of roles) {
-    const currentIndex = roleHierarchy.indexOf(role.role);
-    const highestIndex = roleHierarchy.indexOf(highestRole.role);
-    if (currentIndex !== -1 && (highestIndex === -1 || currentIndex < highestIndex)) {
-      highestRole = role;
-    }
-  }
-  
+  // Rank among APPROVED rows first, so a pending/denied high-privilege row can
+  // never hide an approved lower one. Only when the user has no approved row do
+  // we report the highest non-approved row (so callers can say "pending").
+  const typedRoles = roles as RoleRow[];
+  const approvedRoles = typedRoles.filter((r) => isKnownRole(r.role) && isApprovedRow(r));
+  const highestRole =
+    pickHighestRow(approvedRoles) ??
+    pickHighestRow(typedRoles.filter((r) => isKnownRole(r.role))) ??
+    typedRoles[0];
+
   return {
     user,
     role: highestRole.role || 'student',
-    approvalStatus: highestRole.approval_status,
-    organizationId: highestRole.organization_id
+    // A NULL status on an admin-class role is treated as not approved
+    approvalStatus: highestRole.approval_status ?? (isApprovedRow(highestRole) ? undefined : 'pending'),
+    organizationId: highestRole.organization_id ?? undefined
   }
 }
 
@@ -145,8 +147,10 @@ export async function requireRole(allowedRoles: string[]): Promise<{
     }
   }
   
-  // A role that is still pending approval (or was denied) grants no privileges
-  if (result.approvalStatus === 'pending' || result.approvalStatus === 'denied') {
+  // getServerUserWithRole already ranks approved rows first, so reaching a
+  // non-approved status here means the user has NO approved role at all.
+  // Pending / denied (or any unknown status) grants no privileges.
+  if (result.approvalStatus && result.approvalStatus !== 'approved') {
     return {
       user: result.user,
       role: result.role,

@@ -1,329 +1,152 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { NextResponse } from 'next/server';
+import { withSuperAdmin, apiError, isValidEmail, writeAudit } from '@/lib/api';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { addOrgAdmin } from '@/lib/api/utils/orgAdmins';
+import { findDomainConflict } from '@/lib/api/utils/domains';
+import { sanitizeSettingsPatch } from '@/lib/api/utils/orgSettings';
 
-interface RollbackState {
-  createdOrgId?: string;
-  createdUserId?: string;
-  createdRoleId?: string;
-  createdProfileId?: string;
-}
-
-/**
- * Helper function to log audit events
- */
-async function logAuditEvent(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, event: {
-  actor_id: string;
-  action: string;
-  metadata?: Record<string, unknown>;
-}) {
-  try {
-    await supabase.from('audit_logs').insert({
-      user_id: event.actor_id,
-      action: event.action,
-      resource_type: 'organization',
-      metadata: event.metadata || {},
-      created_at: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('[AUDIT_LOG] Failed to log event:', error);
-  }
-}
+const NO_ORG = '00000000-0000-0000-0000-000000000000';
 
 /**
  * POST /api/v2/admin/super/organizations/complete
- * 
- * Complete organization creation with admin account.
- * Includes full transactional rollback on any failure.
- * 
- * This endpoint creates:
- * 1. Organization record
- * 2. Admin user in auth.users
- * 3. User role (org_admin)
- * 4. User profile
- * 
- * If any step fails, all previous steps are rolled back.
+ *
+ * Create an organization together with its first admin (org_admin, primary).
+ * Steps: organization -> admin user + profile + role (shared addOrgAdmin).
+ * If the admin step fails the organization is deleted again, so a failure
+ * never leaves an orphan organization behind.
  */
-export async function POST(request: NextRequest) {
-  const supabase = await createSupabaseServerClient();
-  const adminClient = await createSupabaseAdminClient();
-  
-  const rollbackState: RollbackState = {};
-  const rollbackErrors: string[] = [];
+export const POST = withSuperAdmin(async (request, { user }) => {
+  const db = await createSupabaseAdminClient();
 
+  let body: {
+    organizationData?: Record<string, unknown>;
+    adminData?: { email?: string; password?: string; name?: string };
+  };
   try {
-    // ========================================
-    // AUTHENTICATION & AUTHORIZATION
-    // ========================================
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    body = await request.json();
+  } catch {
+    return apiError.badRequest('Invalid JSON body');
+  }
+  const { organizationData, adminData } = body;
 
-    const { data: userRole, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .single();
-
-    if (roleError || userRole?.role !== 'super_admin') {
-      return NextResponse.json({ error: 'Super admin access required' }, { status: 403 });
-    }
-
-    // ========================================
-    // PARSE REQUEST BODY
-    // ========================================
-    const body = await request.json();
-    const { organizationData, adminData } = body;
-
-    if (!organizationData || !adminData) {
-      return NextResponse.json({
-        error: 'Missing required data',
-        details: 'Both organizationData and adminData are required'
-      }, { status: 400 });
-    }
-
-    console.log('[ORG_CREATE] Starting complete organization creation process');
-
-    // ========================================
-    // STEP 1: Create Organization
-    // ========================================
-    const { data: organization, error: orgError } = await supabase
-      .from('organizations')
-      .insert({
-        name: organizationData.name,
-        slug: organizationData.slug,
-        type: organizationData.type,
-        email: organizationData.email,
-        phone: organizationData.phone || null,
-        website: organizationData.website || null,
-        settings: organizationData.settings || {},
-        is_active: true,
-        is_verified: true,
-        verified_at: new Date().toISOString()
-      })
-      .select()
-      .single();
-
-    if (orgError) {
-      throw new Error(`[STEP 1] Organization creation failed: ${orgError.message}`);
-    }
-    if (!organization) {
-      throw new Error('[STEP 1] Organization creation returned null');
-    }
-    
-    rollbackState.createdOrgId = organization.id;
-    console.log('[ORG_CREATE] ✅ Step 1: Organization created', organization.id);
-
-    // ========================================
-    // STEP 2: Create Admin User
-    // ========================================
-    const { data: newUser, error: userError } = await adminClient.auth.admin.createUser({
-      email: adminData.email,
-      password: adminData.password,
-      email_confirm: true,
-      user_metadata: { 
-        full_name: adminData.name,
-        organization_id: organization.id
-      }
-    });
-
-    if (userError) {
-      throw new Error(`[STEP 2] User creation failed: ${userError.message}`);
-    }
-    if (!newUser.user) {
-      throw new Error('[STEP 2] User creation returned null');
-    }
-    
-    rollbackState.createdUserId = newUser.user.id;
-    console.log('[ORG_CREATE] ✅ Step 2: Admin user created', newUser.user.id);
-
-    // ========================================
-    // STEP 3: Assign org_admin Role
-    // ========================================
-    const { data: roleData, error: roleAssignError } = await supabase
-      .from('user_roles')
-      .insert({
-        user_id: newUser.user.id,
-        role: 'org_admin',
-        organization_id: organization.id,
-        assigned_by: user.id
-      })
-      .select()
-      .single();
-
-    if (roleAssignError) {
-      throw new Error(`[STEP 3] Role assignment failed: ${roleAssignError.message}`);
-    }
-    
-    rollbackState.createdRoleId = roleData?.id;
-    console.log('[ORG_CREATE] ✅ Step 3: org_admin role assigned');
-
-    // ========================================
-    // STEP 4: Create Profile
-    // ========================================
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .insert({
-        id: newUser.user.id,
-        full_name: adminData.name,
-        email: adminData.email,
-        role: 'org_admin',
-        organization_id: organization.id
-      })
-      .select()
-      .single();
-
-    if (profileError) {
-      console.warn('[ORG_CREATE] ⚠️ Profile creation warning:', profileError.message);
-      // Don't fail entire operation for profile creation
-    } else {
-      rollbackState.createdProfileId = profileData?.id;
-      console.log('[ORG_CREATE] ✅ Step 4: Profile created');
-    }
-
-    // ========================================
-    // SUCCESS: Log Audit Event
-    // ========================================
-    await logAuditEvent(supabase, {
-      actor_id: user.id,
-      action: 'organization_created_complete',
-      metadata: {
-        organization_id: organization.id,
-        organization_name: organizationData.name,
-        admin_email: adminData.email,
-        admin_user_id: newUser.user.id
-      }
-    });
-
-    console.log('[ORG_CREATE] ✅ Complete: Organization and admin created successfully');
-
-    return NextResponse.json({ 
-      success: true,
-      organization, 
-      admin: {
-        id: newUser.user.id,
-        email: newUser.user.email,
-        name: adminData.name
-      }
-    }, { status: 201 });
-
-  } catch (error) {
-    console.error('[ORG_CREATE] ❌ FAILURE - Beginning rollback:', error);
-
-    // ========================================
-    // ROLLBACK: Clean up partial state
-    // ========================================
-
-    // Rollback Step 4: Remove profile
-    if (rollbackState.createdProfileId && rollbackState.createdUserId) {
-      try {
-        const { error: profileDeleteError } = await supabase
-          .from('profiles')
-          .delete()
-          .eq('id', rollbackState.createdUserId);
-        
-        if (profileDeleteError) {
-          rollbackErrors.push(`Profile deletion: ${profileDeleteError.message}`);
-        } else {
-          console.log('[ROLLBACK] ✅ Profile deleted');
-        }
-      } catch (err) {
-        rollbackErrors.push(`Profile deletion exception: ${err instanceof Error ? err.message : 'Unknown'}`);
-      }
-    }
-
-    // Rollback Step 3: Remove role
-    if (rollbackState.createdUserId && rollbackState.createdOrgId) {
-      try {
-        const { error: roleDeleteError } = await supabase
-          .from('user_roles')
-          .delete()
-          .eq('user_id', rollbackState.createdUserId)
-          .eq('organization_id', rollbackState.createdOrgId);
-        
-        if (roleDeleteError) {
-          rollbackErrors.push(`Role deletion: ${roleDeleteError.message}`);
-        } else {
-          console.log('[ROLLBACK] ✅ Role deleted');
-        }
-      } catch (err) {
-        rollbackErrors.push(`Role deletion exception: ${err instanceof Error ? err.message : 'Unknown'}`);
-      }
-    }
-
-    // Rollback Step 2: Delete user from auth
-    if (rollbackState.createdUserId) {
-      try {
-        const { error: userDeleteError } = await adminClient.auth.admin.deleteUser(
-          rollbackState.createdUserId
-        );
-        
-        if (userDeleteError) {
-          rollbackErrors.push(`User deletion: ${userDeleteError.message}`);
-        } else {
-          console.log('[ROLLBACK] ✅ User deleted from auth');
-        }
-      } catch (err) {
-        rollbackErrors.push(`User deletion exception: ${err instanceof Error ? err.message : 'Unknown'}`);
-      }
-    }
-
-    // Rollback Step 1: Delete organization
-    if (rollbackState.createdOrgId) {
-      try {
-        const { error: orgDeleteError } = await supabase
-          .from('organizations')
-          .delete()
-          .eq('id', rollbackState.createdOrgId);
-        
-        if (orgDeleteError) {
-          rollbackErrors.push(`Organization deletion: ${orgDeleteError.message}`);
-        } else {
-          console.log('[ROLLBACK] ✅ Organization deleted');
-        }
-      } catch (err) {
-        rollbackErrors.push(`Organization deletion exception: ${err instanceof Error ? err.message : 'Unknown'}`);
-      }
-    }
-
-    // ========================================
-    // Log Rollback Status
-    // ========================================
-    const { data: { user: currentUser } } = await supabase.auth.getUser();
-    
-    if (currentUser) {
-      if (rollbackErrors.length > 0) {
-        console.error('[ROLLBACK] ⚠️ Partial rollback - Manual cleanup may be required:', rollbackErrors);
-        await logAuditEvent(supabase, {
-          actor_id: currentUser.id,
-          action: 'organization_creation_failed_partial_rollback',
-          metadata: {
-            original_error: error instanceof Error ? error.message : 'Unknown error',
-            rollback_errors: rollbackErrors,
-            organization_id: rollbackState.createdOrgId,
-            user_id: rollbackState.createdUserId
-          }
-        });
-      } else {
-        console.log('[ROLLBACK] ✅ Full rollback successful');
-        await logAuditEvent(supabase, {
-          actor_id: currentUser.id,
-          action: 'organization_creation_failed_fully_rolled_back',
-          metadata: {
-            error: error instanceof Error ? error.message : 'Unknown error'
-          }
-        });
-      }
-    }
-
+  if (!organizationData || !adminData) {
     return NextResponse.json(
-      { 
-        error: error instanceof Error ? error.message : 'Organization creation failed',
-        details: rollbackErrors.length > 0 
-          ? 'Partial rollback - Support team has been notified. Some manual cleanup may be required.'
-          : 'All changes have been rolled back successfully. You can try again.'
-      },
-      { status: 500 }
+      { error: 'Missing required data', details: 'Both organizationData and adminData are required' },
+      { status: 400 }
     );
   }
-}
+
+  const { name, slug, type, email, phone, website, settings } = organizationData as {
+    name?: string; slug?: string; type?: string; email?: string; phone?: string; website?: string; settings?: unknown;
+  };
+  if (typeof name !== 'string' || !name.trim() || name.length > 200) return apiError.validation('Invalid organization name');
+  if (typeof slug !== 'string' || !slug.trim() || slug.length > 100) return apiError.validation('Invalid slug');
+  if (typeof type !== 'string' || type.length > 50) return apiError.validation('Invalid type');
+  if (typeof email !== 'string' || !isValidEmail(email)) return apiError.validation('Invalid organization email');
+  if (!adminData.email || !isValidEmail(adminData.email) || !adminData.name) {
+    return apiError.validation('adminData requires a valid email and a name');
+  }
+
+  const cleanSlug = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/--+/g, '-').replace(/^-|-$/g, '');
+  if (!cleanSlug) return apiError.validation('Invalid slug');
+
+  let cleanSettings: Record<string, unknown> = {};
+  if (settings !== undefined && settings !== null) {
+    const s = sanitizeSettingsPatch(settings, { isSuperAdmin: true });
+    if (!s.ok) return apiError.validation(s.error);
+    cleanSettings = s.value;
+    if (Array.isArray(cleanSettings.allowed_email_domains)) {
+      const conflict = await findDomainConflict(db, NO_ORG, cleanSettings.allowed_email_domains as string[]);
+      if (conflict) {
+        return NextResponse.json(
+          { error: 'A domain is already claimed by another organization', domain: conflict.domain },
+          { status: 409 }
+        );
+      }
+    }
+  }
+
+  // ---- Step 1: organization -------------------------------------------
+  const now = new Date().toISOString();
+  const { data: organization, error: orgError } = await db
+    .from('organizations')
+    .insert({
+      name: name.trim(),
+      slug: cleanSlug,
+      type,
+      email,
+      phone: phone || null,
+      website: website || null,
+      settings: cleanSettings,
+      created_by: user.id,
+      is_active: true,
+      is_verified: true,
+      verified_at: now,
+    })
+    .select()
+    .single();
+
+  if (orgError || !organization) {
+    if (orgError?.code === '23505') {
+      return NextResponse.json({ error: 'Organization with this slug or email already exists' }, { status: 409 });
+    }
+    console.error('[ORG_CREATE] organization creation failed:', orgError);
+    return apiError.internal('Organization creation failed');
+  }
+
+  // ---- Step 2: first admin (user + profile + org_admin role) ----------
+  const outcome = await addOrgAdmin(db, {
+    actorId: user.id,
+    orgId: organization.id,
+    email: adminData.email,
+    fullName: adminData.name,
+    password: adminData.password,
+    role: 'org_admin',
+    makePrimary: true,
+  });
+
+  if (!outcome.ok) {
+    // Roll the organization back
+    const { error: rollbackError } = await db.from('organizations').delete().eq('id', organization.id);
+    await writeAudit(db, {
+      actorId: user.id,
+      action: rollbackError
+        ? 'organization_creation_failed_partial_rollback'
+        : 'organization_creation_failed_fully_rolled_back',
+      targetType: 'organization',
+      targetId: organization.id,
+      organizationId: null,
+      details: { name: organization.name, reason: (outcome.body as { error?: string }).error },
+    });
+    if (rollbackError) console.error('[ORG_CREATE] CRITICAL: rollback failed, orphan organization', organization.id, rollbackError);
+
+    return NextResponse.json(
+      {
+        error: (outcome.body as { error?: string }).error ?? 'Organization creation failed',
+        details: rollbackError
+          ? 'Partial rollback - manual cleanup may be required.'
+          : 'All changes have been rolled back successfully. You can try again.',
+      },
+      { status: outcome.status >= 400 ? outcome.status : 500 }
+    );
+  }
+
+  const adminBody = outcome.body as { user_id: string };
+  await writeAudit(db, {
+    actorId: user.id,
+    action: 'organization_created_complete',
+    targetType: 'organization',
+    targetId: organization.id,
+    organizationId: organization.id,
+    details: { organization_name: organization.name, admin_email: adminData.email, admin_user_id: adminBody.user_id },
+  });
+
+  return NextResponse.json(
+    {
+      success: true,
+      organization,
+      admin: { id: adminBody.user_id, email: adminData.email, name: adminData.name },
+    },
+    { status: 201 }
+  );
+});

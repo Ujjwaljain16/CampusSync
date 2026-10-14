@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
-import { withRole, success, apiError, parseAndValidateBody, isValidUUID, getOrganizationContext } from '@/lib/api';
+import { withRole, success, apiError, parseAndValidateBody, isUuid, resolveAdminOrg, writeAudit } from '@/lib/api';
+import { applyRoleChange } from '@/lib/api/utils/roleMutations';
 
 interface AssignRoleBody {
   userId: string;
@@ -11,10 +12,10 @@ interface AssignRoleBody {
 /**
  * POST /api/auth/assign-role
  *
- * Assign a low-privilege role to a user. Caller must be an authenticated
- * admin / org_admin / super_admin; authorization is derived from the session,
- * never from client-supplied identity fields. Only super admins may target an
- * organization other than their own.
+ * Assign a low-privilege role (student / faculty) to a user INSIDE an
+ * organization the caller administers. Authorization comes from the session
+ * and is checked against that organization (admin of org A cannot assign in
+ * org B). The change goes through the same guarded path as /api/admin/roles.
  */
 export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (req: NextRequest, { user }) => {
   const result = await parseAndValidateBody<AssignRoleBody>(req, ['userId', 'role']);
@@ -22,42 +23,31 @@ export const POST = withRole(['admin', 'org_admin', 'super_admin'], async (req: 
 
   const { userId, role, organizationId: requestedOrgId } = result.data;
 
-  if (!isValidUUID(userId)) throw apiError.badRequest('Invalid userId');
+  if (!isUuid(userId)) return apiError.badRequest('Invalid userId');
   if (!['student', 'faculty'].includes(role)) {
-    throw apiError.badRequest('Invalid role');
+    return apiError.badRequest('Invalid role');
   }
 
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
-  const organizationId = 'organizationId' in orgContext ? orgContext.organizationId : undefined;
-  if (!organizationId) throw apiError.badRequest('organization_id is required');
-
+  const scope = await resolveAdminOrg(user, requestedOrgId || req.headers.get('X-Organization-ID'), 'admin');
   const supabase = await createSupabaseAdminClient();
 
-  // Do not overwrite roles of users in other organizations.
-  const { data: existing } = await supabase
-    .from('user_roles')
-    .select('organization_id')
-    .eq('user_id', userId);
-  if (existing?.some((r: { organization_id: string | null }) => r.organization_id !== organizationId)) {
-    throw apiError.forbidden('User belongs to another organization');
-  }
+  const change = await applyRoleChange(supabase, {
+    actorId: user.id,
+    actorRole: scope.role,
+    orgId: scope.organizationId,
+    targetUserId: userId,
+    newRole: role,
+  });
+  if (!change.ok) return change.response;
 
-  const { error: roleError } = await supabase
-    .from('user_roles')
-    .upsert({
-      user_id: userId,
-      role,
-      organization_id: organizationId,
-      // Explicit: an admin assigning the role is the approval
-      approval_status: 'approved',
-      assigned_by: user.id,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id,organization_id' });
-
-  if (roleError) {
-    console.error('[assign-role] upsert failed:', roleError.code, roleError.message);
-    throw apiError.internal('Failed to assign role');
-  }
+  await writeAudit(supabase, {
+    actorId: user.id,
+    action: 'role_assign',
+    targetType: 'user_role',
+    targetId: userId,
+    organizationId: scope.organizationId,
+    details: { old_role: change.oldRole, new_role: role, via: 'auth/assign-role' },
+  });
 
   return success({ success: true }, `Role '${role}' assigned successfully`);
 });

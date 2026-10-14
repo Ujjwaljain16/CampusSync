@@ -1,189 +1,196 @@
-import { NextRequest } from 'next/server';
-import { withAuth, success, apiError } from '@/lib/api';
-import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
+import {
+  withSession,
+  withSuperAdmin,
+  success,
+  apiError,
+  error as errorResponse,
+  authorizeOrg,
+  isUuid,
+  isValidEmail,
+  writeAudit,
+} from '@/lib/api';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { isAdminClass } from '@/lib/api/utils/roles';
+import { findDomainConflict } from '@/lib/api/utils/domains';
+import {
+  ADMIN_ORG_COLUMNS,
+  PUBLIC_ORG_COLUMNS,
+  mergeJson,
+  sanitizeBrandingPatch,
+  sanitizeSettingsPatch,
+} from '@/lib/api/utils/orgSettings';
 
-// GET /api/organizations/[id] - Get specific organization
-export const GET = withAuth(async (req: NextRequest, { user }) => {
-  const supabase = await createSupabaseServerClient();
-  // Extract organization ID from URL path
-  const pathname = req.nextUrl.pathname;
-  const orgId = pathname.split('/').pop();
+const VALID_TYPES = ['university', 'college', 'school', 'institute', 'enterprise'];
 
-  if (!orgId) {
-    throw apiError.badRequest('Organization ID is required');
+// GET /api/organizations/[id] - Get a specific organization the caller belongs to
+export const GET = withSession<{ id: string }>(async (_req, { user, params }) => {
+  const orgId = params.id;
+  if (!isUuid(orgId)) return apiError.badRequest('Invalid organization id');
+
+  // Any approved role in that organization (or super_admin) may read it...
+  const access = await authorizeOrg(user, { orgId, minRole: 'student' });
+
+  // ...but only admins see contact data and settings. Everyone else gets public bits.
+  const columns = isAdminClass(access.role) ? ADMIN_ORG_COLUMNS : PUBLIC_ORG_COLUMNS;
+
+  const admin = await createSupabaseAdminClient();
+  const { data: organization, error: orgError } = await admin
+    .from('organizations')
+    .select(columns)
+    .eq('id', orgId)
+    .maybeSingle();
+
+  if (orgError) {
+    console.error('Error fetching organization:', orgError);
+    return apiError.internal('Failed to fetch organization');
   }
+  if (!organization) return apiError.notFound('Organization not found');
 
-  try {
-    // Check if user has access to this organization
-    const { data: userRole, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('organization_id', orgId)
-      .maybeSingle();
-
-    if (roleError) throw roleError;
-
-    // Also check if user is super admin
-    const { data: superAdminRole } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('role', 'super_admin')
-      .maybeSingle();
-
-    if (!userRole && !superAdminRole) {
-      throw apiError.forbidden('You do not have access to this organization');
-    }
-
-    // Fetch organization
-    const { data: organization, error: orgError } = await supabase
-      .from('organizations')
-      .select('*')
-      .eq('id', orgId)
-      .single();
-
-    if (orgError) throw orgError;
-
-    return success({ 
-      organization,
-      user_role: userRole?.role || 'super_admin'
-    });
-  } catch (error) {
-    console.error('Error fetching organization:', error);
-    if (error instanceof Error && 'status' in error) {
-      throw error;
-    }
-    throw apiError.internal('Failed to fetch organization');
-  }
+  return success({ organization, user_role: access.role });
 });
 
-// PATCH /api/organizations/[id] - Update organization
-export const PATCH = withAuth(async (req: NextRequest, { user }) => {
-  const supabase = await createSupabaseServerClient();
-  const adminSupabase = await createSupabaseAdminClient();
-  // Extract organization ID from URL path
-  const pathname = req.nextUrl.pathname;
-  const orgId = pathname.split('/').pop();
+// PATCH /api/organizations/[id] - Update organization (org admin: limited fields; super admin: all)
+export const PATCH = withSession<{ id: string }>(async (req, { user, params }) => {
+  const orgId = params.id;
+  if (!isUuid(orgId)) return apiError.badRequest('Invalid organization id');
 
-  if (!orgId) {
-    throw apiError.badRequest('Organization ID is required');
+  const access = await authorizeOrg(user, { orgId, minRole: 'admin' });
+  const isSuperAdmin = access.isSuperAdmin;
+
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return apiError.badRequest('Invalid JSON body');
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return apiError.badRequest('Invalid request body');
   }
 
-  try {
-    // Check if user is org admin or super admin
-    const { data: userRole, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('organization_id', orgId)
-      .maybeSingle();
+  const admin = await createSupabaseAdminClient();
+  const updates: Record<string, unknown> = {};
 
-    if (roleError) throw roleError;
-
-    const { data: superAdminRole } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('role', 'super_admin')
-      .maybeSingle();
-
-    const isOrgAdmin = userRole?.role === 'admin' || userRole?.role === 'org_admin';
-    const isSuperAdmin = !!superAdminRole;
-
-    if (!isOrgAdmin && !isSuperAdmin) {
-      throw apiError.forbidden('You do not have permission to update this organization');
+  if ('name' in body) {
+    if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > 200) {
+      return apiError.validation('Invalid name');
     }
+    updates.name = body.name.trim();
+  }
+  if ('email' in body) {
+    if (typeof body.email !== 'string' || !isValidEmail(body.email)) return apiError.validation('Invalid email');
+    updates.email = body.email;
+  }
+  if ('phone' in body) {
+    if (body.phone !== null && (typeof body.phone !== 'string' || body.phone.length > 40)) {
+      return apiError.validation('Invalid phone');
+    }
+    updates.phone = body.phone;
+  }
+  if ('address' in body) {
+    if (body.address !== null && (typeof body.address !== 'object' || Array.isArray(body.address))) {
+      return apiError.validation('Invalid address');
+    }
+    updates.address = body.address;
+  }
 
-    const body = await req.json();
-    const allowedFields = [
-      'name', 'type', 'email', 'phone', 'address',
-      'subdomain', 'custom_domain', 'branding', 'settings', 'subscription'
-    ];
+  // Super-admin-only fields
+  for (const field of ['subdomain', 'custom_domain', 'subscription', 'type'] as const) {
+    if (field in body) {
+      if (!isSuperAdmin) return apiError.forbidden(`Only a super admin can change ${field}`);
+      if (field === 'type' && !VALID_TYPES.includes(body.type as string)) return apiError.validation('Invalid type');
+      updates[field] = body[field];
+    }
+  }
 
-    const updates: Record<string, unknown> = {};
-    for (const field of allowedFields) {
-      if (field in body) {
-        updates[field] = body[field];
+  // branding / settings: allow-listed keys, merged into what is stored
+  if ('branding' in body || 'settings' in body) {
+    const { data: current, error: currentError } = await admin
+      .from('organizations')
+      .select('settings, branding')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (currentError) {
+      console.error('Error loading organization:', currentError);
+      return apiError.internal('Failed to update organization');
+    }
+    if (!current) return apiError.notFound('Organization not found');
+
+    if ('branding' in body) {
+      const b = sanitizeBrandingPatch(body.branding);
+      if (!b.ok) return apiError.validation(b.error);
+      updates.branding = mergeJson(current.branding, b.value);
+    }
+    if ('settings' in body) {
+      const s = sanitizeSettingsPatch(body.settings, { isSuperAdmin });
+      if (!s.ok) return s.error.includes('super admin') ? apiError.forbidden(s.error) : apiError.validation(s.error);
+
+      if (Array.isArray(s.value.allowed_email_domains)) {
+        const conflict = await findDomainConflict(admin, orgId, s.value.allowed_email_domains as string[]);
+        if (conflict) return errorResponse('A domain is already claimed by another organization', 409, { domain: conflict.domain });
       }
+      updates.settings = mergeJson(current.settings, s.value);
     }
-
-    // Only super admins can change certain fields
-    if (!isSuperAdmin) {
-      delete updates.subdomain;
-      delete updates.custom_domain;
-      delete updates.subscription;
-      delete updates.type;
-    }
-
-    updates.updated_at = new Date().toISOString();
-
-    // Use admin client if super admin, otherwise regular client
-    const client = isSuperAdmin ? adminSupabase : supabase;
-
-    const { data: organization, error: updateError } = await client
-      .from('organizations')
-      .update(updates)
-      .eq('id', orgId)
-      .select()
-      .single();
-
-    if (updateError) throw updateError;
-
-    return success({ organization }, 'Organization updated successfully');
-  } catch (error) {
-    console.error('Error updating organization:', error);
-    if (error instanceof Error && 'status' in error) {
-      throw error;
-    }
-    throw apiError.internal('Failed to update organization');
   }
+
+  if (Object.keys(updates).length === 0) {
+    return apiError.badRequest('No editable fields supplied');
+  }
+  updates.updated_at = new Date().toISOString();
+
+  const { data: organization, error: updateError } = await admin
+    .from('organizations')
+    .update(updates)
+    .eq('id', orgId)
+    .select(ADMIN_ORG_COLUMNS)
+    .maybeSingle();
+
+  if (updateError) {
+    if (updateError.code === '23505') return errorResponse('Another organization already uses this value', 409);
+    console.error('Error updating organization:', updateError);
+    return apiError.internal('Failed to update organization');
+  }
+  if (!organization) return apiError.notFound('Organization not found');
+
+  await writeAudit(admin, {
+    actorId: user.id,
+    action: 'organization_update',
+    targetType: 'organization',
+    targetId: orgId,
+    organizationId: orgId,
+    details: { fields: Object.keys(updates).filter((k) => k !== 'updated_at') },
+  });
+
+  return success({ organization }, 'Organization updated successfully');
 });
 
-// DELETE /api/organizations/[id] - Delete organization (super admin only)
-export const DELETE = withAuth(async (req: NextRequest, { user }) => {
-  const adminSupabase = await createSupabaseAdminClient();
-  const supabase = await createSupabaseServerClient();
-  // Extract organization ID from URL path
-  const pathname = req.nextUrl.pathname;
-  const orgId = pathname.split('/').pop();
-
-  if (!orgId) {
-    throw apiError.badRequest('Organization ID is required');
+// DELETE /api/organizations/[id] - Soft-delete organization (super admin only)
+export const DELETE = withSuperAdmin<{ id: string }>(async (_req, { user, params }) => {
+  const orgId = params.id;
+  if (!isUuid(orgId)) return apiError.badRequest('Invalid organization id');
+  if (orgId === '00000000-0000-0000-0000-000000000001') {
+    return apiError.forbidden('Cannot delete default organization');
   }
 
-  try {
-    // Check if user is super admin
-    const { data: superAdminRole, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('role', 'super_admin')
-      .maybeSingle();
+  const admin = await createSupabaseAdminClient();
+  const { data, error: deleteError } = await admin
+    .from('organizations')
+    .update({ is_active: false, deleted_at: new Date().toISOString() })
+    .eq('id', orgId)
+    .select('id');
 
-    if (roleError) throw roleError;
-
-    if (!superAdminRole) {
-      throw apiError.forbidden('Only super admins can delete organizations');
-    }
-
-    // Soft delete - set deleted_at
-    const { error: deleteError } = await adminSupabase
-      .from('organizations')
-      .update({ 
-        is_active: false,
-        deleted_at: new Date().toISOString()
-      })
-      .eq('id', orgId);
-
-    if (deleteError) throw deleteError;
-
-    return success({ message: 'Organization deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting organization:', error);
-    if (error instanceof Error && 'status' in error) {
-      throw error;
-    }
-    throw apiError.internal('Failed to delete organization');
+  if (deleteError) {
+    console.error('Error deleting organization:', deleteError);
+    return apiError.internal('Failed to delete organization');
   }
+  if (!data || data.length === 0) return apiError.notFound('Organization not found');
+
+  await writeAudit(admin, {
+    actorId: user.id,
+    action: 'organization_soft_delete',
+    targetType: 'organization',
+    targetId: orgId,
+    organizationId: orgId,
+  });
+
+  return success({ message: 'Organization deleted successfully' });
 });

@@ -29,9 +29,10 @@ interface AnalyticsData {
     verified: number;
   }>;
   systemPerformance: {
-    averageProcessingTime: number;
-    successRate: number;
-    errorRate: number;
+    available?: boolean;
+    averageProcessingTime: number | null;
+    successRate: number | null;
+    errorRate: number | null;
   };
 }
 
@@ -212,15 +213,15 @@ export default function AnalyticsDashboard() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-white/70">Average Processing Time</span>
-                <span className="text-white font-semibold">{data.systemPerformance.averageProcessingTime}ms</span>
+                <span className="text-white font-semibold">{data.systemPerformance.averageProcessingTime == null ? 'N/A' : `${data.systemPerformance.averageProcessingTime}ms`}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-white/70">Success Rate</span>
-                <span className="text-emerald-400 font-semibold">{Math.round(data.systemPerformance.successRate * 100)}%</span>
+                <span className="text-emerald-400 font-semibold">{data.systemPerformance.successRate == null ? 'N/A' : `${Math.round(data.systemPerformance.successRate * 100)}%`}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-white/70">Error Rate</span>
-                <span className="text-red-400 font-semibold">{Math.round(data.systemPerformance.errorRate * 100)}%</span>
+                <span className="text-red-400 font-semibold">{data.systemPerformance.errorRate == null ? 'N/A' : `${Math.round(data.systemPerformance.errorRate * 100)}%`}</span>
               </div>
             </div>
           </div>

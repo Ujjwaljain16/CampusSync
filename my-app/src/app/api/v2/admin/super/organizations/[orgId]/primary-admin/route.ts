@@ -1,168 +1,147 @@
-import { NextRequest } from 'next/server';
+import { withSession, withSuperAdmin, success, apiError, authorizeOrg, isUuid, writeAudit } from '@/lib/api';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
-import { withRole, success, apiError, parseAndValidateBody, getOrganizationContext } from '@/lib/api';
+import { getTargetRoleRow } from '@/lib/api/utils/roleIntegrity';
+import { applyRoleChange } from '@/lib/api/utils/roleMutations';
+import { promotePrimaryAdmin } from '@/lib/api/utils/orgAdmins';
 
 /**
- * POST /api/v2/admin/super/organizations/[orgId]/transfer-primary-admin
- * Transfer primary admin status from one user to another
- * ONLY super_admins can call this endpoint
+ * POST /api/v2/admin/super/organizations/[orgId]/primary-admin
+ * Transfer primary admin status. ONLY super_admins.
+ *
+ * Body: { new_primary_admin_id }   (what the UI sends; the current primary
+ *        admin is looked up server-side)
+ *   or  { from_user_id, to_user_id } (legacy form; from_user_id must be the
+ *        current primary admin)
+ *
+ * The new primary must be an approved org_admin of THIS organization (an
+ * `admin` is promoted to org_admin as part of the transfer because
+ * is_primary_admin requires role = org_admin).
  */
+export const POST = withSuperAdmin<{ orgId: string }>(async (req, { user, params }) => {
+  const { orgId } = params;
+  if (!isUuid(orgId)) return apiError.badRequest('Invalid organization id');
 
-interface TransferPrimaryAdminRequest {
-  from_user_id: string;
-  to_user_id: string;
-}
-
-export const POST = withRole(['super_admin'], async (req: NextRequest, { user }) => {
-  // Extract orgId from URL path
-  const urlParts = req.nextUrl.pathname.split('/');
-  const orgId = urlParts[urlParts.indexOf('organizations') + 1];
-  
-  if (!orgId) {
-    return apiError.badRequest('Organization ID is required');
+  let body: { new_primary_admin_id?: unknown; to_user_id?: unknown; from_user_id?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return apiError.badRequest('Invalid JSON body');
   }
-  
-  const { data: body, error: validationError } = await parseAndValidateBody<TransferPrimaryAdminRequest>(
-    req,
-    ['from_user_id', 'to_user_id']
+
+  const toUserId = body.new_primary_admin_id ?? body.to_user_id;
+  const fromUserId = body.from_user_id;
+  if (!toUserId) return apiError.validation('Missing required fields: new_primary_admin_id');
+  if (typeof toUserId !== 'string' || !isUuid(toUserId)) return apiError.validation('Invalid new_primary_admin_id');
+  if (fromUserId !== undefined && (typeof fromUserId !== 'string' || !isUuid(fromUserId))) {
+    return apiError.validation('Invalid from_user_id');
+  }
+
+  const db = await createSupabaseAdminClient();
+
+  const { data: org, error: orgError } = await db.from('organizations').select('id').eq('id', orgId).maybeSingle();
+  if (orgError) {
+    console.error('[primary-admin] org lookup failed:', orgError);
+    return apiError.internal('Failed to transfer primary admin');
+  }
+  if (!org) return apiError.notFound('Organization not found');
+
+  // Current primary admin(s), looked up server-side
+  const { data: currentRows, error: currentError } = await db
+    .from('user_roles')
+    .select('user_id')
+    .eq('organization_id', orgId)
+    .eq('is_primary_admin', true);
+  if (currentError) {
+    console.error('[primary-admin] lookup failed:', currentError);
+    return apiError.internal('Failed to transfer primary admin');
+  }
+  const currentPrimary = ((currentRows ?? []) as Array<{ user_id: string }>)[0]?.user_id ?? null;
+
+  if (fromUserId && fromUserId !== currentPrimary) {
+    return apiError.validation('Source user is not the primary admin of this organization');
+  }
+  if (currentPrimary === toUserId) {
+    return apiError.validation('Target user is already the primary admin');
+  }
+
+  // Target must belong to this organization (exact row) and be an approved admin
+  const target = await getTargetRoleRow(db, toUserId, orgId);
+  if (!target) return apiError.validation('Target user must be in the same organization');
+  if (target.approval_status !== 'approved' || !['org_admin', 'admin'].includes(target.role)) {
+    return apiError.validation('Target user must be an approved admin of this organization');
+  }
+
+  if (target.role === 'admin') {
+    const upgraded = await applyRoleChange(db, {
+      actorId: user.id,
+      actorRole: 'super_admin',
+      orgId,
+      targetUserId: toUserId,
+      newRole: 'org_admin',
+    });
+    if (!upgraded.ok) return upgraded.response;
+  }
+
+  const promoted = await promotePrimaryAdmin(db, orgId, toUserId, user.id);
+  if (!promoted.ok) {
+    return promoted.status === 422 ? apiError.validation(promoted.error) : apiError.internal(promoted.error);
+  }
+
+  await writeAudit(db, {
+    actorId: user.id,
+    action: 'transfer_primary_admin',
+    targetType: 'organization',
+    targetId: orgId,
+    organizationId: orgId,
+    details: { from_user_id: currentPrimary, to_user_id: toUserId },
+  });
+
+  return success(
+    {
+      success: true,
+      from_user_id: currentPrimary,
+      to_user_id: toUserId,
+      organization_id: orgId,
+      message: 'Primary admin status transferred successfully',
+    },
+    'Primary admin transferred successfully'
   );
-  
-  if (validationError) return validationError;
-  
-  // Verify caller is super_admin
-  const orgContext = await getOrganizationContext(user);
-  if (!orgContext.isSuperAdmin) {
-    return apiError.forbidden('Only super admins can transfer primary admin status');
-  }
-  
-  // Validate that from_user and to_user are different
-  if (body.from_user_id === body.to_user_id) {
-    return apiError.validation('Cannot transfer primary admin status to the same user');
-  }
-  
-  const adminSupabase = await createSupabaseAdminClient();
-  
-  // Step 1: Verify from_user is current primary admin
-  const { data: fromUser, error: fromUserError } = await adminSupabase
-    .from('user_roles')
-    .select('role, organization_id, is_primary_admin')
-    .eq('user_id', body.from_user_id)
-    .single();
-  
-  if (fromUserError || !fromUser) {
-    return apiError.notFound('Source user not found');
-  }
-  
-  if (!fromUser.is_primary_admin) {
-    return apiError.validation('Source user is not the primary admin');
-  }
-  
-  if (fromUser.organization_id !== orgId) {
-    return apiError.validation('Source user does not belong to this organization');
-  }
-  
-  // Step 2: Verify to_user exists and is in same organization
-  const { data: toUser, error: toUserError } = await adminSupabase
-    .from('user_roles')
-    .select('role, organization_id, is_primary_admin')
-    .eq('user_id', body.to_user_id)
-    .single();
-  
-  if (toUserError || !toUser) {
-    return apiError.notFound('Target user not found');
-  }
-  
-  if (toUser.organization_id !== orgId) {
-    return apiError.validation('Target user must be in the same organization');
-  }
-  
-  if (toUser.is_primary_admin) {
-    return apiError.validation('Target user is already a primary admin');
-  }
-  
-  // Step 3: Perform transfer using database function
-  const { data: transferResult, error: transferError } = await adminSupabase
-    .rpc('transfer_primary_admin', {
-      from_user_id: body.from_user_id,
-      to_user_id: body.to_user_id,
-      org_id: orgId
-    });
-  
-  if (transferError) {
-    console.error('Error transferring primary admin:', transferError);
-    return apiError.internal(`Failed to transfer primary admin: ${transferError.message}`);
-  }
-  
-  // Step 4: Update organizations table primary_admin_id
-  const { error: orgUpdateError } = await adminSupabase
-    .from('organizations')
-    .update({
-      primary_admin_id: body.to_user_id,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', orgId);
-  
-  if (orgUpdateError) {
-    console.warn('Failed to update organizations.primary_admin_id:', orgUpdateError);
-    // Don't fail the whole operation, just log warning
-  }
-  
-  // Step 5: Log the transfer in audit logs
-  await adminSupabase
-    .from('super_admin_audit_partitioned')
-    .insert({
-      user_id: user.id,
-      action: 'transfer_primary_admin',
-      access_reason: `Transferred primary admin from ${body.from_user_id} to ${body.to_user_id}`,
-      category: 'organization_management',
-      metadata: {
-        organization_id: orgId,
-        from_user_id: body.from_user_id,
-        to_user_id: body.to_user_id,
-        transfer_result: transferResult
-      }
-    });
-  
-  return success({
-    success: true,
-    from_user_id: body.from_user_id,
-    to_user_id: body.to_user_id,
-    organization_id: orgId,
-    message: 'Primary admin status transferred successfully'
-  }, 'Primary admin transferred successfully');
 });
 
 /**
  * GET /api/v2/admin/super/organizations/[orgId]/primary-admin
- * Get the current primary admin for an organization
+ * The primary admin of an organization. Caller must be an admin OF THAT
+ * organization (or super_admin) - not any admin anywhere.
  */
-export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (req: NextRequest) => {
-  // Extract orgId from URL path
-  const urlParts = req.nextUrl.pathname.split('/');
-  const orgId = urlParts[urlParts.indexOf('organizations') + 1];
-  
-  if (!orgId) {
-    return apiError.badRequest('Organization ID is required');
-  }
-  
-  const adminSupabase = await createSupabaseAdminClient();
-  
-  // Get primary admin using database function
-  const { data: primaryAdmin, error } = await adminSupabase
-    .rpc('get_organization_primary_admin', { org_id: orgId });
-  
+export const GET = withSession<{ orgId: string }>(async (_req, { user, params }) => {
+  const { orgId } = params;
+  if (!isUuid(orgId)) return apiError.badRequest('Invalid organization id');
+
+  await authorizeOrg(user, { orgId, minRole: 'admin' });
+
+  const db = await createSupabaseAdminClient();
+  const { data: rows, error } = await db
+    .from('user_roles')
+    .select('user_id')
+    .eq('organization_id', orgId)
+    .eq('is_primary_admin', true)
+    .limit(1);
   if (error) {
-    console.error('Error fetching primary admin:', error);
-    return apiError.internal(`Failed to fetch primary admin: ${error.message}`);
+    console.error('[primary-admin] fetch failed:', error);
+    return apiError.internal('Failed to fetch primary admin');
   }
-  
-  if (!primaryAdmin || primaryAdmin.length === 0) {
-    return apiError.notFound('No primary admin found for this organization');
-  }
-  
+  const primaryId = ((rows ?? []) as Array<{ user_id: string }>)[0]?.user_id;
+  if (!primaryId) return apiError.notFound('No primary admin found for this organization');
+
+  const { data: profile } = await db
+    .from('profiles')
+    .select('email, full_name')
+    .eq('id', primaryId)
+    .maybeSingle();
+
   return success({
-    user_id: primaryAdmin[0].user_id,
-    email: primaryAdmin[0].email,
-    full_name: primaryAdmin[0].full_name
+    user_id: primaryId,
+    email: profile?.email ?? null,
+    full_name: profile?.full_name ?? null,
   });
 });

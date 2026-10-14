@@ -1,10 +1,13 @@
-import { withRole, success, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { withRole, success, resolveAdminOrg } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export const GET = withRole(['faculty', 'admin', 'org_admin'], async (_req, { user }) => {
+export const GET = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], async (req, { user }) => {
   const supabase = await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
+  // Caller must hold at least faculty IN the organization (not merely somewhere)
+  const requestedOrg = req.headers.get('X-Organization-ID') || new URL(req.url).searchParams.get('organization_id');
+  const scope = await resolveAdminOrg(user, requestedOrg, 'faculty');
+  const targetOrgIds = [scope.organizationId];
+  const orgContext = { isSuperAdmin: scope.isSuperAdmin && !scope.requested };
 
     // Get all certificates with their confidence scores and metadata (org-filtered)
     let certQuery = supabase
@@ -16,18 +19,6 @@ export const GET = withRole(['faculty', 'admin', 'org_admin'], async (_req, { us
     }
 
     const { data: allCertificates } = await certQuery;
-
-    console.log('[Analytics] Total certificates found:', allCertificates?.length);
-    console.log('[Analytics] Certificates with confidence_score:', 
-      allCertificates?.filter(c => c.confidence_score != null).length);
-    console.log('[Analytics] Sample certificate data:', 
-      allCertificates?.[0] ? {
-        id: allCertificates[0].id,
-        confidence_score: allCertificates[0].confidence_score,
-        auto_approved: allCertificates[0].auto_approved,
-        verification_method: allCertificates[0].verification_method,
-        has_fields: !!allCertificates[0].fields
-      } : 'No certificates');
 
     const totalCerts = allCertificates?.length || 0;
 
@@ -103,12 +94,6 @@ export const GET = withRole(['faculty', 'admin', 'org_admin'], async (_req, { us
         };
       })
       .filter(item => item.score != null); // Only include items with confidence scores
-
-    console.log('[Analytics] Total metadata entries:', allMetadata.length);
-    console.log('[Analytics] Sample metadata:', allMetadata[0]);
-    console.log('[Analytics] Document metadata found:', documentMetadata?.length || 0);
-    console.log('[Analytics] Certificate metadata found:', certMetadata?.length || 0);
-    console.log('[Analytics] Metadata map size:', metadataMap.size);
 
     // Calculate confidence distribution based on OCR extraction confidence
     const confidenceDistribution = {
