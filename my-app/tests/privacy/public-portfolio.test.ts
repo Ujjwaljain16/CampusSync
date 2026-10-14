@@ -21,14 +21,15 @@ function setup(opts: { profileResult?: QueryResult; student?: boolean } = {}) {
     user_roles: () => ({ data: opts.student === false ? [] : [{ user_id: USER }] }),
     certificates: () => ({
       data: [
-        { id: CERT_1, title: 'Python Basics', institution: 'Uni', date_issued: '2025-05-01', description: 'RAW OCR', confidence_score: 0.9, file_url: 'https://b/x.pdf' },
-        { id: CERT_2, title: 'Docker', institution: 'Uni', date_issued: null },
-      ],
-    }),
-    verifiable_credentials: () => ({
-      data: [
-        { id: 'urn:uuid:vc-1', credential: { credentialSubject: { certificateId: CERT_1 }, proof: { jws: 'aaa.bbb.ccc' } } },
-        { id: 'urn:uuid:vc-old', credential: { credentialSubject: { certificateId: CERT_1 }, proof: { jws: 'old.old.old' } } },
+        {
+          id: CERT_1, title: 'Python Basics', institution: 'Uni', date_issued: '2025-05-01', description: 'RAW OCR', confidence_score: 0.9, file_url: 'https://b/x.pdf',
+          // embedded through verifiable_credentials.certificate_id (active only); newest wins
+          verifiable_credentials: [
+            { id: 'urn:uuid:vc-old', created_at: '2025-01-01T00:00:00Z', credential: { proof: { jws: 'old.old.old' } } },
+            { id: 'urn:uuid:vc-1', created_at: '2025-06-01T00:00:00Z', credential: { proof: { jws: 'aaa.bbb.ccc' } } },
+          ],
+        },
+        { id: CERT_2, title: 'Docker', institution: 'Uni', date_issued: null, verifiable_credentials: [] },
       ],
     }),
   });
@@ -81,7 +82,37 @@ describe('GET /api/public/portfolio/[userId]', () => {
       { id: CERT_2, title: 'Docker', institution: 'Uni', date_issued: null },
     ]);
     expect(admin.callsFor('certificates')[0].eq('verification_status')).toBe('verified');
-    expect(admin.callsFor('verifiable_credentials')[0].eq('status')).toBe('active');
+  });
+
+  it('joins credentials to certificates by certificate_id in ONE query (no JSON match, no 200 cap)', async () => {
+    const admin = setup();
+    await call();
+    expect(admin.callsFor('verifiable_credentials')).toHaveLength(0);
+    const query = admin.callsFor('certificates')[0];
+    const select = String(query.find('select')?.args[0]);
+    expect(select).toContain('verifiable_credentials(');
+    expect(query.find('eq', 'verifiable_credentials.status')?.args[1]).toBe('active');
+    expect(query.has('contains')).toBe(false);
+    expect(query.find('limit')?.args[0]).toBe(100);
+  });
+
+  it('shows a certificate without an active credential and ignores a missing embed', async () => {
+    const admin = createMockClient({
+      profiles: () => ({ data: [{ id: USER, public_portfolio_enabled: true, recruiter_share_contact: false }] }),
+      user_roles: () => ({ data: [{ user_id: USER }] }),
+      certificates: () => ({
+        data: [
+          { id: CERT_1, title: 'A', institution: 'U', date_issued: '2025-05-01' },
+          { id: CERT_2, title: 'B', institution: 'U', date_issued: null, verifiable_credentials: null },
+        ],
+      }),
+    });
+    vi.mocked(createSupabaseAdminClient).mockResolvedValue(admin as never);
+    const json = await (await call()).json();
+    expect(json.data.certificates).toEqual([
+      { id: CERT_1, title: 'A', institution: 'U', date_issued: '2025-05-01' },
+      { id: CERT_2, title: 'B', institution: 'U', date_issued: null },
+    ]);
   });
 
   it('never exposes description, OCR text, confidence, file urls or user ids', async () => {

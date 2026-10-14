@@ -58,7 +58,8 @@ const signed = { id: 'urn:uuid:11111111-1111-4111-8111-111111111111', issuer: 'd
 describe('issue hook', () => {
   it('does not call the log when the flag is off', async () => {
     vi.mocked(signCredential).mockResolvedValue(signed as never);
-    const res = await issueCredentialForCertificate(fakeDb(), { certificateId: 'cert-1', actor: ACTOR });
+    const db = fakeDb();
+    const res = await issueCredentialForCertificate(db, { certificateId: 'cert-1', actor: ACTOR, writeDb: db });
     expect(res.ok).toBe(true);
     expect(appendEventSafely).not.toHaveBeenCalled();
   });
@@ -66,7 +67,8 @@ describe('issue hook', () => {
   it('appends credential.issued with the raw student id (hashed inside the log layer) when enabled', async () => {
     vi.stubEnv('TRANSPARENCY_LOG_ENABLED', 'true');
     vi.mocked(signCredential).mockResolvedValue(signed as never);
-    const res = await issueCredentialForCertificate(fakeDb(), { certificateId: 'cert-1', actor: ACTOR });
+    const db = fakeDb();
+    const res = await issueCredentialForCertificate(db, { certificateId: 'cert-1', actor: ACTOR, writeDb: db });
     expect(res).toMatchObject({ ok: true, reused: false });
     expect(appendEventSafely).toHaveBeenCalledTimes(1);
     expect(appendEventSafely).toHaveBeenCalledWith({
@@ -82,14 +84,15 @@ describe('issue hook', () => {
     vi.stubEnv('TRANSPARENCY_LOG_ENABLED', 'true');
     vi.mocked(signCredential).mockResolvedValue(signed as never);
     vi.mocked(appendEventSafely).mockRejectedValue(new Error('boom'));
-    const res = await issueCredentialForCertificate(fakeDb(), { certificateId: 'cert-1', actor: ACTOR });
+    const db = fakeDb();
+    const res = await issueCredentialForCertificate(db, { certificateId: 'cert-1', actor: ACTOR, writeDb: db });
     expect(res.ok).toBe(true);
   });
 
   it('an idempotent re-issue (existing active credential) logs nothing new', async () => {
     vi.stubEnv('TRANSPARENCY_LOG_ENABLED', 'true');
     const db = fakeDb({ activeRows: [{ id: 'existing', credential: { id: 'existing' }, created_at: 'x' }] });
-    const res = await issueCredentialForCertificate(db, { certificateId: 'cert-1', actor: ACTOR });
+    const res = await issueCredentialForCertificate(db, { certificateId: 'cert-1', actor: ACTOR, writeDb: db });
     expect(res).toMatchObject({ ok: true, reused: true });
     expect(appendEventSafely).not.toHaveBeenCalled();
   });

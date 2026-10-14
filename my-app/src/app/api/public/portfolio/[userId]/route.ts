@@ -24,18 +24,23 @@ import { getStudentVisibility } from '@/lib/privacy/visibility';
 const MAX_CERTIFICATES = 100;
 const NOT_AVAILABLE = 'This portfolio is private or does not exist';
 
-type CertRow = { id: string; title: string | null; institution: string | null; date_issued: string | null };
-type VcRow = { id: string; credential: unknown };
+type VcEmbed = { id: string; created_at?: string | null; credential: unknown };
+type CertRow = {
+  id: string;
+  title: string | null;
+  institution: string | null;
+  date_issued: string | null;
+  /** Active credentials of this certificate (embedded through verifiable_credentials.certificate_id). */
+  verifiable_credentials?: VcEmbed[] | VcEmbed | null;
+};
 
-function readVcLink(row: VcRow): { certificateId: string; id: string; jws?: string } | null {
-  const credential = row.credential as
-    | { credentialSubject?: { certificateId?: unknown }; proof?: { jws?: unknown } }
-    | null
-    | undefined;
-  const certificateId = credential?.credentialSubject?.certificateId;
-  if (typeof certificateId !== 'string') return null;
-  const jws = credential?.proof?.jws;
-  return { certificateId, id: row.id, ...(typeof jws === 'string' && jws ? { jws } : {}) };
+/** The newest active credential of a certificate, reduced to what the portfolio shows. */
+function pickCredential(embed: CertRow['verifiable_credentials']): { id: string; jws?: string } | null {
+  const rows = Array.isArray(embed) ? embed : embed ? [embed] : [];
+  if (rows.length === 0) return null;
+  const newest = [...rows].sort((a, b) => `${b.created_at ?? ''}`.localeCompare(`${a.created_at ?? ''}`))[0];
+  const jws = (newest.credential as { proof?: { jws?: unknown } } | null | undefined)?.proof?.jws;
+  return { id: newest.id, ...(typeof jws === 'string' && jws ? { jws } : {}) };
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ userId: string }> }) {
@@ -69,11 +74,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
     if (!roleRows || roleRows.length === 0) return apiError.notFound(NOT_AVAILABLE);
 
+    // One query: verified certificates with their ACTIVE credentials embedded (join on
+    // verifiable_credentials.certificate_id). The embedded filter keeps certificates that have none.
     let certQuery = admin
       .from('certificates')
-      .select('id, title, institution, date_issued')
+      .select('id, title, institution, date_issued, verifiable_credentials(id, created_at, credential)')
       .eq('student_id', userId)
       .eq('verification_status', 'verified')
+      .eq('verifiable_credentials.status', 'active')
       .order('date_issued', { ascending: false })
       .limit(MAX_CERTIFICATES);
     if (organizationId) certQuery = certQuery.eq('organization_id', organizationId);
@@ -83,32 +91,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       console.error('[public-portfolio] certificate query failed', certError);
       return apiError.internal('Failed to load portfolio');
     }
-    const certRows = (certificates ?? []) as CertRow[];
-
-    // Link active verifiable credentials to their certificates (by credentialSubject.certificateId).
-    const linkByCert = new Map<string, { id: string; jws?: string }>();
-    if (certRows.length > 0) {
-      const { data: vcs, error: vcError } = await admin
-        .from('verifiable_credentials')
-        .select('id, credential')
-        .eq('student_id', userId)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(200);
-      if (vcError) {
-        console.error('[public-portfolio] credential query failed', vcError);
-      } else {
-        for (const row of (vcs ?? []) as VcRow[]) {
-          const link = readVcLink(row);
-          if (link && !linkByCert.has(link.certificateId)) {
-            linkByCert.set(link.certificateId, { id: link.id, ...(link.jws ? { jws: link.jws } : {}) });
-          }
-        }
-      }
-    }
+    const certRows = (certificates ?? []) as unknown as CertRow[];
 
     const items = certRows.map((c) => {
-      const credential = linkByCert.get(c.id);
+      const credential = pickCredential(c.verifiable_credentials);
       return {
         id: c.id,
         title: c.title,

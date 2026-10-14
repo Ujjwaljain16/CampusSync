@@ -7,8 +7,9 @@ import {
   isValidUUID,
   getOrganizationContext,
   getTargetOrganizationIds,
+  writeAudit,
 } from '@/lib/api';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
 import { credentialIdCandidates, isInvalidInputSyntax } from '@/lib/vcId';
 import { markCredentialsRevoked } from '@/lib/statusList';
 
@@ -47,12 +48,18 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
 
   // Load the credential so we can scope the caller to the right organization.
   // The id is stored as issued (urn:uuid:<uuid>); accept the bare UUID too.
-  type VcRow = { id: string; status: string; credential: unknown };
+  type VcRow = {
+    id: string;
+    status: string;
+    credential: unknown;
+    certificate_id: string | null;
+    organization_id: string | null;
+  };
   let vcRow: VcRow | null = null;
   for (const candidate of candidates) {
     const { data, error: vcErr } = await supabase
       .from('verifiable_credentials')
-      .select('id, status, credential')
+      .select('id, status, credential, certificate_id, organization_id')
       .eq('id', candidate)
       .maybeSingle();
     if (vcErr) {
@@ -68,21 +75,25 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
   if (!vcRow) return apiError.notFound('Credential not found');
   const credentialId = vcRow.id; // exactly as stored
 
-  // Organization scoping (credentials have no organization column; use the certificate's)
+  // Organization scoping: the credential's own organization_id first; rows without one fall back to
+  // the organization of their certificate (certificate_id column).
+  let credentialOrgId: string | null = vcRow.organization_id ?? null;
   if (role !== 'super_admin') {
     const orgContext = await getOrganizationContext(user);
     if (!orgContext.isSuperAdmin) {
-      const certificateId = (vcRow.credential as { credentialSubject?: { certificateId?: unknown } } | null)
-        ?.credentialSubject?.certificateId;
-      if (typeof certificateId !== 'string' || !isValidUUID(certificateId)) {
-        return apiError.forbidden('Credential is outside your organization');
+      if (!credentialOrgId) {
+        const certificateId = vcRow.certificate_id;
+        if (typeof certificateId !== 'string' || !isValidUUID(certificateId)) {
+          return apiError.forbidden('Credential is outside your organization');
+        }
+        const { data: cert } = await supabase
+          .from('certificates')
+          .select('organization_id')
+          .eq('id', certificateId)
+          .maybeSingle();
+        credentialOrgId = cert?.organization_id ?? null;
       }
-      const { data: cert } = await supabase
-        .from('certificates')
-        .select('organization_id')
-        .eq('id', certificateId)
-        .maybeSingle();
-      if (!cert || !getTargetOrganizationIds(orgContext).includes(cert.organization_id)) {
+      if (!credentialOrgId || !getTargetOrganizationIds(orgContext).includes(credentialOrgId)) {
         return apiError.forbidden('Credential is outside your organization');
       }
     }
@@ -93,8 +104,10 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
     return success({ status: 'revoked', credentialId, alreadyRevoked: true });
   }
 
+  // Authorized. Credential rows are written by the backend only: update with the service role.
+  const admin = await createSupabaseAdminClient();
   const now = new Date().toISOString();
-  let { data: updated, error: updateError } = await supabase
+  let { data: updated, error: updateError } = await admin
     .from('verifiable_credentials')
     .update({ status: 'revoked', revoked_at: now, revoked_reason: reason })
     .eq('id', credentialId)
@@ -103,7 +116,7 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
   // revoked_at / revoked_reason may not exist in every deployment: fall back to status only
   if (updateError && (updateError.code === '42703' || updateError.code === 'PGRST204')) {
     console.warn('[vcs/revoke] revoked_at/revoked_reason columns missing; updating status only');
-    ({ data: updated, error: updateError } = await supabase
+    ({ data: updated, error: updateError } = await admin
       .from('verifiable_credentials')
       .update({ status: 'revoked' })
       .eq('id', credentialId)
@@ -122,20 +135,15 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
   // a credentialStatus entry). Never fails the revocation; the status column stays authoritative.
   await markCredentialsRevoked([{ id: credentialId, credential: vcRow.credential }]);
 
-  // Audit log (same columns as the other audit inserts, e.g. certificates/issue)
-  try {
-    const { error: auditError } = await supabase.from('audit_logs').insert({
-      actor_id: user.id,
-      action: 'revoke_vc',
-      entity_type: 'verifiable_credential',
-      entity_id: credentialId,
-      details: { reason },
-      created_at: now,
-    });
-    if (auditError) console.error('[vcs/revoke] audit log insert failed:', auditError.code, auditError.message);
-  } catch (auditError) {
-    console.error('[vcs/revoke] audit log error:', auditError);
-  }
+  // Audit log (canonical shape, written with the service role by writeAudit)
+  await writeAudit(admin, {
+    actorId: user.id,
+    organizationId: credentialOrgId,
+    action: 'revoke_vc',
+    targetType: 'credential',
+    targetId: credentialId,
+    details: { reason },
+  });
 
   // --- transparency log (best-effort, no-op unless TRANSPARENCY_LOG_ENABLED=true) ---
   if (process.env.TRANSPARENCY_LOG_ENABLED === 'true') {

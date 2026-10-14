@@ -14,12 +14,21 @@ const state: {
   adminThrows: boolean;
   issuerJwk: JWK | null;
   orgIds: string[];
-} = { user: null, tables: {}, inserts: [], fromCalls: [], adminThrows: false, issuerJwk: null, orgIds: [] };
+  /** every filter applied to a query: ['verifiable_credentials', 'eq', 'certificate_id', value] */
+  filters: Array<[string, string, string, unknown]>;
+  audits: Array<Record<string, unknown>>;
+} = { user: null, tables: {}, inserts: [], fromCalls: [], adminThrows: false, issuerJwk: null, orgIds: [], filters: [], audits: [] };
 
 function builder(table: string) {
   const result = () => ({ data: state.tables[table]?.data ?? null, error: state.tables[table]?.error ?? null });
   const b: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'contains', 'order', 'limit', 'in']) b[m] = () => b;
+  for (const m of ['select', 'order', 'limit', 'in']) b[m] = () => b;
+  for (const m of ['eq', 'contains']) {
+    b[m] = (col: string, val: unknown) => {
+      state.filters.push([table, m, col, val]);
+      return b;
+    };
+  }
   const one = async () => {
     const r = result();
     return { data: Array.isArray(r.data) ? (r.data[0] ?? null) : r.data, error: r.error };
@@ -51,6 +60,13 @@ vi.mock('@/lib/supabaseServer', () => ({
     return fakeClient();
   },
   requireRole: async () => ({ authorized: false }),
+}));
+
+vi.mock('@/lib/api/utils/audit', () => ({
+  writeAudit: async (_client: unknown, entry: Record<string, unknown>) => {
+    state.audits.push(entry);
+    return true;
+  },
 }));
 
 vi.mock('@/lib/api/utils/organization', async (orig) => ({
@@ -108,8 +124,10 @@ function arrangeIssue(over: { cert?: Record<string, unknown> | null; vc?: unknow
   state.orgIds = over.orgIds ?? [ORG_ID];
   state.tables = {
     certificates: { data: over.cert === undefined ? cert({ student_id: state.user?.id ?? STUDENT_ID }) : over.cert },
-    verifiable_credentials: { data: over.vc === undefined ? [{ id: VC_ID, status: 'active' }] : over.vc },
+    verifiable_credentials: { data: over.vc === undefined ? [{ id: VC_ID, status: 'active', organization_id: ORG_ID }] : over.vc },
   };
+  state.filters = [];
+  state.audits = [];
 }
 
 function issueReq(body: unknown) {
@@ -242,6 +260,34 @@ describe('POST /api/credentials/sd/issue', () => {
   it('403 when the certificate is outside the caller organisations', async () => {
     arrangeIssue({ orgIds: ['other-org'] });
     expect((await issuePOST(issueReq({ certificateId: CERT_ID }))).status).toBe(403);
+  });
+
+  it('looks the credential up by certificate_id (+ active, owner), not by JSON containment', async () => {
+    arrangeIssue();
+    expect((await issuePOST(issueReq({ certificateId: CERT_ID }))).status).toBe(201);
+    const vcFilters = state.filters.filter(([t]) => t === 'verifiable_credentials');
+    expect(vcFilters).toContainEqual(['verifiable_credentials', 'eq', 'certificate_id', CERT_ID]);
+    expect(vcFilters).toContainEqual(['verifiable_credentials', 'eq', 'status', 'active']);
+    expect(vcFilters.some(([, method]) => method === 'contains')).toBe(false);
+  });
+
+  it('audits through writeAudit with the canonical credential target', async () => {
+    arrangeIssue();
+    const res = await issuePOST(issueReq({ certificateId: CERT_ID }));
+    expect(res.status).toBe(201);
+    const { data } = await res.json();
+    expect(state.audits).toEqual([
+      {
+        actorId: state.user!.id,
+        organizationId: ORG_ID,
+        action: 'issue_sd_jwt',
+        targetType: 'credential',
+        targetId: VC_ID,
+        details: { sd_jti: data.jti, certificateId: CERT_ID },
+      },
+    ]);
+    // no hand-rolled audit_logs insert with entity_type / entity_id
+    expect(state.inserts.filter((i) => i.table === 'audit_logs')).toEqual([]);
   });
 
   it('404 when there is no ACTIVE credential (e.g. revoked), 500 on lookup error', async () => {

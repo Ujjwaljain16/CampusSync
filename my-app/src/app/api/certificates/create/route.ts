@@ -24,7 +24,8 @@ export const POST = withAuth(async (req: NextRequest, { user: authUser }) => {
 
   // The file must be one the caller uploaded to our own storage: exactly
   // <SUPABASE_URL>/storage/v1/object/public/<bucket>/<user.id>/<file> (see storageUrl.ts).
-  if (!parseCertificateFileUrl(body.publicUrl, { expectedUserId: user.id })) {
+  const parsedFile = parseCertificateFileUrl(body.publicUrl, { expectedUserId: user.id });
+  if (!parsedFile) {
     throw apiError.badRequest('Invalid file URL');
   }
 
@@ -50,6 +51,8 @@ export const POST = withAuth(async (req: NextRequest, { user: authUser }) => {
     date_issued: normalizeDateIssued(body.ocr?.date_issued),
     description: body.ocr?.description ?? body.ocr?.raw_text ?? '',
     file_url: body.publicUrl,
+    // object path inside the bucket (<uid>/<file>): what storage calls need once the bucket is private
+    storage_path: parsedFile.path,
     verification_status: 'pending' as const,
     confidence_score: body.ocr?.confidence ?? null,
     created_at: now,

@@ -11,7 +11,7 @@ import {
   revokeAllCredentialsForCertificate,
   writeAudit,
 } from '@/lib/services/certificateService';
-import { parseCertificateFileUrl } from '@/lib/services/storageUrl';
+import { CERTIFICATES_BUCKET, parseCertificateFileUrl } from '@/lib/services/storageUrl';
 
 interface DeleteCertificateBody {
   certificateId: string;
@@ -23,18 +23,41 @@ interface Row {
   organization_id: string | null;
   verification_status: string | null;
   file_url: string | null;
+  /** Only certificates have it (documents do not). */
+  storage_path?: string | null;
 }
 
-/** Remove the stored object after the DB row is gone. Failures are logged only. */
-async function removeStoredFile(supabase: SupabaseClient, fileUrl: string | null, ownerId: string) {
-  if (!fileUrl) return;
+/**
+ * Remove the stored object after the DB row is gone. Failures are logged only.
+ * Prefers `storage_path`; rows from before it existed fall back to parsing `file_url`.
+ * Either way the object must live in the owner's own folder.
+ */
+async function removeStoredFile(
+  supabase: SupabaseClient,
+  row: { storage_path?: string | null; file_url: string | null },
+  ownerId: string
+) {
   try {
-    const parsed = parseCertificateFileUrl(fileUrl, { expectedUserId: ownerId });
-    if (!parsed) {
-      logger.warn('[Delete] file_url is not a recognised storage URL for this owner; skipping file removal');
+    let target: { bucket: string; path: string } | null = null;
+    const storagePath = row.storage_path;
+    if (typeof storagePath === 'string' && storagePath.length > 0) {
+      // <ownerId>/<file>, same shape rules as the URL form (no traversal, no extra segments)
+      const m = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(storagePath);
+      if (m && m[1] === ownerId && m[2] !== '.' && m[2] !== '..') {
+        target = { bucket: CERTIFICATES_BUCKET, path: storagePath };
+      }
+    }
+    if (!target && row.file_url) {
+      const parsed = parseCertificateFileUrl(row.file_url, { expectedUserId: ownerId });
+      if (parsed) target = { bucket: parsed.bucket, path: parsed.path };
+    }
+    if (!target) {
+      if (row.storage_path || row.file_url) {
+        logger.warn('[Delete] stored file is not in the owner folder / not recognised; skipping file removal');
+      }
       return;
     }
-    const { error } = await supabase.storage.from(parsed.bucket).remove([parsed.path]);
+    const { error } = await supabase.storage.from(target.bucket).remove([target.path]);
     if (error) logger.error('[Delete] Error deleting file from storage', error);
   } catch (storageError) {
     logger.error('[Delete] Error deleting file from storage', storageError);
@@ -59,14 +82,18 @@ export const DELETE = withRole(['student', 'admin', 'org_admin', 'super_admin'],
 
   // Certificates first; fall back to documents (newer flow). Same rules for both.
   const tables = [
-    { table: 'certificates', metaTable: 'certificate_metadata', metaKey: 'certificate_id', isCertificate: true },
+    { table: 'certificates', metaTable: null, metaKey: null, isCertificate: true },
     { table: 'documents', metaTable: 'document_metadata', metaKey: 'document_id', isCertificate: false },
   ] as const;
 
   for (const t of tables) {
+    // documents have no storage_path column
+    const columns: string = t.isCertificate
+      ? 'id, student_id, organization_id, verification_status, file_url, storage_path'
+      : 'id, student_id, organization_id, verification_status, file_url';
     const { data: rec, error: readErr } = await supabase
       .from(t.table)
-      .select('id, student_id, organization_id, verification_status, file_url')
+      .select(columns)
       .eq('id', certificateId)
       .maybeSingle();
 
@@ -76,7 +103,7 @@ export const DELETE = withRole(['student', 'admin', 'org_admin', 'super_admin'],
       continue;
     }
     if (!rec) continue;
-    const row = rec as Row;
+    const row = rec as unknown as Row;
 
     const isOwner = row.student_id === user.id;
     const isAdminOfOrg = actorHasRoleInOrg(actor, ADMIN_ROLES, row.organization_id);
@@ -94,9 +121,11 @@ export const DELETE = withRole(['student', 'admin', 'org_admin', 'super_admin'],
       if (!revoke.ok) throw apiError.internal('Failed to revoke credentials; certificate not deleted');
     }
 
-    // 2) Metadata (foreign key), then the row itself, scoped in the WHERE clause.
-    const { error: metaErr } = await admin.from(t.metaTable).delete().eq(t.metaKey, row.id);
-    if (metaErr) logger.error(`[Delete] Error deleting ${t.metaTable}`, metaErr);
+    // 2) Document metadata (certificates have none), then the row itself, scoped in the WHERE clause.
+    if (t.metaTable) {
+      const { error: metaErr } = await admin.from(t.metaTable).delete().eq(t.metaKey, row.id);
+      if (metaErr) logger.error(`[Delete] Error deleting ${t.metaTable}`, metaErr);
+    }
 
     let del = admin.from(t.table).delete().eq('id', row.id);
     if (ownerOnly) {
@@ -116,9 +145,9 @@ export const DELETE = withRole(['student', 'admin', 'org_admin', 'super_admin'],
     }
 
     // 3) Storage object last: a failure here leaves an orphan file, never a dangling row.
-    await removeStoredFile(admin, row.file_url, row.student_id);
+    await removeStoredFile(admin, row, row.student_id);
 
-    await writeAudit(supabase, {
+    await writeAudit(admin, {
       actorId: user.id,
       organizationId: row.organization_id,
       action: t.isCertificate ? 'delete_certificate' : 'delete_document',

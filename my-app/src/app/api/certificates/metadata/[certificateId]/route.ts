@@ -7,7 +7,8 @@ const REVIEWER_ROLES = ['faculty', 'admin', 'org_admin', 'super_admin'] as const
 /**
  * GET /api/certificates/metadata/[certificateId]
  *
- * Extraction metadata (confidence, evidence, method) for one certificate.
+ * Extraction metadata (confidence, evidence, method) for one certificate, read from
+ * the certificate row itself (there is no separate metadata table).
  * Visible to the certificate's owner and to APPROVED reviewers of the
  * certificate's own organization — nobody else (recruiters never see it).
  */
@@ -40,17 +41,6 @@ export const GET = withSession<{ certificateId: string }>(async (_req: NextReque
     }
   }
 
-  const { data: metadata, error: metadataError } = await supabase
-    .from('certificate_metadata')
-    .select('*')
-    .eq('certificate_id', certificateId)
-    .maybeSingle();
-
-  if (metadata && !metadataError) {
-    return success({ data: metadata });
-  }
-
-  // No separate metadata row: derive it from the certificate itself.
   return success({
     data: {
       certificate_id: certificate.id,
