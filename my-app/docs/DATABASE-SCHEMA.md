@@ -137,6 +137,19 @@ do not apply both. `20261014_authz_05a/b/c` must be applied before step 08 (it r
 
 ### Application changes that gate the later steps
 
+**Status: A, B and D are implemented in code on this branch** (tsc, eslint and 1094 app tests green; 93 migration checks
+green). **C is still open** (needs the `auth.users` trigger body). What that means for deploy order:
+
+1. Apply steps 01 to 04 **before** deploying this code. The new code reads `certificates.verification_details`, writes
+   `organization_domains`, and embeds `verifiable_credentials` through the `certificate_id` foreign key (created in step 02).
+   Without them the analytics routes, the org domain routes and the public portfolio return 500.
+2. Deploy the code.
+3. Then apply 05, 06 and 08 (07 after C).
+
+Two behaviour changes to expect after step 05: faculty see only their own rows in `/api/certificates/approval-history`
+(the audit read policy is "own rows, or organization admin and above"), and the recruiter dashboard's "recent
+verifications" list is always empty (the route that wrote those audit rows was removed).
+
 **A. Before 05 (audit writes only through the service role, one shape)**
 - `src/lib/services/certificateService.ts` `writeAudit(db, ...)`, `src/app/api/vcs/revoke/route.ts` (also uses `entity_type` / `entity_id`),
   `src/app/api/credentials/sd/issue/route.ts` (same), `src/app/api/certificates/delete/route.ts`: pass the admin client.
