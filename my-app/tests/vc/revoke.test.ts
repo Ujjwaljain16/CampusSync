@@ -49,8 +49,7 @@ const post = async (body: unknown) => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    }),
-    undefined as any
+    })
   );
   return { status: res.status, body: await res.json() };
 };

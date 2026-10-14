@@ -44,6 +44,10 @@ const PUBLIC_ROUTES: Record<string, string> = {
   'public/portfolio/[userId]': 'Public student portfolio by design (review: expose only opted-in fields).',
   'recruiter/verify-credential': 'Public credential verification by JWS/VC (rate limited).',
   'vcs/verify': 'Public credential verification endpoint (rate limited).',
+  'transparency/sth': 'Public by design: latest signed tree head of the transparency log (read-only, rate limited, flag-gated).',
+  'transparency/proof/inclusion': 'Public by design: Merkle inclusion proof anyone can verify offline (read-only, rate limited, flag-gated).',
+  'transparency/proof/consistency': 'Public by design: Merkle consistency proof between two signed heads (read-only, rate limited, flag-gated).',
+  'transparency/entries': 'Public by design: paged pseudonymous log entries, no raw student data (read-only, rate limited, flag-gated).',
 };
 
 /** Substrings/regexes whose presence in a route file counts as an auth guard. */

@@ -46,7 +46,8 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
 
   // Load the credential so we can scope the caller to the right organization.
   // The id is stored as issued (urn:uuid:<uuid>); accept the bare UUID too.
-  let vcRow: { id: string; status: string; credential: unknown } | null = null;
+  type VcRow = { id: string; status: string; credential: unknown };
+  let vcRow: VcRow | null = null;
   for (const candidate of candidates) {
     const { data, error: vcErr } = await supabase
       .from('verifiable_credentials')
@@ -59,7 +60,7 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
       return apiError.internal('Failed to revoke credential');
     }
     if (data) {
-      vcRow = data as typeof vcRow;
+      vcRow = data as VcRow;
       break;
     }
   }
@@ -130,6 +131,15 @@ export const POST = withRole(['admin', 'faculty', 'org_admin', 'super_admin'], a
   } catch (auditError) {
     console.error('[vcs/revoke] audit log error:', auditError);
   }
+
+  // --- transparency log (best-effort, no-op unless TRANSPARENCY_LOG_ENABLED=true) ---
+  if (process.env.TRANSPARENCY_LOG_ENABLED === 'true') {
+    try {
+      const { appendEventSafely } = await import('@/lib/transparencyLog');
+      await appendEventSafely({ type: 'credential.revoked', credentialId });
+    } catch { /* logging must never affect revocation */ }
+  }
+  // --- end transparency log ---
 
   return success({ status: 'revoked', credentialId });
 });

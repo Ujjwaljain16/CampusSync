@@ -310,6 +310,14 @@ export async function revokeAllCredentialsForCertificate(
   // verifiable_credentials.status is the single source of truth for revocation
   // (there is no revocation_list table).
   const ids = ((data ?? []) as Array<{ id: string }>).map(r => r.id);
+  // --- transparency log (best-effort, no-op unless TRANSPARENCY_LOG_ENABLED=true) ---
+  if (ids.length > 0 && process.env.TRANSPARENCY_LOG_ENABLED === 'true') {
+    try {
+      const { appendEventsSafely } = await import('@/lib/transparencyLog');
+      await appendEventsSafely(ids.map(id => ({ type: 'credential.revoked' as const, credentialId: id, certificateId })));
+    } catch { /* logging must never affect revocation */ }
+  }
+  // --- end transparency log ---
   return { ok: true, count: ids.length, ids };
 }
 
@@ -613,6 +621,21 @@ export async function issueCredentialForCertificate(
     targetId: certificateId,
     details: { credentialId: vc.id },
   });
+
+  // --- transparency log (best-effort, no-op unless TRANSPARENCY_LOG_ENABLED=true) ---
+  if (process.env.TRANSPARENCY_LOG_ENABLED === 'true') {
+    try {
+      const { appendEventSafely } = await import('@/lib/transparencyLog');
+      await appendEventSafely({
+        type: 'credential.issued',
+        credentialId: vc.id as string,
+        certificateId: cert.id,
+        organizationId: cert.organization_id,
+        studentId: cert.student_id,
+      });
+    } catch { /* logging must never affect issuance */ }
+  }
+  // --- end transparency log ---
 
   return { ok: true, vc: vc as unknown as Record<string, unknown> & { id: string }, reused: false };
 }
