@@ -1,18 +1,20 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { isApprovedRow, pickHighestRow, type RoleRow } from '@/lib/api/utils/roles';
 
 /**
  * GET /api/auth/me
- * 
- * Get current user's profile and role information
+ *
+ * The current user's profile and role. A user may hold several user_roles rows (one per organization, or a
+ * platform-level row next to organization rows), so this picks the highest-privilege APPROVED row; when nothing is
+ * approved yet it reports the highest row so the UI can show "awaiting approval".
  */
 export async function GET() {
   try {
     const supabase = await createSupabaseServerClient();
-    
-    // Get current user
+
     const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
+
     if (authError || !user) {
       return NextResponse.json(
         { error: 'Not authenticated' },
@@ -20,19 +22,21 @@ export async function GET() {
       );
     }
 
-    // Get user's role
-    const { data: roleData } = await supabase
+    const { data: roleRows } = await supabase
       .from('user_roles')
-      .select('role, organization_id, approval_status')
+      .select('role, organization_id, approval_status, created_at')
       .eq('user_id', user.id)
-      .single();
+      .order('created_at', { ascending: true });
 
-    // Get user's profile
+    const rows = (roleRows ?? []) as RoleRow[];
+    const roleData = pickHighestRow(rows.filter((r) => isApprovedRow(r))) ?? pickHighestRow(rows);
+
+    // profiles is keyed by id (= auth user id)
     const { data: profileData } = await supabase
       .from('profiles')
       .select('full_name, email, organization_id')
-      .eq('user_id', user.id)
-      .single();
+      .eq('id', user.id)
+      .maybeSingle();
 
     return NextResponse.json({
       user_id: user.id,
