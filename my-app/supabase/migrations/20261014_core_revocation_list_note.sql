@@ -1,0 +1,19 @@
+-- DRAFT - review against the live schema before applying; idempotent
+-- (comment-only file: it changes nothing)
+--
+-- The table `public.revocation_list` DOES NOT EXIST in the production database.
+-- The application's /api/vcs/revoke route still tries to insert into it after updating the credential
+-- and merely logs the failure; that second write is dead code and should be removed from the route.
+--
+-- Source of truth for revocation is `verifiable_credentials`:
+--   status        'active' | 'revoked'
+--   revoked_at    timestamptz
+--   revoked_reason text
+-- (see 20261014_core_vc_status_columns.sql). Verification (/api/vcs/verify) already reads these.
+--
+-- No table is created here on purpose: a second store would need to be kept consistent with
+-- verifiable_credentials, and nothing reads it. If a public, cacheable revocation feed is wanted later,
+-- prefer a VIEW over verifiable_credentials (id, revoked_at only) rather than a new table.
+--
+-- Verification query to confirm the current state:
+--   select to_regclass('public.revocation_list');   -- expected: NULL

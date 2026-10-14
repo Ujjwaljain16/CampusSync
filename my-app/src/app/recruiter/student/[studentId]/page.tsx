@@ -1,162 +1,111 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Download, CheckCircle, XCircle, Clock, Award, MapPin, Calendar, Building, GraduationCap, Mail, Phone, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Download, CheckCircle, Award, MapPin, Calendar, Building, GraduationCap, Mail, Phone, ExternalLink } from 'lucide-react';
+import { apiFetch } from '@/lib/apiClient';
+import { safeEmail, safeHttpUrl } from '@/lib/privacy/safeUrl';
 
+/**
+ * Recruiter view of one student. The API (GET /api/recruiter/student/:id) returns
+ * { data: Student }. Only VERIFIED certificates are returned; contact details and
+ * GPA are present only when the student opted in (`contact_shared`).
+ */
 interface Student {
   id: string;
   name: string;
-  email: string;
-  university: string;
-  graduation_year: number;
-  major: string;
-  gpa: number;
-  location: string;
+  email?: string;
+  university: string | null;
+  graduation_year: number | null;
+  major: string | null;
+  gpa?: number | null;
+  location: string | null;
   phone?: string;
   linkedin?: string;
   github?: string;
   portfolio?: string;
+  contact_shared: boolean;
   skills: string[];
   certifications: Certification[];
   verified_count: number;
   total_certifications: number;
-  last_activity: string;
-  created_at: string;
+  last_activity: string | null;
+  created_at: string | null;
 }
 
 interface Certification {
   id: string;
   title: string;
-  issuer: string;
-  issue_date?: string | null;
-  verification_status: 'verified' | 'pending' | 'rejected';
-  confidence_score: number;
-  skills: string[];
-  verification_method: string;
-  description?: string;
-  certificate_url?: string;
-  verification_details?: {
-    qr_verified: boolean;
-    logo_verified: boolean;
-    template_verified: boolean;
-    ai_confidence: number;
-  };
+  institution: string | null;
+  date_issued: string | null;
+  verification_status: 'verified';
+}
+
+function ExternalLinkItem({ href, label }: { href: string | undefined; label: string }) {
+  const safe = safeHttpUrl(href);
+  if (!safe) return null;
+  return (
+    <a
+      href={safe}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center text-sm text-blue-600 hover:text-blue-800"
+    >
+      <ExternalLink className="w-4 h-4 mr-2" />
+      {label}
+    </a>
+  );
 }
 
 export default function StudentDetailPage() {
   const params = useParams();
   const studentId = params.studentId as string;
-  
+
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [contacting, setContacting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const fetchStudentDetails = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await apiFetch(`/api/recruiter/student/${encodeURIComponent(studentId)}`, { signal });
+
+        if (!response.ok) {
+          if (response.status === 404) throw new Error('Student not found');
+          if (response.status === 401 || response.status === 403) throw new Error('You do not have access to this student');
+          if (response.status === 429) throw new Error('Too many requests. Please try again in a moment.');
+          throw new Error('Failed to fetch student details');
+        }
+
+        const json = await response.json();
+        // API responses use the standardized { data: T } envelope
+        const payload = json && typeof json === 'object' && 'data' in json ? json.data : json;
+        setStudent(payload as Student);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [studentId]
+  );
 
   useEffect(() => {
-    if (studentId) {
-      fetchStudentDetails();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studentId]); // fetchStudentDetails is stable and only depends on studentId which is in deps
-
-  const fetchStudentDetails = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch(`/api/recruiter/student/${studentId}`);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch student details');
-      }
-      
-      const json = await response.json();
-      // API responses use the standardized { data: T } envelope
-      // unwrap if present, otherwise fall back to the raw body
-      const payload = json && typeof json === 'object' && 'data' in json ? json.data : json;
-      setStudent(payload as Student);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyCertificate = async (certificateId: string) => {
-    try {
-      const response = await fetch('/api/recruiter/verify-certificate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          certificate_id: certificateId,
-          action: 'verify'
-        })
-      });
-
-      if (response.ok) {
-        // Refresh student data
-        fetchStudentDetails();
-      }
-    } catch (err) {
-      console.error('Error verifying certificate:', err);
-    }
-  };
-
-  const handleRejectCertificate = async (certificateId: string) => {
-    try {
-      const response = await fetch('/api/recruiter/verify-certificate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          certificate_id: certificateId,
-          action: 'reject'
-        })
-      });
-
-      if (response.ok) {
-        // Refresh student data
-        fetchStudentDetails();
-      }
-    } catch (err) {
-      console.error('Error rejecting certificate:', err);
-    }
-  };
-
-  const handleDownloadCertificate = (certificate: Certification) => {
-    if (certificate.certificate_url) {
-      window.open(certificate.certificate_url, '_blank');
-    } else {
-      // Generate download link or show message
-      console.log('Certificate download not available');
-    }
-  };
-
-  const getVerificationStatusIcon = (status: string) => {
-    switch (status) {
-      case 'verified':
-        return <CheckCircle className="w-5 h-5 text-green-500" />;
-      case 'pending':
-        return <Clock className="w-5 h-5 text-yellow-500" />;
-      case 'rejected':
-        return <XCircle className="w-5 h-5 text-red-500" />;
-      default:
-        return <Clock className="w-5 h-5 text-gray-400" />;
-    }
-  };
-
-  const getConfidenceColor = (score: number) => {
-    if (score >= 0.9) return 'text-green-600 bg-green-100';
-    if (score >= 0.7) return 'text-yellow-600 bg-yellow-100';
-    return 'text-red-600 bg-red-100';
-  };
+    if (!studentId) return;
+    const controller = new AbortController();
+    void fetchStudentDetails(controller.signal);
+    return () => controller.abort();
+  }, [studentId, fetchStudentDetails]);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
+        <div className="text-center" role="status" aria-live="polite">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading student details...</p>
         </div>
@@ -167,7 +116,7 @@ export default function StudentDetailPage() {
   if (error || !student) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
+        <div className="text-center" role="alert">
           <div className="text-red-500 text-xl mb-4">Error</div>
           <p className="text-gray-600">{error || 'Student not found'}</p>
           <button
@@ -182,92 +131,62 @@ export default function StudentDetailPage() {
     );
   }
 
-  // (removed unused loadScript helper; using dynamic imports instead)
-  // Prefer server-side PDF export for robustness; fall back to client-side html2canvas
-  // if the server route isn't available.
-  const exportProfileAsPDF = async () => {
-    if (typeof window === 'undefined') return;
+  const contactEmail = safeEmail(student.email);
 
-    // First try the server-side PDF endpoint (more reliable, avoids CSS parsing issues)
+  // Server-side PDF only: the endpoint enforces who may export and what is included.
+  const exportProfileAsPDF = async () => {
+    setExportError(null);
     try {
-      const res = await fetch('/api/portfolio/export-pdf', {
+      const res = await apiFetch('/api/portfolio/export-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: student?.id, includePersonalInfo: true })
+        body: JSON.stringify({ userId: student.id, includePersonalInfo: student.contact_shared }),
       });
 
-      if (res.ok) {
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/pdf')) {
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${(student?.name || 'student').replace(/\s+/g, '_')}_profile.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-          return;
-        }
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        setExportError((json && typeof json.error === 'string' && json.error) || 'Could not export this profile');
+        return;
       }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(student.name || 'student').replace(/[^\w-]+/g, '_')}_profile.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     } catch (err) {
-      console.warn('Server-side PDF export failed or unavailable, falling back to client-side export:', err);
+      console.error('Failed to export PDF', err);
+      setExportError('Could not export this profile');
     }
+  };
 
-    // Client-side fallback using html2canvas + jsPDF
+  const contactStudent = async () => {
+    if (contacting || !contactEmail) return;
+    setContacting(true);
     try {
-      const html2canvasModule = await import('html2canvas');
-      const jspdfModule = await import('jspdf');
-      type Html2CanvasFn = (el: Element, opts?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
-      const html2canvasFn = ((html2canvasModule as unknown) as { default?: Html2CanvasFn }).default ?? ((html2canvasModule as unknown) as Html2CanvasFn);
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      const jsPDF = (jspdfModule as unknown as any).jsPDF ?? (jspdfModule as unknown as any).default ?? (jspdfModule as unknown as any);
-      /* eslint-enable @typescript-eslint/no-explicit-any */
+      const subject = encodeURIComponent('Opportunity to connect');
+      const body = encodeURIComponent(
+        `Hi ${student.name || ''},\r\n\r\nI found your profile on CampusSync and would like to discuss opportunities with you.\r\n\r\nRegards,`
+      );
+      window.location.assign(`mailto:${contactEmail}?subject=${subject}&body=${body}`);
 
-      if (!html2canvasFn || !jsPDF) throw new Error('PDF libraries not available');
-
-      const element = document.getElementById('profile-root') || document.body;
-      const canvas = await html2canvasFn(element, { scale: 2 });
-      const imgData = canvas.toDataURL('image/png');
-
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      const pdf = typeof jsPDF === 'function' ? new jsPDF('p', 'pt', 'a4') : new (jsPDF as any).jsPDF('p', 'pt', 'a4');
-      /* eslint-enable @typescript-eslint/no-explicit-any */
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgProps = { width: canvas.width, height: canvas.height };
-      const ratio = imgProps.width / imgProps.height;
-      const imgWidth = pageWidth;
-      const imgHeight = pageWidth / ratio;
-
-      let position = 0;
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      position -= pageHeight;
-      while (Math.abs(position) < imgHeight - pageHeight) {
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        position -= pageHeight;
-      }
-
-      const filename = `${(student?.name || 'student').replace(/\s+/g, '_')}_profile.pdf`;
-      pdf.save(filename);
+      // Log contact server-side (de-duplicated server-side as well)
+      await apiFetch('/api/recruiter/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: student.id,
+          method: 'email',
+          notes: `Email sent via mailto on ${new Date().toLocaleString()}`,
+        }),
+      });
     } catch (err) {
-      console.error('Failed to export PDF (client fallback)', err);
-      console.debug('PDF export failed, falling back to JSON. Error:', err);
-      if (student) {
-        const dataStr = JSON.stringify(student, null, 2);
-        const blob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${(student.name || 'student').replace(/\s+/g, '_')}_profile.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      }
+      console.error('Failed to log contact from student page', err);
+    } finally {
+      setTimeout(() => setContacting(false), 500);
     }
   };
 
@@ -278,59 +197,44 @@ export default function StudentDetailPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between py-6">
             <div className="flex items-center">
-              <button
-                onClick={() => window.history.back()}
-                className="mr-4 p-2 text-gray-400 hover:text-gray-600"
-              >
+              <button onClick={() => window.history.back()} className="mr-4 p-2 text-gray-400 hover:text-gray-600" aria-label="Go back">
                 <ArrowLeft className="w-5 h-5" />
               </button>
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">{student.name}</h1>
-                <p className="mt-2 text-gray-600">{student.university} • Class of {student.graduation_year}</p>
+                <p className="mt-2 text-gray-600">
+                  {student.university || 'University not provided'}
+                  {student.graduation_year ? ` • Class of ${student.graduation_year}` : ''}
+                </p>
               </div>
             </div>
             <div className="flex space-x-3">
               <button
-                onClick={() => exportProfileAsPDF()}
+                onClick={() => void exportProfileAsPDF()}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
               >
                 <Download className="w-4 h-4 mr-2" />
                 Export Profile
               </button>
               <button
-                onClick={async () => {
-                  if (contacting) return;
-                  if (!student || !student.email) return;
-
-                  setContacting(true);
-                  try {
-                    const subject = encodeURIComponent(`Opportunity to connect`);
-                    const body = encodeURIComponent(`Hi ${student.name || ''},%0D%0A%0D%0AI found your profile on CampusSync and would like to discuss opportunities with you.%0D%0A%0D%0ARegards,`);
-                    // open mail client once
-                    window.location.href = `mailto:${student.email}?subject=${subject}&body=${body}`;
-
-                    // Log contact server-side (debounced server-side as well)
-                    await fetch('/api/recruiter/contacts', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ studentId: student.id, method: 'email', notes: `Email sent via mailto on ${new Date().toLocaleString()}` })
-                    });
-                  } catch (err) {
-                    console.error('Failed to log contact from student page', err);
-                  } finally {
-                    // allow again after the request completes
-                    setTimeout(() => setContacting(false), 500);
-                  }
-                }}
-                disabled={contacting}
+                onClick={() => void contactStudent()}
+                disabled={contacting || !contactEmail}
                 aria-busy={contacting}
-                className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${contacting ? 'bg-blue-600/70 opacity-80 pointer-events-none' : 'bg-blue-600 hover:bg-blue-700'}`}
+                title={contactEmail ? 'Contact student by email' : 'This student has not shared contact details'}
+                className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+                  contacting || !contactEmail ? 'bg-blue-600/50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
                 <Mail className="w-4 h-4 mr-2" />
-                {contacting ? 'Contacting...' : 'Contact Student'}
+                {contacting ? 'Contacting...' : contactEmail ? 'Contact Student' : 'Contact not shared'}
               </button>
             </div>
           </div>
+          {exportError && (
+            <p role="alert" className="pb-4 text-sm text-red-600">
+              {exportError}
+            </p>
+          )}
         </div>
       </div>
 
@@ -342,40 +246,46 @@ export default function StudentDetailPage() {
               <div className="flex items-center mb-6">
                 <div className="h-20 w-20 rounded-full bg-blue-100 flex items-center justify-center">
                   <span className="text-2xl font-medium text-blue-600">
-                    {student.name?.split(' ').map(n => n[0]).join('') || 'ST'}
+                    {student.name?.split(' ').map((n) => n[0]).join('') || 'ST'}
                   </span>
                 </div>
                 <div className="ml-4">
                   <h3 className="text-lg font-medium text-gray-900">{student.name || 'Unknown Student'}</h3>
-                    <p className="text-sm text-gray-500">{student.major || 'N/A'}</p>
-                    {/* Add student's institution/university on the profile card */}
-                    {student.university && (
-                      <p className="text-sm text-gray-500 mt-1 flex items-center">
-                        <Building className="w-4 h-4 mr-2 text-gray-400" />
-                        <span>{student.university}</span>
-                      </p>
-                    )}
+                  <p className="text-sm text-gray-500">{student.major || 'N/A'}</p>
+                  {student.university && (
+                    <p className="text-sm text-gray-500 mt-1 flex items-center">
+                      <Building className="w-4 h-4 mr-2 text-gray-400" />
+                      <span>{student.university}</span>
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-center text-sm text-gray-600">
-                  <Mail className="w-4 h-4 mr-3" />
-                  {student.email}
-                </div>
-                <div className="flex items-center text-sm text-gray-600">
-                  <Building className="w-4 h-4 mr-3" />
-                  {student.university}
-                </div>
-                <div className="flex items-center text-sm text-gray-600">
-                  <GraduationCap className="w-4 h-4 mr-3" />
-                  Class of {student.graduation_year}
-                </div>
-                <div className="flex items-center text-sm text-gray-600">
-                  <MapPin className="w-4 h-4 mr-3" />
-                  {student.location}
-                </div>
-                {student.gpa && (
+                {contactEmail ? (
+                  <div className="flex items-center text-sm text-gray-600">
+                    <Mail className="w-4 h-4 mr-3" />
+                    {contactEmail}
+                  </div>
+                ) : (
+                  <div className="flex items-center text-sm text-gray-500">
+                    <Mail className="w-4 h-4 mr-3" />
+                    Contact details not shared by the student
+                  </div>
+                )}
+                {student.graduation_year && (
+                  <div className="flex items-center text-sm text-gray-600">
+                    <GraduationCap className="w-4 h-4 mr-3" />
+                    Class of {student.graduation_year}
+                  </div>
+                )}
+                {student.location && (
+                  <div className="flex items-center text-sm text-gray-600">
+                    <MapPin className="w-4 h-4 mr-3" />
+                    {student.location}
+                  </div>
+                )}
+                {typeof student.gpa === 'number' && (
                   <div className="flex items-center text-sm text-gray-600">
                     <Award className="w-4 h-4 mr-3" />
                     GPA: {student.gpa}
@@ -389,44 +299,13 @@ export default function StudentDetailPage() {
                 )}
               </div>
 
-              {/* Social Links */}
-              {(student.linkedin || student.github || student.portfolio) && (
+              {(safeHttpUrl(student.linkedin) || safeHttpUrl(student.github) || safeHttpUrl(student.portfolio)) && (
                 <div className="mt-6 pt-6 border-t border-gray-200">
                   <h4 className="text-sm font-medium text-gray-900 mb-3">Links</h4>
                   <div className="space-y-2">
-                    {student.linkedin && (
-                      <a
-                        href={student.linkedin}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        LinkedIn
-                      </a>
-                    )}
-                    {student.github && (
-                      <a
-                        href={student.github}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        GitHub
-                      </a>
-                    )}
-                    {student.portfolio && (
-                      <a
-                        href={student.portfolio}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        Portfolio
-                      </a>
-                    )}
+                    <ExternalLinkItem href={student.linkedin} label="LinkedIn" />
+                    <ExternalLinkItem href={student.github} label="GitHub" />
+                    <ExternalLinkItem href={student.portfolio} label="Portfolio" />
                   </div>
                 </div>
               )}
@@ -436,14 +315,12 @@ export default function StudentDetailPage() {
             <div className="bg-white shadow rounded-lg p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Skills</h3>
               <div className="flex flex-wrap gap-2">
-                {(student.skills ?? []).map((skill, index) => (
-                  <span
-                    key={index}
-                    className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
-                  >
+                {(student.skills ?? []).map((skill) => (
+                  <span key={skill} className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
                     {skill}
                   </span>
                 ))}
+                {(student.skills ?? []).length === 0 && <p className="text-sm text-gray-500">No skills derived yet</p>}
               </div>
             </div>
           </div>
@@ -453,91 +330,33 @@ export default function StudentDetailPage() {
             <div className="bg-white shadow rounded-lg">
               <div className="px-6 py-4 border-b border-gray-200">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-medium text-gray-900">
-                    Certifications ({student.total_certifications})
-                  </h3>
-                  <div className="text-sm text-gray-500">
-                    {student.verified_count} verified
-                  </div>
+                  <h3 className="text-lg font-medium text-gray-900">Verified certifications ({student.verified_count})</h3>
                 </div>
               </div>
 
               <div className="divide-y divide-gray-200">
-                {(student.certifications ?? []).map((cert) => {
-                  const conf = typeof cert.confidence_score === 'number' && !isNaN(cert.confidence_score)
-                    ? cert.confidence_score
-                    : (cert.verification_details?.ai_confidence ?? 0);
-                  
-                  return (
+                {(student.certifications ?? []).length === 0 && (
+                  <p className="p-6 text-sm text-gray-500">This student has no verified certifications yet.</p>
+                )}
+                {(student.certifications ?? []).map((cert) => (
                   <div key={cert.id} className="p-6">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center mb-2">
-                          {getVerificationStatusIcon(cert.verification_status)}
-                          <h4 className="ml-2 text-lg font-medium text-gray-900">
-                            {cert.title}
-                          </h4>
-                          {cert.verification_status === 'verified' ? (
-                            <span className="ml-3 text-xs px-2 py-1 rounded-full bg-green-100 text-green-800 font-semibold">
-                              Approved
-                            </span>
-                          ) : (
-                            <span className={`ml-3 text-xs px-2 py-1 rounded-full ${getConfidenceColor(conf)}`}>
-                              {Number.isFinite(conf) ? `${(conf * 100).toFixed(0)}%` : 'N/A'}
-                            </span>
-                          )}
-                        </div>
-                        
-                        <div className="text-sm text-gray-600 mb-2">
-                          <div className="flex items-center">
-                            <Building className="w-4 h-4 mr-1" />
-                            {cert.issuer}
-                          </div>
-                          <div className="flex items-center mt-1">
-                            <Calendar className="w-4 h-4 mr-1" />
-                            Issued: {cert.issue_date ? new Date(cert.issue_date).toLocaleDateString() : 'Not available'}
-                          </div>
-                        </div>
-
-                        {cert.description && (
-                          <p className="text-sm text-gray-600 mb-3">{cert.description}</p>
-                        )}
-
-                        {/* Simplified verification UI: hide granular verification details and method.
-                            Show only Approved badge when certificate is verified (e.g., approved by faculty). */}
+                    <div className="flex items-center mb-2">
+                      <CheckCircle className="w-5 h-5 text-green-500" />
+                      <h4 className="ml-2 text-lg font-medium text-gray-900">{cert.title}</h4>
+                      <span className="ml-3 text-xs px-2 py-1 rounded-full bg-green-100 text-green-800 font-semibold">Verified</span>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      <div className="flex items-center">
+                        <Building className="w-4 h-4 mr-1" />
+                        {cert.institution || 'Institution not provided'}
                       </div>
-
-                      <div className="ml-4 flex flex-col space-y-2">
-                        {cert.verification_status === 'pending' && (
-                          <>
-                            <button
-                              onClick={() => handleVerifyCertificate(cert.id)}
-                              className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700"
-                            >
-                              <CheckCircle className="w-3 h-3 mr-1" />
-                              Verify
-                            </button>
-                            <button
-                              onClick={() => handleRejectCertificate(cert.id)}
-                              className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-white bg-red-600 hover:bg-red-700"
-                            >
-                              <XCircle className="w-3 h-3 mr-1" />
-                              Reject
-                            </button>
-                          </>
-                        )}
-                        <button
-                          onClick={() => handleDownloadCertificate(cert)}
-                          className="inline-flex items-center px-3 py-1 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50"
-                        >
-                          <Download className="w-3 h-3 mr-1" />
-                          Download
-                        </button>
+                      <div className="flex items-center mt-1">
+                        <Calendar className="w-4 h-4 mr-1" />
+                        Issued: {cert.date_issued && !Number.isNaN(Date.parse(cert.date_issued)) ? new Date(cert.date_issued).toLocaleDateString() : 'Not available'}
                       </div>
                     </div>
                   </div>
-                );
-                })}
+                ))}
               </div>
             </div>
           </div>

@@ -25,166 +25,99 @@ export default function ResetPasswordPage() {
   const [isValidating, setIsValidating] = useState(true);
   const [sessionEstablished, setSessionEstablished] = useState(false);
 
-  // Check for recovery token and establish session
+  // Check for recovery token and establish session.
+  //
+  // SECURITY: only the `token_hash` + verifyOtp (PKCE-style) flow is supported.
+  // A legacy branch that called setSession() with whatever `#access_token` /
+  // `#refresh_token` was present in the URL has been removed: a crafted link
+  // could otherwise swap the visitor's session for an attacker's, after which
+  // the visitor would set a password on the attacker's account.
+  // Never log URLs, hashes or tokens here.
   useEffect(() => {
     const handlePasswordReset = async () => {
-      console.log('[INFO] [Reset Password] Initializing password reset flow...');
-      console.log('[INFO] [Reset Password] Full URL:', window.location.href);
-      console.log('[INFO] [Reset Password] Hash:', window.location.hash);
-      console.log('[INFO] [Reset Password] Search:', window.location.search);
-      
       const supabase = createClient();
-      
+
       try {
-        // IMPORTANT: Check URL format first to diagnose the issue
         const params = new URLSearchParams(window.location.search);
-        const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        
-        console.log('[INFO] [Reset Password] Query params:', {
-          token_hash: params.get('token_hash'),
-          type: params.get('type'),
-          code: params.get('code'),
-          error: params.get('error'),
-        });
-        
-        console.log('[INFO] [Reset Password] Hash params:', {
-          access_token: hashParams.get('access_token'),
-          refresh_token: hashParams.get('refresh_token'),
-          type: hashParams.get('type'),
-        });
-        
+
         // Check for error in URL params first
         const urlError = params.get('error');
         const errorDescription = params.get('error_description');
-        
+
         if (urlError) {
-          console.log('[ERROR] [Reset Password] URL contains error:', urlError, errorDescription);
           setError(errorDescription?.replace(/\+/g, ' ') || 'Invalid or expired reset link. Please request a new one.');
           setIsValidating(false);
           return;
         }
-        
-        // Check if email template is still using old format (hash fragments)
-        const hasOldFormat = window.location.hash.includes('access_token');
-        if (hasOldFormat) {
-          console.warn('[WARNING] [Reset Password] DETECTED OLD EMAIL TEMPLATE FORMAT!');
-          console.warn('[WARNING] Email link uses #access_token= (implicit flow)');
-          console.warn('[WARNING] TEMPORARY WORKAROUND: Handling old format, but you MUST update the email template!');
-          console.warn('[WARNING] Update Supabase email template to use ?token_hash= (PKCE flow)');
-          
-          // TEMPORARY: Handle old format by setting session from hash tokens
-          const accessToken = hashParams.get('access_token');
-          const refreshToken = hashParams.get('refresh_token');
-          const type = hashParams.get('type');
-          
-          if (accessToken && type === 'recovery') {
-            console.log('[DEBUG] [Reset Password] Attempting to set session from hash tokens (TEMPORARY FIX)...');
-            
-            try {
-              const { data, error: setSessionError } = await supabase.auth.setSession({
-                access_token: accessToken,
-                refresh_token: refreshToken || '',
-              });
-              
-              if (setSessionError) {
-                console.error('[ERROR] [Reset Password] Failed to set session from hash:', setSessionError);
-                setError('Failed to verify reset link. Please request a new one.');
-                setIsValidating(false);
-                return;
-              }
-              
-              if (data?.session) {
-                console.log('[SUCCESS] [Reset Password] Session established from hash tokens');
-                console.log('[WARNING] [Reset Password] IMPORTANT: Update your email template to use ?token_hash= format!');
-                setSessionEstablished(true);
-                setIsValidating(false);
-                return;
-              }
-            } catch (err) {
-              console.error('[ERROR] [Reset Password] Exception setting session from hash:', err);
-              setError('Failed to verify reset link. Please request a new one.');
-              setIsValidating(false);
-              return;
-            }
-          }
-          
-          setError('Invalid reset link format. Email template needs to be updated. See console for details.');
-          setIsValidating(false);
-          return;
-        }
-        
-        // Check if we already have a valid session (PKCE flow completed by middleware)
-        const { data: { session: existingSession }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error('[ERROR] [Reset Password] Session error:', sessionError);
-          setError('Failed to verify reset link. Please request a new one.');
+
+        // Legacy implicit-flow links (#access_token=...) are not supported.
+        if (window.location.hash.includes('access_token')) {
+          // Drop the fragment from the address bar so tokens do not linger in history
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          setError('This reset link is no longer supported. Please request a new password reset.');
           setIsValidating(false);
           return;
         }
 
-        if (existingSession) {
-          console.log('[SUCCESS] [Reset Password] Valid session found via PKCE flow');
-          console.log('[SUCCESS] [Reset Password] Session user:', existingSession.user.email);
-          setSessionEstablished(true);
-          setIsValidating(false);
-          return;
-        }
-
-        console.log('[INFO] [Reset Password] No existing session, checking for token_hash in URL...');
-        
-        // For password recovery, we need to exchange the token_hash using verifyOtp
+        // Exchange the single-use token_hash for a recovery session
         const tokenHash = params.get('token_hash');
         const type = params.get('type');
-        
+
         if (tokenHash && type === 'recovery') {
-          console.log('[DEBUG] [Reset Password] Found token_hash, exchanging for session...');
-          
           try {
             const { data, error: verifyError } = await supabase.auth.verifyOtp({
               token_hash: tokenHash,
               type: 'recovery',
             });
-            
+
             if (verifyError) {
-              console.error('[ERROR] [Reset Password] Failed to verify OTP:', verifyError);
+              console.error('[Reset Password] Failed to verify OTP:', verifyError.message);
               setError('Invalid or expired reset link. Please request a new one.');
               setIsValidating(false);
               return;
             }
-            
+
             if (data?.session) {
-              console.log('[SUCCESS] [Reset Password] Session established via verifyOtp');
-              console.log('[SUCCESS] [Reset Password] Session user:', data.session.user.email);
+              // Remove the one-time token from the address bar
+              window.history.replaceState(null, '', window.location.pathname);
               setSessionEstablished(true);
               setIsValidating(false);
               return;
             }
           } catch (err) {
-            console.error('[ERROR] [Reset Password] Exception during OTP verification:', err);
+            console.error('[Reset Password] Exception during OTP verification:', err instanceof Error ? err.message : 'unknown');
             setError('Failed to verify reset link. Please try again.');
             setIsValidating(false);
             return;
           }
         }
 
-        // No session found
-        console.log('[ERROR] [Reset Password] No valid session found after all attempts');
-        console.log('[INFO] [Reset Password] Troubleshooting:');
-        console.log('   1. Check if email template uses ?token_hash= (not #access_token=)');
-        console.log('   2. Link expires after 1 hour');
-        console.log('   3. Links are one-time use only');
-        
+        // Otherwise accept a recovery session that was already established (e.g. by /auth/confirm)
+        const { data: { session: existingSession }, error: sessionError } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          console.error('[Reset Password] Session error:', sessionError.message);
+          setError('Failed to verify reset link. Please request a new one.');
+          setIsValidating(false);
+          return;
+        }
+
+        if (existingSession) {
+          setSessionEstablished(true);
+          setIsValidating(false);
+          return;
+        }
+
         setError('Could not establish session. Link may be expired or invalid. Please request a new password reset.');
         setIsValidating(false);
 
       } catch (err) {
-        console.error('[ERROR] [Reset Password] Exception during initialization:', err);
+        console.error('[Reset Password] Exception during initialization:', err instanceof Error ? err.message : 'unknown');
         setError('An error occurred while verifying your reset link. Please try again.');
         setIsValidating(false);
       }
     };
-    
+
     handlePasswordReset();
   }, []);
 
@@ -206,43 +139,24 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      console.log('[INFO] [Reset Password] Attempting to update password...');
-      console.log('[INFO] [Reset Password] Session established flag:', sessionEstablished);
-      
       const supabase = createClient();
-      
+
       // Verify we still have a valid session
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      console.log('[INFO] [Reset Password] Session check:', {
-        hasSession: !!session,
-        sessionError: sessionError?.message,
-        userId: session?.user?.id,
-        userEmail: session?.user?.email
-      });
-      
+
       if (sessionError || !session) {
-        console.error('[ERROR] [Reset Password] No valid session found');
-        console.error('[ERROR] [Reset Password] Session was established:', sessionEstablished);
-        console.error('[ERROR] [Reset Password] This means the session was lost between page load and form submit');
-        console.error('[ERROR] [Reset Password] Possible causes:');
-        console.error('   1. Session cookies were blocked or cleared');
-        console.error('   2. Session expired (should not happen this quickly)');
-        console.error('   3. Storage issue (localStorage/cookies)');
         throw new Error('Session lost. Please try again or request a new password reset link.');
       }
 
-      console.log('[SUCCESS] [Reset Password] Session valid, updating password...');
       const { error: updateError } = await supabase.auth.updateUser({
         password: password,
       });
 
       if (updateError) {
-        console.error('[ERROR] [Reset Password] Update error:', updateError);
+        console.error('[Reset Password] Update error:', updateError.message);
         throw updateError;
       }
 
-      console.log('[SUCCESS] [Reset Password] Password updated successfully');
       setSuccess(true);
       
       // Sign out after password reset for security
@@ -254,13 +168,13 @@ export default function ResetPasswordPage() {
       }, 2000);
 
     } catch (err: unknown) {
-      console.error('[ERROR] [Reset Password] Exception:', err);
+      console.error('[Reset Password] Exception:', err instanceof Error ? err.message : 'unknown');
       const message = err instanceof Error ? err.message : "Failed to reset password";
       setError(message);
     } finally {
       setLoading(false);
     }
-  }, [password, confirmPassword, router, sessionEstablished]);
+  }, [password, confirmPassword, router]);
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900">

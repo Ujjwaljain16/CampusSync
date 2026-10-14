@@ -10,6 +10,43 @@ interface RateLimitStore {
 
 const rateLimitStore = new Map<string, RateLimitStore>();
 
+/**
+ * Upper bound on tracked keys. Attackers can vary identifiers (e.g. spoofed
+ * IPs) to grow the map; once the cap is reached the oldest entries are evicted
+ * so memory stays bounded.
+ */
+export const RATE_LIMIT_MAX_KEYS = 10_000;
+
+function setEntry(identifier: string, entry: RateLimitStore) {
+  // Delete first so re-set keys move to the end of Map insertion order
+  // (the front of the map is therefore always the oldest entry).
+  rateLimitStore.delete(identifier);
+
+  if (rateLimitStore.size >= RATE_LIMIT_MAX_KEYS) {
+    const now = Date.now();
+    // Prefer dropping expired entries
+    for (const [key, value] of rateLimitStore.entries()) {
+      if (value.resetTime < now) rateLimitStore.delete(key);
+    }
+    // Still full: evict oldest-first
+    while (rateLimitStore.size >= RATE_LIMIT_MAX_KEYS) {
+      const oldest = rateLimitStore.keys().next();
+      if (oldest.done) break;
+      rateLimitStore.delete(oldest.value);
+    }
+  }
+
+  rateLimitStore.set(identifier, entry);
+}
+
+/** Test helpers (not used by application code). */
+export function __rateLimitStoreSize(): number {
+  return rateLimitStore.size;
+}
+export function __resetRateLimitStore(): void {
+  rateLimitStore.clear();
+}
+
 // Cleanup old entries every 5 minutes
 const cleanupTimer = setInterval(() => {
   const now = Date.now();
@@ -53,7 +90,7 @@ export function rateLimit(
 
   if (!tokenData) {
     // First request
-    rateLimitStore.set(identifier, {
+    setEntry(identifier, {
       count: 1,
       resetTime,
     });
@@ -68,7 +105,7 @@ export function rateLimit(
 
   if (tokenData.resetTime < now) {
     // Window expired, reset
-    rateLimitStore.set(identifier, {
+    setEntry(identifier, {
       count: 1,
       resetTime,
     });
@@ -152,11 +189,20 @@ export const RateLimitPresets = {
 
 /**
  * Best-effort client IP extraction (behind Vercel/proxies).
+ *
+ * Prefer headers the platform sets itself (Vercel overwrites
+ * `x-vercel-forwarded-for` / `x-real-ip` and they cannot be spoofed by the
+ * client). `x-forwarded-for` is only a fallback: its first entry is
+ * client-controlled on platforms that append rather than overwrite.
  */
 export function getClientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim();
-  return request.headers.get('x-real-ip') || 'unknown';
+  const first = (value: string | null) => value?.split(',')[0]?.trim() || '';
+  return (
+    first(request.headers.get('x-vercel-forwarded-for')) ||
+    first(request.headers.get('x-real-ip')) ||
+    first(request.headers.get('x-forwarded-for')) ||
+    'unknown'
+  );
 }
 
 /**

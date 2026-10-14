@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
 
 	// If no profile exists, this user hasn't completed signup - redirect to signup
 	if (!existingProfile) {
-		console.log(`OAuth user ${user.email} has no profile - redirecting to signup`);
+		console.log(`OAuth user ${user.id} has no profile - redirecting to signup`);
 		// If user metadata signals a recruiter signup or invited role, pass role in query
 		const roleFromMeta = user.user_metadata?.signup_type || user.user_metadata?.invited_role;
 		const qs = new URLSearchParams({
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
 	}
 
 	// User exists, check for role and approval status for proper redirect
-	console.log(`OAuth user ${user.email} has existing profile`);
+	console.log(`OAuth user ${user.id} has existing profile`);
 	
 	// Check if user is a recruiter and their approval status
 	const { data: recruiterRole } = await supabase

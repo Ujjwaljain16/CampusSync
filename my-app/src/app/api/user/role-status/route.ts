@@ -1,29 +1,30 @@
-import { withAuth, success } from '@/lib/api';
+import { withAuth, success, fetchApprovedRoleRows, pickHighestRow } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export const GET = withAuth(async (_req, { user }) => {
-  const supabase = await createSupabaseServerClient();
-  
-  // Get user's role from user_roles table
-  const { data: roleData, error: roleError } = await supabase
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id)
-    .single();
-  
-  if (roleError) {
-    // No role assigned yet, still pending
-    return success({ 
-      role: null, 
-      status: 'pending',
-      message: 'Role request pending approval'
+  // Deterministic: highest-privilege APPROVED role (a user may hold several rows)
+  const approved = await fetchApprovedRoleRows(user.id);
+  const best = pickHighestRow(approved);
+
+  if (best) {
+    return success({
+      role: best.role,
+      status: 'approved',
+      userId: user.id
     });
   }
-  
-  // Return the user's current role
-  return success({ 
-    role: roleData.role,
-    status: 'approved',
-    userId: user.id
+
+  // No approved role: distinguish "denied" from "still pending / none yet"
+  const supabase = await createSupabaseServerClient();
+  const { data: rows } = await supabase
+    .from('user_roles')
+    .select('role, approval_status')
+    .eq('user_id', user.id);
+  const denied = (rows ?? []).length > 0 && (rows ?? []).every((r: { approval_status: string }) => r.approval_status === 'denied');
+
+  return success({
+    role: null,
+    status: denied ? 'denied' : 'pending',
+    message: denied ? 'Role request was denied' : 'Role request pending approval'
   });
 });

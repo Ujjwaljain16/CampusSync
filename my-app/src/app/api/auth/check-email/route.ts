@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { extractDomain, domainMatchesAllowedList } from '@/lib/emailValidation';
 
 /**
  * POST /api/auth/check-email
@@ -27,8 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Extract domain from email
-    const emailLower = email.toLowerCase().trim();
-    const domain = emailLower.split('@')[1];
+    const domain = extractDomain(email);
 
     if (!domain) {
       return NextResponse.json(
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     try {
       supabase = await createSupabaseAdminClient();
     } catch (clientError) {
-      console.error('[CHECK_EMAIL] Failed to create Supabase client:', clientError);
+      console.error('[CHECK_EMAIL] Failed to create Supabase client:', clientError instanceof Error ? clientError.message : 'unknown');
       return NextResponse.json(
         { error: 'Database connection failed' },
         { status: 500 }
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     // Get all active organizations
     const { data: allOrganizations, error } = await supabase
       .from('organizations')
-      .select('id, name, slug, type, settings')
+      .select('id, name, settings')
       .eq('is_active', true);
 
     if (error) {
@@ -87,9 +87,8 @@ export async function POST(request: NextRequest) {
 
     // Filter organizations that have this domain in their allowed_email_domains
     const matches = (allOrganizations || []).filter((org: { settings?: unknown }) => {
-      const settings = org.settings as { allowed_email_domains?: string[] };
-      const allowedDomains = settings?.allowed_email_domains || [];
-      return Array.isArray(allowedDomains) && allowedDomains.some(d => d.toLowerCase() === domain);
+      const settings = org.settings as { allowed_email_domains?: unknown } | null;
+      return domainMatchesAllowedList(domain, settings?.allowed_email_domains);
     });
 
     if (matches.length > 0) {
@@ -97,11 +96,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         canSignup: true,
         userType: 'student', // Default to student, can upgrade to faculty later
-        matches: matches.map((org: { id: string; name: string; slug: string; type?: string }) => ({
+        // Only what the signup UI needs to let the user pick an organization
+        matches: matches.map((org: { id: string; name: string }) => ({
           id: org.id,
-          name: org.name,
-          slug: org.slug,
-          type: org.type
+          name: org.name
         })),
         domain,
         message: matches.length === 1

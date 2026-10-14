@@ -1,181 +1,80 @@
-import { withRole, success, getOrganizationContext, type RecruiterContext } from '@/lib/api';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
+import { NextRequest } from 'next/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { success, apiError } from '@/lib/api/utils/response';
+import { RateLimitPresets } from '@/lib/rateLimit';
+import { recruiterRoute } from '@/lib/privacy/recruiterAccess';
 
-export const GET = withRole(['recruiter'], async (req, { user }) => {
-  const supabase = await createSupabaseServerClient();
-  
-  // Get requested organization from header
-  const requestedOrgId = getRequestedOrgId(req);
-  
-  // Get organization context (auto-detects recruiter multi-org)
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
-  
-  // Check if this is a recruiter with multi-org access
-  if ('isRecruiter' in orgContext && orgContext.isRecruiter) {
-    const recruiterContext = orgContext as RecruiterContext;
-    
-    // If specific org selected, return stats for that org only
-    if (recruiterContext.selectedOrganization) {
-      const { count: totalVerifications } = await supabase
-        .from('certificates')
-        .select('*', { count: 'exact', head: true })
-        .eq('organization_id', recruiterContext.selectedOrganization);
-      
-      const { count: successfulVerifications } = await supabase
-        .from('certificates')
-        .select('*', { count: 'exact', head: true })
-        .eq('organization_id', recruiterContext.selectedOrganization)
-        .eq('verification_status', 'verified');
-      
-      const { count: pendingVerifications } = await supabase
-        .from('certificates')
-        .select('*', { count: 'exact', head: true })
-        .eq('organization_id', recruiterContext.selectedOrganization)
-        .eq('verification_status', 'pending');
-      
-      const { data: recentVerifications } = await supabase
+/**
+ * Audit actions that are actually written for recruiter verification work
+ * (see /api/recruiter/verify-certificate).
+ */
+const VERIFICATION_ACTIONS = ['recruiter_certificate_verification'];
+
+async function countCertificates(admin: SupabaseClient, orgIds: string[], status?: string): Promise<number> {
+  let query = admin.from('certificates').select('*', { count: 'exact', head: true }).in('organization_id', orgIds);
+  if (status) query = query.eq('verification_status', status);
+  const { count, error } = await query;
+  if (error) throw new Error(`certificate count failed: ${error.message ?? 'unknown'}`);
+  return count ?? 0;
+}
+
+/**
+ * Per-organisation certificate counts for the recruiter's approved organisations
+ * plus their own recent verification actions (from audit_logs).
+ * Response (envelope): { data: { user, analytics, recent_verifications } }
+ */
+export const GET = recruiterRoute(
+  { scope: 'recruiter-dashboard', rateLimit: RateLimitPresets.relaxed },
+  async (_req: NextRequest, { admin, user, orgIds, selectedOrgId }) => {
+    try {
+      const byOrganization = await Promise.all(
+        orgIds.map(async (organizationId) => {
+          const [total, verified, pending] = await Promise.all([
+            countCertificates(admin, [organizationId]),
+            countCertificates(admin, [organizationId], 'verified'),
+            countCertificates(admin, [organizationId], 'pending'),
+          ]);
+          return {
+            organizationId,
+            total_verifications: total,
+            successful_verifications: verified,
+            pending_verifications: pending,
+          };
+        })
+      );
+
+      const total = byOrganization.reduce((s, o) => s + o.total_verifications, 0);
+      const verified = byOrganization.reduce((s, o) => s + o.successful_verifications, 0);
+      const pending = byOrganization.reduce((s, o) => s + o.pending_verifications, 0);
+
+      const { data: recent, error: recentError } = await admin
         .from('audit_logs')
-        .select('action, created_at, target_id, details')
-        .eq('organization_id', recruiterContext.selectedOrganization)
+        .select('action, created_at, target_id, details, organization_id')
+        .in('organization_id', orgIds)
         .eq('user_id', user.id)
-        .in('action', ['verify_certificate', 'bulk_verify', 'bulk_reject'])
+        .in('action', VERIFICATION_ACTIONS)
         .order('created_at', { ascending: false })
         .limit(10);
-      
-      const verificationRate = totalVerifications && totalVerifications > 0
-        ? ((successfulVerifications || 0) / totalVerifications * 100).toFixed(1)
-        : 0;
-      
+      if (recentError) console.error('[recruiter-dashboard] recent verifications failed', recentError);
+
       return success({
         user: {
           id: user.id,
-          email: user.email,
           role: 'recruiter',
-          organizationId: recruiterContext.selectedOrganization
+          ...(selectedOrgId ? { organizationId: selectedOrgId } : { accessibleOrganizations: orgIds }),
         },
         analytics: {
-          total_verifications: totalVerifications || 0,
-          successful_verifications: successfulVerifications || 0,
-          pending_verifications: pendingVerifications || 0,
-          verification_rate: verificationRate
+          total_verifications: total,
+          successful_verifications: verified,
+          pending_verifications: pending,
+          verification_rate: total > 0 ? ((verified / total) * 100).toFixed(1) : '0.0',
+          ...(selectedOrgId ? {} : { by_organization: byOrganization }),
         },
-        recent_verifications: recentVerifications || [],
-        message: 'Recruiter dashboard loaded successfully (single org)'
+        recent_verifications: recent ?? [],
       });
+    } catch (err) {
+      console.error('[recruiter-dashboard] failed', err);
+      return apiError.internal('Failed to load dashboard');
     }
-    
-    // No specific org - aggregate stats from all accessible organizations
-    const aggregatedStats = await Promise.all(
-      recruiterContext.accessibleOrganizations.map(async (orgId) => {
-        const { count: total } = await supabase
-          .from('certificates')
-          .select('*', { count: 'exact', head: true })
-          .eq('organization_id', orgId);
-        
-        const { count: verified } = await supabase
-          .from('certificates')
-          .select('*', { count: 'exact', head: true })
-          .eq('organization_id', orgId)
-          .eq('verification_status', 'verified');
-        
-        const { count: pending } = await supabase
-          .from('certificates')
-          .select('*', { count: 'exact', head: true })
-          .eq('organization_id', orgId)
-          .eq('verification_status', 'pending');
-        
-        return {
-          organizationId: orgId,
-          total_verifications: total || 0,
-          successful_verifications: verified || 0,
-          pending_verifications: pending || 0,
-        };
-      })
-    );
-    
-    // Get recent verifications across all orgs
-    const { data: recentVerifications } = await supabase
-      .from('audit_logs')
-      .select('action, created_at, target_id, details, organization_id')
-      .in('organization_id', recruiterContext.accessibleOrganizations)
-      .eq('user_id', user.id)
-      .in('action', ['verify_certificate', 'bulk_verify', 'bulk_reject'])
-      .order('created_at', { ascending: false })
-      .limit(10);
-    
-    const totalVerifications = aggregatedStats.reduce((sum, s) => sum + s.total_verifications, 0);
-    const totalVerified = aggregatedStats.reduce((sum, s) => sum + s.successful_verifications, 0);
-    const totalPending = aggregatedStats.reduce((sum, s) => sum + s.pending_verifications, 0);
-    const verificationRate = totalVerifications > 0
-      ? ((totalVerified / totalVerifications) * 100).toFixed(1)
-      : 0;
-    
-    return success({
-      user: {
-        id: user.id,
-        email: user.email,
-        role: 'recruiter',
-        accessibleOrganizations: recruiterContext.accessibleOrganizations
-      },
-      analytics: {
-        total_verifications: totalVerifications,
-        successful_verifications: totalVerified,
-        pending_verifications: totalPending,
-        verification_rate: verificationRate,
-        by_organization: aggregatedStats
-      },
-      recent_verifications: recentVerifications || [],
-      message: 'Recruiter dashboard loaded successfully (multi-org aggregated)'
-    });
   }
-  
-  // This shouldn't happen for recruiters, but keeping backward compatibility
-  // for any edge cases (like recruiter with an assigned org_id)
-  const { count: totalVerifications } = await supabase
-    .from('certificates')
-    .select('*', { count: 'exact', head: true })
-    .eq('organization_id', orgContext.organizationId);
-  
-  const { count: successfulVerifications } = await supabase
-    .from('certificates')
-    .select('*', { count: 'exact', head: true })
-    .eq('organization_id', orgContext.organizationId)
-    .eq('verification_status', 'verified');
-  
-  const { count: pendingVerifications } = await supabase
-    .from('certificates')
-    .select('*', { count: 'exact', head: true })
-    .eq('organization_id', orgContext.organizationId)
-    .eq('verification_status', 'pending');
-  
-  const { data: recentVerifications } = await supabase
-    .from('audit_logs')
-    .select('action, created_at, target_id, details')
-    .eq('organization_id', orgContext.organizationId)
-    .eq('user_id', user.id)
-    .in('action', ['verify_certificate', 'bulk_verify', 'bulk_reject'])
-    .order('created_at', { ascending: false })
-    .limit(10);
-  
-  const verificationRate = totalVerifications && totalVerifications > 0
-    ? ((successfulVerifications || 0) / totalVerifications * 100).toFixed(1)
-    : 0;
-  
-  return success({
-    user: {
-      id: user.id,
-      email: user.email,
-      role: 'recruiter',
-      organizationId: orgContext.organizationId
-    },
-    analytics: {
-      total_verifications: totalVerifications || 0,
-      successful_verifications: successfulVerifications || 0,
-      pending_verifications: pendingVerifications || 0,
-      verification_rate: verificationRate
-    },
-    recent_verifications: recentVerifications || [],
-    message: 'Recruiter dashboard loaded successfully'
-  });
-});
+);

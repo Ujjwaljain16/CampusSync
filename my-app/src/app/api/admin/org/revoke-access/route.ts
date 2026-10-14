@@ -1,113 +1,63 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { NextResponse } from 'next/server';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { withSession, apiError, resolveAdminOrg, isUuid, writeAudit } from '@/lib/api';
 
 /**
  * POST /api/admin/org/revoke-access
- * 
- * Revoke a recruiter's access to the organization.
+ *
+ * Revoke a recruiter's access to the caller's organization. Recruiter data
+ * routes read approved per-org `user_roles` rows, so revoking = flipping that
+ * row to approval_status='denied' (the database has no 'revoked' status).
  * Body: { recruiterId, reason? }
  */
-export async function POST(request: NextRequest) {
+export const POST = withSession(async (request, { user }) => {
+  let body: { recruiterId?: unknown; reason?: unknown };
   try {
-    const supabase = await createSupabaseServerClient();
-
-    // Check authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Get user's org admin role
-    const { data: userRole, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role, organization_id')
-      .eq('user_id', user.id)
-      .in('role', ['org_admin', 'admin'])
-      .not('organization_id', 'is', null)
-      .maybeSingle();
-
-    if (roleError || !userRole) {
-      return NextResponse.json(
-        { error: 'Organization admin access required' },
-        { status: 403 }
-      );
-    }
-
-    const body = await request.json();
-    const { recruiterId, reason } = body;
-
-    if (!recruiterId) {
-      return NextResponse.json(
-        { error: 'recruiterId is required' },
-        { status: 400 }
-      );
-    }
-
-    // Find approved access for this recruiter and org
-    const { data: accessRecord, error: fetchError } = await supabase
-      .from('recruiter_org_access')
-      .select('id, status')
-      .eq('recruiter_user_id', recruiterId)
-      .eq('organization_id', userRole.organization_id)
-      .eq('status', 'approved')
-      .maybeSingle();
-
-    if (fetchError) {
-      console.error('[REVOKE_ACCESS] Fetch error:', fetchError);
-      return NextResponse.json(
-        { error: 'Failed to check access' },
-        { status: 500 }
-      );
-    }
-
-    if (!accessRecord) {
-      return NextResponse.json(
-        { error: 'No approved access found for this recruiter' },
-        { status: 404 }
-      );
-    }
-
-    // Update to revoked status
-    const { error: updateError } = await supabase
-      .from('recruiter_org_access')
-      .update({
-        status: 'revoked',
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
-        review_notes: reason || 'Access revoked by organization admin'
-      })
-      .eq('id', accessRecord.id);
-
-    if (updateError) {
-      console.error('[REVOKE_ACCESS] Update failed:', updateError);
-      return NextResponse.json(
-        { error: 'Failed to revoke access' },
-        { status: 500 }
-      );
-    }
-
-    // Log audit event
-    await supabase.from('audit_logs').insert({
-      user_id: user.id,
-      action: 'recruiter_access_revoked',
-      resource_type: 'organization',
-      resource_id: userRole.organization_id,
-      metadata: {
-        recruiter_user_id: recruiterId,
-        reason
-      }
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: 'Access revoked successfully'
-    });
-
-  } catch (error: unknown) {
-    console.error('[REVOKE_ACCESS] Error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    body = await request.json();
+  } catch {
+    return apiError.badRequest('Invalid JSON body');
   }
-}
+  const { recruiterId } = body;
+  const reason = typeof body.reason === 'string' ? body.reason.slice(0, 1000) : null;
+
+  if (!recruiterId) return apiError.badRequest('recruiterId is required');
+  if (typeof recruiterId !== 'string' || !isUuid(recruiterId)) return apiError.validation('Invalid recruiterId');
+
+  const requestedOrg = request.headers.get('X-Organization-ID') || new URL(request.url).searchParams.get('organization_id');
+  const scope = await resolveAdminOrg(user, requestedOrg, 'admin');
+  const admin = await createSupabaseAdminClient();
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updateError } = await admin
+    .from('user_roles')
+    .update({
+      approval_status: 'denied',
+      approval_notes: reason || 'Access revoked by organization admin',
+      approved_by: user.id,
+      updated_at: now,
+    })
+    .eq('user_id', recruiterId)
+    .eq('organization_id', scope.organizationId)
+    .eq('role', 'recruiter')
+    .eq('approval_status', 'approved')
+    .select('user_id');
+
+  if (updateError) {
+    console.error('[REVOKE_ACCESS] Update failed:', updateError);
+    return apiError.internal('Failed to revoke access');
+  }
+  if (!updated || updated.length === 0) {
+    return apiError.notFound('No approved access found for this recruiter');
+  }
+
+  await writeAudit(admin, {
+    actorId: user.id,
+    action: 'recruiter_access_revoked',
+    targetType: 'recruiter_access',
+    targetId: recruiterId,
+    organizationId: scope.organizationId,
+    details: { reason },
+  });
+
+  return NextResponse.json({ success: true, message: 'Access revoked successfully' });
+});

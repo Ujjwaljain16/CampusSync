@@ -1,183 +1,134 @@
-import { withRole, success, getOrganizationContext, type RecruiterContext } from '@/lib/api';
-import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabaseServer';
-import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
+import { NextRequest } from 'next/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { success, apiError } from '@/lib/api/utils/response';
+import { RateLimitPresets } from '@/lib/rateLimit';
+import { recruiterRoute } from '@/lib/privacy/recruiterAccess';
+import { extractSkills } from '@/lib/privacy/studentView';
 
-export const GET = withRole(['recruiter', 'admin'], async (req, { user }) => {
-  // Use admin client to bypass RLS for reading student data
-  const adminSupabase = await createSupabaseAdminClient();
-  const supabase = await createSupabaseServerClient();
+const SAMPLE_LIMIT = 1000;
 
-  // Get requested organization from header
-  const requestedOrgId = getRequestedOrgId(req);
+async function countRows(
+  admin: SupabaseClient,
+  table: string,
+  apply: (q: ReturnType<ReturnType<SupabaseClient['from']>['select']>) => ReturnType<ReturnType<SupabaseClient['from']>['select']>
+): Promise<number> {
+  const query = apply(admin.from(table).select('*', { count: 'exact', head: true }));
+  const { count, error } = await query;
+  if (error) throw new Error(`count on ${table} failed: ${error.message ?? 'unknown'}`);
+  return count ?? 0;
+}
 
-  // Get organization context for multi-tenancy (handles recruiter multi-org)
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
-  
-  // Determine which organization IDs to query
-  let targetOrgIds: string[] = [];
-  
-  if ('isRecruiter' in orgContext && orgContext.isRecruiter) {
-    const recruiterContext = orgContext as RecruiterContext;
-    // Recruiter: use selected org or all accessible orgs
-    targetOrgIds = recruiterContext.selectedOrganization 
-      ? [recruiterContext.selectedOrganization]
-      : recruiterContext.accessibleOrganizations;
-  } else {
-    // Regular user: use their organization
-    targetOrgIds = [orgContext.organizationId];
-  }
+/**
+ * Recruiter analytics for the caller's approved organisations.
+ *
+ * Every figure is computed from real rows. Counts are exact; "top" lists and the
+ * average are computed over at most 1000 rows and flagged in `sampled`.
+ * Response (envelope): { data: { ...metrics } }
+ */
+export const GET = recruiterRoute(
+  { scope: 'recruiter-analytics', rateLimit: RateLimitPresets.relaxed },
+  async (_req: NextRequest, { admin, user, orgIds }) => {
+    try {
+      const totalStudents = await countRows(admin, 'user_roles', (q) =>
+        q.eq('role', 'student').eq('approval_status', 'approved').in('organization_id', orgIds)
+      );
+      const [verifiedCount, pendingCount, rejectedCount] = await Promise.all(
+        (['verified', 'pending', 'rejected'] as const).map((status) =>
+          countRows(admin, 'certificates', (q) => q.eq('verification_status', status).in('organization_id', orgIds))
+        )
+      );
 
-  // Get all APPROVED students from user_roles (filtered by accessible organizations)
-  const { data: userRoles } = await adminSupabase
-    .from('user_roles')
-    .select('user_id')
-    .eq('role', 'student')
-    .eq('approval_status', 'approved')
-    .in('organization_id', targetOrgIds); // Multi-org filter
+      // Verified certificate sample (titles + confidence) for skills / average.
+      const { data: verifiedSample, error: verifiedError } = await admin
+        .from('certificates')
+        .select('title, institution, confidence_score')
+        .eq('verification_status', 'verified')
+        .in('organization_id', orgIds)
+        .limit(SAMPLE_LIMIT);
+      if (verifiedError) throw new Error(`certificate sample failed: ${verifiedError.message}`);
+      const verifiedRows = (verifiedSample ?? []) as Array<{ title: string | null; confidence_score: number | null }>;
 
-  // Total students = ALL approved students (with or without certificates)
-  const totalStudents = (userRoles || []).length;
+      const scores = verifiedRows.map((c) => c.confidence_score).filter((s): s is number => typeof s === 'number' && Number.isFinite(s));
+      const averageConfidence = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
 
-    // Get certification counts by status (filtered by org)
-    const { data: statusCounts } = await adminSupabase
-      .from('certificates')
-      .select('verification_status')
-      .in('verification_status', ['verified', 'pending', 'rejected'])
-      .in('organization_id', targetOrgIds); // Multi-org filter
+      const skillCounts = new Map<string, number>();
+      for (const row of verifiedRows) {
+        for (const skill of extractSkills([row.title])) skillCounts.set(skill, (skillCounts.get(skill) ?? 0) + 1);
+      }
+      const topSkills = Array.from(skillCounts.entries())
+        .map(([skill, count]) => ({ skill, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
 
-    const verifiedCount = statusCounts?.filter((c: { verification_status: string }) => c.verification_status === 'verified').length || 0;
-    const pendingCount = statusCounts?.filter((c: { verification_status: string }) => c.verification_status === 'pending').length || 0;
-    const rejectedCount = statusCounts?.filter((c: { verification_status: string }) => c.verification_status === 'rejected').length || 0;
+      const { data: profileSample, error: profileError } = await admin
+        .from('profiles')
+        .select('university')
+        .in('organization_id', orgIds)
+        .not('university', 'is', null)
+        .limit(SAMPLE_LIMIT);
+      if (profileError) throw new Error(`profile sample failed: ${profileError.message}`);
+      const universityCounts = new Map<string, number>();
+      for (const row of (profileSample ?? []) as Array<{ university: string | null }>) {
+        if (row.university) universityCounts.set(row.university, (universityCounts.get(row.university) ?? 0) + 1);
+      }
+      const topUniversities = Array.from(universityCounts.entries())
+        .map(([university, count]) => ({ university, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
 
-  // Get average confidence score (filtered by org)
-  const { data: confidenceData } = await adminSupabase
-    .from('certificates')
-    .select('confidence_score')
-    .not('confidence_score', 'is', null)
-    .in('organization_id', targetOrgIds); // Multi-org filter
+      const since = new Date();
+      since.setDate(since.getDate() - 30);
+      const { data: activityRows, error: activityError } = await admin
+        .from('certificates')
+        .select('created_at')
+        .in('organization_id', orgIds)
+        .gte('created_at', since.toISOString())
+        .order('created_at', { ascending: true })
+        .limit(SAMPLE_LIMIT);
+      if (activityError) throw new Error(`activity sample failed: ${activityError.message}`);
+      const activity = new Map<string, number>();
+      for (const row of (activityRows ?? []) as Array<{ created_at: string }>) {
+        const day = new Date(row.created_at).toISOString().split('T')[0];
+        activity.set(day, (activity.get(day) ?? 0) + 1);
+      }
+      const dailyActivity = Array.from(activity.entries())
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => a.date.localeCompare(b.date));
 
-  const averageConfidence = (confidenceData && confidenceData.length > 0)
-    ? confidenceData.reduce((sum: number, cert: { confidence_score?: number }) => sum + (cert.confidence_score || 0), 0) / confidenceData.length
-    : 0;
+      // Recruiter-specific metrics (this recruiter, accessible orgs only)
+      const contactedStudents = await countRows(admin, 'recruiter_contacts', (q) =>
+        q.eq('recruiter_id', user.id).in('organization_id', orgIds)
+      );
+      const respondedStudents = await countRows(admin, 'recruiter_contacts', (q) =>
+        q.eq('recruiter_id', user.id).in('organization_id', orgIds).eq('response_received', true)
+      );
+      const activePipeline = await countRows(admin, 'recruiter_pipeline', (q) =>
+        q.eq('recruiter_id', user.id).in('organization_id', orgIds).neq('stage', 'rejected')
+      );
 
-    // Get top skills (extracted from certificate titles) - filtered by org
-    const { data: certificates } = await adminSupabase
-      .from('certificates')
-      .select('title, issuer')
-      .eq('verification_status', 'verified')
-      .in('organization_id', targetOrgIds); // Multi-org filter
-
-    const skillCounts = new Map<string, number>();
-    certificates?.forEach((cert: { title: string; issuer: string }) => {
-      // Simple skill extraction - in production, you'd have a proper skills table
-      const title = cert.title.toLowerCase();
-      const issuer = cert.issuer.toLowerCase();
-      
-      const commonSkills = [
-        'python', 'javascript', 'java', 'react', 'node.js', 'aws', 'docker', 'kubernetes',
-        'machine learning', 'data science', 'ai', 'blockchain', 'cybersecurity',
-        'frontend', 'backend', 'full stack', 'mobile', 'ios', 'android'
-      ];
-      
-      commonSkills.forEach(skill => {
-        if (title.includes(skill) || issuer.includes(skill)) {
-          skillCounts.set(skill, (skillCounts.get(skill) || 0) + 1);
-        }
+      return success({
+        total_students: totalStudents,
+        verified_certifications: verifiedCount,
+        pending_certifications: pendingCount,
+        rejected_certifications: rejectedCount,
+        average_confidence: averageConfidence,
+        top_skills: topSkills,
+        top_universities: topUniversities,
+        daily_activity: dailyActivity,
+        contacted_students: contactedStudents,
+        active_pipeline_count: activePipeline,
+        engagement_rate: totalStudents > 0 ? Math.round((activePipeline / totalStudents) * 100) : 0,
+        response_rate: contactedStudents > 0 ? Math.round((respondedStudents / contactedStudents) * 100) : 0,
+        sampled: {
+          top_skills: verifiedRows.length >= SAMPLE_LIMIT,
+          average_confidence: verifiedRows.length >= SAMPLE_LIMIT,
+          top_universities: (profileSample?.length ?? 0) >= SAMPLE_LIMIT,
+          daily_activity: (activityRows?.length ?? 0) >= SAMPLE_LIMIT,
+        },
       });
-    });
-
-    const topSkills = Array.from(skillCounts.entries())
-      .map(([skill, count]) => ({ skill, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-
-  // Get top universities - filtered by org
-  const { data: universityData } = await adminSupabase
-    .from('user_roles')
-    .select(`
-      profiles!inner(
-        university
-      )
-    `)
-    .eq('role', 'student')
-    .in('organization_id', targetOrgIds); // Multi-org filter
-
-  const universityCounts = new Map<string, number>();
-  universityData?.forEach((item: Record<string, unknown>) => {
-    const profiles = item.profiles as Array<{ university?: string }> | undefined;
-    const university = profiles?.[0]?.university;
-    if (university) {
-      universityCounts.set(university, (universityCounts.get(university) || 0) + 1);
+    } catch (err) {
+      console.error('[recruiter-analytics] failed', err);
+      return apiError.internal('Failed to load analytics');
     }
-  });
-
-    const topUniversities = Array.from(universityCounts.entries())
-      .map(([university, count]) => ({ university, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-
-    // Get daily activity for the last 30 days - filtered by org
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-    const { data: dailyActivity } = await adminSupabase
-      .from('certificates')
-      .select('created_at')
-      .gte('created_at', thirtyDaysAgo.toISOString())
-      .in('organization_id', targetOrgIds) // Multi-org filter
-      .order('created_at', { ascending: true });
-
-    const activityMap = new Map<string, number>();
-    dailyActivity?.forEach((cert: { created_at: string }) => {
-      const date = new Date(cert.created_at).toISOString().split('T')[0];
-      activityMap.set(date, (activityMap.get(date) || 0) + 1);
-    });
-
-    const dailyActivityData = Array.from(activityMap.entries())
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    // Get recruiter-specific metrics from database
-    const { count: contactedCount } = await supabase
-      .from('recruiter_contacts')
-      .select('*', { count: 'exact', head: true })
-      .eq('recruiter_id', user.id);
-
-    const { count: responseCount } = await supabase
-      .from('recruiter_contacts')
-      .select('*', { count: 'exact', head: true })
-      .eq('recruiter_id', user.id)
-      .eq('response_received', true);
-
-    const { count: pipelineCount } = await supabase
-      .from('recruiter_pipeline')
-      .select('*', { count: 'exact', head: true })
-      .eq('recruiter_id', user.id)
-      .neq('stage', 'rejected');
-
-    const contactedStudents = contactedCount || 0;
-    const responseRate = contactedStudents > 0 ? Math.round((responseCount || 0) / contactedStudents * 100) : 0;
-    
-    // Calculate engagement rate as percentage of students in active pipeline vs total students
-  const activePipelineCount = pipelineCount || 0;
-  const engagementRate = totalStudents && totalStudents > 0 
-    ? Math.round((activePipelineCount / totalStudents) * 100) 
-    : 0;
-
-  return success({
-    total_students: totalStudents || 0,
-    verified_certifications: verifiedCount,
-    pending_certifications: pendingCount,
-    rejected_certifications: rejectedCount,
-    average_confidence: averageConfidence,
-    top_skills: topSkills,
-    top_universities: topUniversities,
-    daily_activity: dailyActivityData,
-    // Recruiter-specific metrics
-    contacted_students: contactedStudents,
-    active_pipeline_count: activePipelineCount,
-    engagement_rate: engagementRate,
-    response_rate: responseRate
-  });
-});
-
+  }
+);

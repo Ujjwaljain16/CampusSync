@@ -1,46 +1,55 @@
+# Database access flow
 
-### 📊 Database Query Flow (RLS in Action)
+How API routes reach Postgres. There are two kinds of Supabase client, and they behave very differently with respect
+to Row-Level Security (RLS).
 
 ```mermaid
 graph TB
-    subgraph Client["Client Application"]
-        UI[React Component]
-        Action[Server Action]
-    end
-
-    subgraph Server["Next.js API"]
-        Route[API Route Handler]
-        Supabase[Supabase Client]
-    end
-
-    subgraph Database["PostgreSQL Database"]
-        RLS[RLS Engine]
-        Policy1[Policy: org_isolation_certificates]
-        Policy2[Policy: recruiter_multi_org_access]
-        Policy3[Policy: super_admin_bypass]
-        Table[(certificates table)]
-    end
-
-    UI -->|User Action| Action
-    Action -->|API Call| Route
-    Route -->|Query| Supabase
-    Supabase -->|SQL + JWT| RLS
-    
-    RLS -->|Check Policies| Policy1
-    RLS -->|Check Policies| Policy2
-    RLS -->|Check Policies| Policy3
-    
-    Policy1 -->|organization_id match?| Table
-    Policy2 -->|recruiter access?| Table
-    Policy3 -->|super_admin role?| Table
-    
-    Table -->|Filtered Results| Supabase
-    Supabase -->|JSON Response| Route
-    Route -->|Data| Action
-    Action -->|State Update| UI
-
-    style RLS fill:#ef4444,stroke:#dc2626,color:#fff
-    style Policy1 fill:#f59e0b,stroke:#d97706,color:#fff
-    style Policy2 fill:#f59e0b,stroke:#d97706,color:#fff
-    style Policy3 fill:#f59e0b,stroke:#d97706,color:#fff
+    UI[React component] -->|fetch /api/...| Route[Route handler]
+    Route -->|1. authenticate| Guard["withAuth / withRole / auth.getUser()"]
+    Route -->|2. resolve organization| Ctx[getOrganizationContext / getRecruiterContext]
+    Route -->|3a. user-bound client: createSupabaseServerClient| UC[Supabase client with the user's JWT]
+    Route -->|3b. admin client: createSupabaseAdminClient / service-role key| AC[Supabase client with the service-role key]
+    UC -->|RLS policies apply| DB[(Postgres)]
+    AC -->|RLS bypassed| DB
 ```
+
+## Rules of thumb used in the code
+
+1. **Authenticate first** (`withAuth`, `withRole`, or `supabase.auth.getUser()`); `/api/*` is not covered by middleware.
+2. **Resolve the organization** for multi-tenant data with `getOrganizationContext(user, requestedOrgId)` and filter
+   by `organization_id` (`getTargetOrganizationIds(context)` returns the list; recruiters may have several).
+3. **User-bound client** (`createSupabaseServerClient`): queries run as the signed-in user, so RLS policies are the
+   second line of defence.
+4. **Admin client** (35 route files): used for operations that RLS would block (creating users, role changes,
+   cross-organization admin views, storage cleanup, audit writes). Nothing but the route's own checks protects these
+   queries, so each such route must verify the caller's role and the target's organization itself.
+5. Prefer small, explicit `select(...)` column lists over `select('*')` for responses that reach other users.
+
+## Query example (organization-scoped list)
+
+```ts
+export const GET = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], async (req, { user }) => {
+  const ctx = await getOrganizationContext(user, req.headers.get('X-Organization-ID'));
+  const orgIds = getTargetOrganizationIds(ctx);
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from('certificates')
+    .select('id, title, institution, verification_status, student_id')
+    .in('organization_id', orgIds);
+  ...
+});
+```
+
+## What RLS covers
+
+RLS is enabled in production on `certificates`, `profiles`, `role_requests`, `user_roles` and
+`verifiable_credentials`. The policies themselves are not stored in this repository, so this document does not
+list or count them. The hardening drafts live in `supabase/migrations/` and must be reviewed against the live schema
+before they are applied. Other tables referenced by the code may have no RLS at all; check with
+`select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r';`.
+
+## Tables the code touches
+
+See the list in [ARCHITECTURE.md](./ARCHITECTURE.md#data-stores). `revocation_list` is referenced by two routes but
+does not exist in production.

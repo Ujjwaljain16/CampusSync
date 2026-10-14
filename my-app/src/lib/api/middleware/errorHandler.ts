@@ -25,6 +25,11 @@ export function withErrorHandler(
     try {
       return await handler(request)
     } catch (err) {
+      // A thrown apiError.* Response is an intentional HTTP response
+      if (err instanceof Response) {
+        return err
+      }
+
       // Log the error for debugging
       console.error('[API Error]:', err)
       

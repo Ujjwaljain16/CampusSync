@@ -104,7 +104,7 @@ export class ErrorBoundary extends Component<Props, State> {
               {/* Body */}
               <div className="p-8 space-y-6">
                 <p className="text-white/70 text-lg">
-                  Don&apos;t worry, our team has been notified and is working on fixing this issue.
+                  Please try again. If the problem continues, reload the page or contact support.
                   In the meantime, you can try one of the following options:
                 </p>
 

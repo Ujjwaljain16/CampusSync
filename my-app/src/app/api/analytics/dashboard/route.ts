@@ -1,25 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient, requireRole, getServerUserWithRole } from '@/lib/supabaseServer';
-import { getOrganizationContext } from '@/lib/api'; import { getTargetOrganizationIds } from '@/lib/api';
+import { NextResponse } from 'next/server';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { withRole, resolveAdminOrg } from '@/lib/api';
 
-export async function GET(req: NextRequest) {
-  const auth = await requireRole(['admin', 'org_admin', 'super_admin']);
-  if (!auth.authorized) {
-    return NextResponse.json({ error: auth.message || 'Unauthorized' }, { status: 403 });
-  }
-
-  const userWithRole = await getServerUserWithRole();
-  if (!userWithRole) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  
-  const { user } = userWithRole;
-
+export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (req, { user }) => {
   const supabase = await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
   const { searchParams } = new URL(req.url);
   const range = searchParams.get('range') || '30d';
+
+  // The caller must be admin-class IN the organization the data is read from.
+  // A super_admin who did not pick an organization sees every organization.
+  const requestedOrg = req.headers.get('X-Organization-ID') || searchParams.get('organization_id');
+  const scope = await resolveAdminOrg(user, requestedOrg, 'admin');
+  const allOrgs = scope.isSuperAdmin && !scope.requested;
+  const targetOrgIds = [scope.organizationId];
+  const orgContext = { isSuperAdmin: allOrgs };
 
   try {
     // Calculate date range
@@ -174,11 +168,13 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // Calculate system performance (mock data for now)
+    // System performance is not measured anywhere yet: report that honestly
+    // instead of inventing numbers.
     const systemPerformance = {
-      averageProcessingTime: Math.floor(Math.random() * 2000) + 1000, // 1-3 seconds
-      successRate: 0.95 + Math.random() * 0.04, // 95-99%
-      errorRate: Math.random() * 0.02 // 0-2%
+      available: false,
+      averageProcessingTime: null,
+      successRate: null,
+      errorRate: null
     };
 
     const analyticsData = {
@@ -204,7 +200,7 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 
 

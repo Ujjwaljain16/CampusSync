@@ -3,6 +3,19 @@ import path from "path";
 
 const isDev = process.env.NODE_ENV !== 'production';
 
+// connect-src allows only this app and the configured Supabase project
+// (HTTP + realtime websocket), not wildcard hosting domains.
+function supabaseConnectSources(): string[] {
+  try {
+    const url = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '');
+    const wsProtocol = url.protocol === 'http:' ? 'ws:' : 'wss:';
+    return [url.origin, `${wsProtocol}//${url.host}`];
+  } catch {
+    // NEXT_PUBLIC_SUPABASE_URL missing/invalid (setup not finished): fall back to hosted Supabase
+    return ['https://*.supabase.co', 'wss://*.supabase.co'];
+  }
+}
+
 const nextConfig: NextConfig = {
   // Ensure Next.js treats this app directory as the workspace root
   outputFileTracingRoot: path.join(__dirname),
@@ -26,10 +39,9 @@ const nextConfig: NextConfig = {
             key: 'Cross-Origin-Opener-Policy',
             value: 'same-origin'
           },
-          {
-            key: 'Cross-Origin-Embedder-Policy',
-            value: 'require-corp'
-          },
+          // Cross-Origin-Embedder-Policy is intentionally NOT set: `require-corp`
+          // breaks cross-origin images and the PDF preview iframe, and we do not
+          // need cross-origin isolation.
           {
             key: 'Cross-Origin-Resource-Policy',
             value: 'same-origin'
@@ -40,11 +52,13 @@ const nextConfig: NextConfig = {
               "default-src 'self'",
               // 'unsafe-eval' is only needed by the dev server (React refresh); never ship it to production.
               // Wildcard https://*.vercel.app is intentionally NOT allowed for scripts (any tenant could host code there).
+              // KNOWN LIMITATION: 'unsafe-inline' remains in script-src because Next.js emits inline
+              // bootstrap scripts; removing it requires nonce-based CSP (not implemented here).
               `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''} https://vercel.live https://va.vercel-scripts.com`,
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
               "font-src 'self' data:",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vercel.live https://*.vercel.app https://generativelanguage.googleapis.com",
+              ['connect-src', "'self'", ...supabaseConnectSources()].join(' '),
               "media-src 'self' blob:",
               "object-src 'none'",
               "base-uri 'self'",

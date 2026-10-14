@@ -1,128 +1,203 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
+import { isMissingColumnError, VISIBILITY_COLUMNS } from '@/lib/privacy/visibility';
+import { isPlainObject } from '@/lib/privacy/sanitize';
+
+/**
+ * Own-profile completion + privacy settings.
+ *
+ * GET  -> { data: profile & { public_portfolio_enabled, recruiter_share_contact } }
+ *         (the two booleans are always present and default to false)
+ * POST -> whitelisted fields only:
+ *         full_name (required), university, major, location (strings),
+ *         graduation_year (integer 1950..current+10), gpa (number 0..10),
+ *         public_portfolio_enabled, recruiter_share_contact (booleans).
+ *         Responds { ok: true, data: { ... }, warnings? }.
+ */
+
+const ROLE_HIERARCHY = ['super_admin', 'org_admin', 'admin', 'faculty', 'recruiter', 'student'];
+const MAX_TEXT = 200;
+const MAX_NAME = 120;
+
+type RoleRow = { role: string | null; organization_id: string | null; approval_status?: string | null };
+
+function highestRole(rows: RoleRow[]): string {
+  let best: string | null = null;
+  for (const row of rows) {
+    if (!row.role) continue;
+    const idx = ROLE_HIERARCHY.indexOf(row.role);
+    if (idx === -1) continue;
+    if (best === null || idx < ROLE_HIERARCHY.indexOf(best)) best = row.role;
+  }
+  return best ?? 'student';
+}
+
+function optionalText(value: unknown, field: string): { value?: string; error?: string } {
+  if (value === undefined || value === null || value === '') return {};
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  const trimmed = value.trim();
+  if (trimmed.length > MAX_TEXT) return { error: `${field} must be at most ${MAX_TEXT} characters` };
+  return trimmed ? { value: trimmed } : {};
+}
 
 export async function GET(request: NextRequest) {
-	try {
-		const response = NextResponse.json({ ok: true });
-		const supabase = createServerClient(
-			process.env.NEXT_PUBLIC_SUPABASE_URL!,
-			process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-			{
-				cookies: {
-					getAll() {
-						return request.cookies.getAll();
-					},
-					setAll(cookies) {
-						cookies.forEach(({ name, value, options }) => {
-							response.cookies.set(name, value, options);
-						});
-					},
-				},
-			}
-		);
+  const limited = enforceRateLimit(request, 'profile-complete-read', RateLimitPresets.relaxed);
+  if (limited) return limited;
 
-		const { data: { user }, error: userError } = await supabase.auth.getUser();
-		if (userError || !user) {
-			return NextResponse.json({ error: userError?.message || 'Not authenticated' }, { status: 401 });
-		}
+  try {
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+    if (userError || !user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
-		const { data: profile, error: profileError } = await supabase
-			.from('profiles')
-			.select('*')
-			.eq('id', user.id)
-			.single();
+    const { data: profile, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if (profileError) {
+      console.error('[profile/complete] GET failed', profileError);
+      return NextResponse.json({ error: 'Failed to load profile' }, { status: 500 });
+    }
+    if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
 
-		if (profileError) {
-			return NextResponse.json({ error: profileError.message || 'Profile not found' }, { status: 404 });
-		}
-
-		return NextResponse.json({ data: profile });
-	} catch (error: unknown) {
-		return NextResponse.json({ error: error instanceof Error ? error.message : 'Unexpected error' }, { status: 500 });
-	}
+    const record = profile as Record<string, unknown>;
+    return NextResponse.json({
+      data: {
+        ...record,
+        public_portfolio_enabled: record.public_portfolio_enabled === true,
+        recruiter_share_contact: record.recruiter_share_contact === true,
+      },
+    });
+  } catch (error) {
+    console.error('[profile/complete] GET error', error);
+    return NextResponse.json({ error: 'Unexpected error' }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
-	try {
-		const body = await request.json().catch(() => ({}));
-		const {
-			full_name,
-			university,
-			graduation_year,
-			major,
-			location,
-			gpa,
-		} = body || {};
+  try {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+    if (!isPlainObject(body)) return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
 
-		if (!full_name || typeof full_name !== 'string' || full_name.trim().length === 0) {
-			return NextResponse.json({ error: 'Full name is required' }, { status: 400 });
-		}
+    const { full_name, graduation_year, gpa, public_portfolio_enabled, recruiter_share_contact } = body;
 
-		const response = NextResponse.json({ ok: true });
-		const supabase = createServerClient(
-			process.env.NEXT_PUBLIC_SUPABASE_URL!,
-			process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-			{
-				cookies: {
-					getAll() {
-						return request.cookies.getAll();
-					},
-					setAll(cookies) {
-						cookies.forEach(({ name, value, options }) => {
+    if (typeof full_name !== 'string' || full_name.trim().length === 0) {
+      return NextResponse.json({ error: 'Full name is required' }, { status: 400 });
+    }
+    if (full_name.trim().length > MAX_NAME) {
+      return NextResponse.json({ error: `Full name must be at most ${MAX_NAME} characters` }, { status: 400 });
+    }
 
-							response.cookies.set(name, value, options);
-						});
-					},
-				},
-			}
-		);
+    const university = optionalText(body.university, 'university');
+    const major = optionalText(body.major, 'major');
+    const location = optionalText(body.location, 'location');
+    const textError = university.error ?? major.error ?? location.error;
+    if (textError) return NextResponse.json({ error: textError }, { status: 400 });
 
-		const { data: { user }, error: userError } = await supabase.auth.getUser();
-		if (userError || !user) {
-			return NextResponse.json({ error: userError?.message || 'Not authenticated' }, { status: 401 });
-		}
+    let graduationYear: number | undefined;
+    if (graduation_year !== undefined && graduation_year !== null && graduation_year !== '') {
+      const n = typeof graduation_year === 'number' ? graduation_year : typeof graduation_year === 'string' ? Number(graduation_year.trim()) : NaN;
+      const maxYear = new Date().getFullYear() + 10;
+      if (!Number.isInteger(n) || n < 1950 || n > maxYear) {
+        return NextResponse.json({ error: `graduation_year must be a whole year between 1950 and ${maxYear}` }, { status: 400 });
+      }
+      graduationYear = n;
+    }
 
-		// Get organization context for multi-tenancy
-		let organizationId: string | null = null;
-		try {
-			const { data: userRole } = await supabase
-				.from('user_roles')
-				.select('organization_id')
-				.eq('user_id', user.id)
-				.single();
-			organizationId = userRole?.organization_id || null;
-		} catch {
-			// If no organization found, will be assigned later by trigger
-		}
+    let gpaValue: number | undefined;
+    if (gpa !== undefined && gpa !== null && gpa !== '') {
+      const n = typeof gpa === 'number' ? gpa : typeof gpa === 'string' ? Number(gpa.trim()) : NaN;
+      if (!Number.isFinite(n) || n < 0 || n > 10) {
+        return NextResponse.json({ error: 'gpa must be a number between 0 and 10' }, { status: 400 });
+      }
+      gpaValue = n;
+    }
 
-		// Build payload using best-effort columns
-		const payload: Record<string, unknown> = { id: user.id, full_name: full_name.trim(), role: 'student' };
-		if (organizationId) payload.organization_id = organizationId; // Multi-org support
-		if (university) payload.university = String(university);
-		if (graduation_year) payload.graduation_year = Number(graduation_year);
-		if (major) payload.major = String(major);
-		if (location) payload.location = String(location);
-		if (gpa !== undefined && gpa !== null && gpa !== '') payload.gpa = Number(gpa);
+    for (const [key, value] of [
+      ['public_portfolio_enabled', public_portfolio_enabled],
+      ['recruiter_share_contact', recruiter_share_contact],
+    ] as const) {
+      if (value !== undefined && typeof value !== 'boolean') {
+        return NextResponse.json({ error: `${key} must be a boolean` }, { status: 400 });
+      }
+    }
 
-		let upsertErr: unknown = null;
-		try {
-			const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
-			upsertErr = error;
-		} catch (e) {
-			upsertErr = e;
-		}
-		if (upsertErr) {
-			// Fallback to minimal
-			const { error } = await supabase.from('profiles').upsert({ id: user.id, full_name: full_name.trim(), role: 'student' }, { onConflict: 'id' });
-			if (error) {
-				return NextResponse.json({ error: error.message || 'Profile update failed' }, { status: 500 });
-			}
-		}
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+    if (userError || !user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
-		return response;
-	} catch (error: unknown) {
-		return NextResponse.json({ error: error instanceof Error ? error.message : 'Unexpected error' }, { status: 500 });
-	}
+    const limited = enforceRateLimit(request, 'profile-complete-write', RateLimitPresets.standard, user.id);
+    if (limited) return limited;
+
+    // Roles (a user may hold several): used for the organisation and to avoid
+    // clobbering profiles.role of staff accounts.
+    const { data: roleData, error: roleError } = await supabase
+      .from('user_roles')
+      .select('role, organization_id, approval_status')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true });
+    if (roleError) {
+      console.error('[profile/complete] role lookup failed', roleError);
+      return NextResponse.json({ error: 'Unable to verify account' }, { status: 500 });
+    }
+    const roles = (roleData ?? []) as RoleRow[];
+    const isStudent = highestRole(roles) === 'student';
+    const orgRow = roles.find((r) => r.role === 'student' && r.organization_id) ?? roles.find((r) => r.organization_id);
+
+    const core: Record<string, unknown> = { id: user.id, full_name: full_name.trim() };
+    if (isStudent) core.role = 'student'; // never overwrite faculty/admin/recruiter profile roles
+    if (orgRow?.organization_id) core.organization_id = orgRow.organization_id;
+    if (university.value) core.university = university.value;
+    if (major.value) core.major = major.value;
+    if (location.value) core.location = location.value;
+    if (graduationYear !== undefined) core.graduation_year = graduationYear;
+    if (gpaValue !== undefined) core.gpa = gpaValue;
+
+    const flags: Record<string, boolean> = {};
+    if (typeof public_portfolio_enabled === 'boolean') flags[VISIBILITY_COLUMNS.publicPortfolioEnabled] = public_portfolio_enabled;
+    if (typeof recruiter_share_contact === 'boolean') flags[VISIBILITY_COLUMNS.recruiterShareContact] = recruiter_share_contact;
+    const hasFlags = Object.keys(flags).length > 0;
+
+    const warnings: Array<{ code: string; message: string }> = [];
+    let saved: Record<string, unknown> = { ...core, ...flags };
+
+    let { error: upsertError } = await supabase.from('profiles').upsert({ ...core, ...flags }, { onConflict: 'id' });
+    if (upsertError && hasFlags && isMissingColumnError(upsertError)) {
+      // Privacy columns not migrated yet: save the profile, but tell the client the settings were NOT stored.
+      console.warn('[profile/complete] privacy columns missing; saving profile without them');
+      saved = { ...core };
+      ({ error: upsertError } = await supabase.from('profiles').upsert(core, { onConflict: 'id' }));
+      if (!upsertError) {
+        warnings.push({
+          code: 'privacy_settings_unavailable',
+          message: 'Privacy settings could not be saved yet; your profile stays private.',
+        });
+      }
+    }
+    if (upsertError) {
+      console.error('[profile/complete] upsert failed', upsertError);
+      return NextResponse.json({ error: 'Profile update failed' }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      data: {
+        ...saved,
+        public_portfolio_enabled: saved.public_portfolio_enabled === true,
+        recruiter_share_contact: saved.recruiter_share_contact === true,
+      },
+      ...(warnings.length > 0 ? { warnings } : {}),
+    });
+  } catch (error) {
+    console.error('[profile/complete] POST error', error);
+    return NextResponse.json({ error: 'Unexpected error' }, { status: 500 });
+  }
 }
-
-

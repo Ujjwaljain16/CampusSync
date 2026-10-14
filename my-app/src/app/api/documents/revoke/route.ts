@@ -1,132 +1,136 @@
 // Unified document revocation API
 import { NextRequest } from 'next/server';
-import { withAuth, withRole, success, apiError, parseAndValidateBody, isValidUUID, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { withAuth, success, apiError, error as apiErrorResponse, isValidUUID } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import {
+  canTransition,
+  isOwner,
+  loadDocumentHead,
+  requireApprovedReviewer,
+  upsertMetadataMerged,
+  writeAuditLog,
+} from '@/lib/documents/authz';
 
-interface RevokeDocumentBody {
-  documentId: string;
-  reason: string;
-  revokedBy?: string;
-}
+const MAX_REASON = 1000;
 
-export const POST = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], async (req: NextRequest, { user }) => {
-  const result = await parseAndValidateBody<RevokeDocumentBody>(req, ['documentId', 'reason']);
-  if (result.error) return result.error;
+// POST /api/documents/revoke - approved reviewers of the document's organization only
+export const POST = withAuth(async (req: NextRequest, { user }) => {
+  const body = (await req.json().catch(() => null)) as { documentId?: unknown; reason?: unknown } | null;
+  if (!body || typeof body !== 'object') return apiError.badRequest('Invalid JSON body');
 
-  const { documentId, reason } = result.data;
-  // Never trust a client-supplied "revokedBy"; attribute to the authenticated user
-  const revokedBy = user.id;
-  if (!isValidUUID(documentId) || typeof reason !== 'string' || reason.length > 1000) {
-    throw apiError.badRequest('Invalid documentId or reason');
+  const { documentId, reason } = body;
+  if (
+    typeof documentId !== 'string' ||
+    !isValidUUID(documentId) ||
+    typeof reason !== 'string' ||
+    reason.trim().length === 0 ||
+    reason.length > MAX_REASON
+  ) {
+    return apiError.badRequest('Invalid documentId or reason');
   }
+  const cleanReason = reason.trim();
+
   const supabase = await createSupabaseServerClient();
 
-  // Document must belong to the caller's organization
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-  const { data: target } = await supabase
-    .from('documents')
-    .select('id')
-    .eq('id', documentId)
-    .in('organization_id', targetOrgIds)
-    .maybeSingle();
-  if (!target) throw apiError.notFound('Document not found');
+  const doc = await loadDocumentHead(supabase, documentId);
+  if (!doc) return apiError.notFound('Document not found');
 
-  // Update document verification status to revoked
-  const { error: updateError } = await supabase
+  const reviewer = await requireApprovedReviewer(user, doc.organization_id, supabase);
+  if (!reviewer) return apiError.forbidden('Only approved faculty or admins of this organization can revoke documents');
+
+  const from = doc.verification_status;
+  if (!canTransition(from, 'revoked', reviewer.role)) {
+    return apiErrorResponse(`Cannot revoke a document that is '${from}'`, 409);
+  }
+
+  const { data: updated, error: updateError } = await supabase
     .from('documents')
-    .update({
-      verification_status: 'revoked',
-      updated_at: new Date().toISOString()
-    })
+    .update({ verification_status: 'revoked', updated_at: new Date().toISOString() })
     .eq('id', documentId)
-    .in('organization_id', targetOrgIds);
+    .eq('organization_id', doc.organization_id)
+    .eq('verification_status', from)
+    .select('id');
 
   if (updateError) {
     console.error('Document update error:', updateError);
-    throw apiError.internal('Failed to revoke document');
+    return apiError.internal('Failed to revoke document');
+  }
+  if (!updated || updated.length === 0) {
+    return apiErrorResponse('Document status changed concurrently; reload and retry', 409);
   }
 
-  // Update document metadata with revocation details
-  try {
-    await supabase.from('document_metadata').upsert({
-      document_id: documentId,
-      verification_details: { 
-        revoked: true, 
-        reason, 
-        revoked_by: revokedBy,
-        revoked_at: new Date().toISOString() 
-      },
-      updated_at: new Date().toISOString()
-    });
-  } catch (metadataError) {
-    console.error('Metadata update error:', metadataError);
-    // Don't fail the request, just log the error
-  }
+  // Record revocation details, keeping any verification evidence already stored
+  const metaResult = await upsertMetadataMerged(supabase, documentId, {
+    detailsPatch: {
+      revoked: true,
+      reason: cleanReason,
+      revoked_by: user.id, // never trust a client-supplied "revokedBy"
+      revoked_at: new Date().toISOString(),
+    },
+  });
+  if (!metaResult.ok) console.error('Metadata update error:', metaResult.error);
 
-  // Log audit entry
-  try {
-    await supabase.from('audit_logs').insert({
-      actor_id: user.id,
-      target_id: documentId,
-      action: 'revoke_document',
-      details: { reason, revoked_by: revokedBy },
-      created_at: new Date().toISOString()
-    });
-  } catch (auditError) {
-    console.error('Audit log error:', auditError);
-    // Don't fail the request, just log the error
-  }
+  await writeAuditLog(supabase, {
+    actorId: user.id,
+    organizationId: doc.organization_id,
+    action: 'revoke_document',
+    targetId: documentId,
+    details: { from_status: from, to_status: 'revoked', reason: cleanReason, revoked_by: user.id },
+  });
 
-  return success({
-    success: true,
-    documentId,
-    status: 'revoked'
-  }, 'Document revoked successfully');
+  return success(
+    { success: true, documentId, status: 'revoked', metadataUpdated: metaResult.ok },
+    'Document revoked successfully'
+  );
 });
 
+// GET /api/documents/revoke?documentId=... - document owner or approved reviewer
 export const GET = withAuth(async (req: NextRequest, { user }) => {
   const { searchParams } = new URL(req.url);
   const documentId = searchParams.get('documentId');
-
   if (!documentId || !isValidUUID(documentId)) {
-    throw apiError.badRequest('Valid document ID required');
+    return apiError.badRequest('Valid document ID required');
   }
 
   const supabase = await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
 
-  // Check if document is revoked
-  const { data: document, error: docError } = await supabase
-    .from('documents')
-    .select(`
-      id,
-      student_id,
-      verification_status,
-      document_metadata (
-        verification_details
-      )
-    `)
-    .eq('id', documentId)
-    .in('organization_id', targetOrgIds)
-    .single();
+  const head = await loadDocumentHead(supabase, documentId);
+  if (!head) return apiError.notFound('Document not found');
 
-  if (docError || !document) {
-    throw apiError.notFound('Document not found');
-  }
-  if (orgContext.role === 'student' && document.student_id !== user.id) {
-    throw apiError.forbidden('You do not have permission to view this document');
+  const owner = isOwner(head, user.id);
+  const reviewer = owner ? null : await requireApprovedReviewer(user, head.organization_id, supabase);
+  if (!owner && !reviewer) {
+    return apiError.forbidden('You do not have permission to view this document');
   }
 
-  const isRevoked = document.verification_status === 'revoked';
-  const metadata = document.document_metadata as Array<{ verification_details?: unknown }> | undefined;
-  const revocationDetails = metadata?.[0]?.verification_details as Record<string, unknown> | null;
+  const isRevoked = head.verification_status === 'revoked';
+  let revocationDetails: Record<string, unknown> | null = null;
 
-  return success({
-    documentId,
-    isRevoked,
-    status: document.verification_status,
-    revocationDetails: isRevoked ? revocationDetails : null
-  }, 'Document revocation status retrieved');
+  if (isRevoked) {
+    const { data: meta } = await supabase
+      .from('document_metadata')
+      .select('verification_details')
+      .eq('document_id', documentId)
+      .maybeSingle();
+    const d = (meta as { verification_details?: Record<string, unknown> } | null)?.verification_details;
+    if (d && typeof d === 'object') {
+      // Only expose the revocation fields, not the rest of the verification evidence
+      revocationDetails = {
+        revoked: d.revoked ?? true,
+        reason: d.reason ?? null,
+        revoked_at: d.revoked_at ?? null,
+        ...(reviewer ? { revoked_by: d.revoked_by ?? null } : {}),
+      };
+    }
+  }
+
+  return success(
+    {
+      documentId,
+      isRevoked,
+      status: head.verification_status,
+      revocationDetails,
+    },
+    'Document revocation status retrieved'
+  );
 });

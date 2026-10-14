@@ -15,9 +15,10 @@
 
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useId, useRef } from 'react';
 import { GraduationCap, Briefcase, UserCheck, Mail, Lock, User, Building2, Calendar, BookOpen, MapPin, Star, Eye, EyeOff, CheckCircle, ArrowRight, ArrowLeft, Sparkles, Shield } from 'lucide-react';
 import { toast } from '@/components/ui/toast';
+import { parseSignupParams } from '@/lib/signupQuery';
 
 // Types
 interface Organization {
@@ -71,6 +72,9 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
   const [error, setError] = useState<string | null>(null);
   const [validatingEmail, setValidatingEmail] = useState(false);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const uid = useId();
+  // Monotonic counter: only the latest email validation may update state
+  const validationReq = useRef(0);
 
   // Validate email and fetch organizations
   // validateEmail now accepts an optional role override so OAuth redirects
@@ -79,6 +83,8 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
     if (!email || !email.includes('@')) return;
 
     const effectiveRole = roleOverride ?? data.role;
+    const reqId = ++validationReq.current;
+    const isStale = () => reqId !== validationReq.current;
 
     // IMPORTANT: Recruiters can use ANY email - skip validation entirely
     if (effectiveRole === 'recruiter') {
@@ -101,6 +107,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
       });
 
       const result: EmailValidationResult = await res.json();
+      if (isStale()) return;
 
       if (!res.ok) {
         throw new Error(result.canSignup === false ? 'Email not eligible for signup' : 'Validation failed');
@@ -115,28 +122,23 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
         toast.error(errorMsg);
       }
     } catch (err) {
+      if (isStale()) return;
       const errorMsg = err instanceof Error ? err.message : 'Email validation failed';
       setError(errorMsg);
       toast.error(errorMsg);
     } finally {
-      setValidatingEmail(false);
+      if (!isStale()) setValidatingEmail(false);
     }
   }, [data.role]);
 
   // Check for OAuth user on mount
   React.useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const emailParam = params.get('email');
-    const oauthParam = params.get('oauth');
+    const { email: emailParam, oauth, role: roleParam } = parseSignupParams(window.location.search);
 
-    if (emailParam && oauthParam === 'true') {
-      const roleParam = params.get('role') as Role | null;
-      // If role is present in query (e.g. role=recruiter) set it immediately
+    if (emailParam && oauth) {
+      // Only allow-listed roles are accepted from the query string
       if (roleParam) {
         setData(prev => ({ ...prev, role: roleParam }));
-      } else {
-        // leave role null so user selects it
-        setData(prev => ({ ...prev }));
       }
 
       setData(prev => ({ ...prev, email: emailParam }));
@@ -148,8 +150,6 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
         setTimeout(() => {
           validateEmail(emailParam, roleParam);
         }, 500);
-      } else {
-        console.log('[OAuth] Email set but validation skipped - waiting for role selection');
       }
     }
   }, [validateEmail]);
@@ -160,9 +160,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
     setError(null);
 
     // For OAuth users who came without a role, validate email now that role is selected
-    const params = new URLSearchParams(window.location.search);
-    const isOAuthUser = params.get('oauth') === 'true';
-    const emailParam = params.get('email');
+    const { oauth: isOAuthUser, email: emailParam } = parseSignupParams(window.location.search);
 
     if (isOAuthUser && emailParam && (role === 'student' || role === 'faculty')) {
       // Validate email for student/faculty to check org match
@@ -274,7 +272,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
       setLoading(false);
 
       // Check if this is an OAuth user or if account was already confirmed
-      const isOAuthUser = new URLSearchParams(window.location.search).get('oauth') === 'true';
+      const isOAuthUser = parseSignupParams(window.location.search).oauth;
       const shouldSignInFromAPI = result.shouldSignIn === true;
       const shouldSignIn = shouldSignInFromAPI || isOAuthUser;
 
@@ -415,7 +413,7 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
 
         {/* Error Message */}
         {error && (
-          <div className="mb-6 p-5 bg-gradient-to-br from-red-500/10 to-red-600/5 border border-red-500/30 rounded-2xl text-red-200 animate-in slide-in-from-top-2 fade-in duration-300 backdrop-blur-xl">
+          <div role="alert" className="mb-6 p-5 bg-gradient-to-br from-red-500/10 to-red-600/5 border border-red-500/30 rounded-2xl text-red-200 animate-in slide-in-from-top-2 fade-in duration-300 backdrop-blur-xl">
             <div className="flex items-start gap-3">
               <div className="w-6 h-6 bg-red-500/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
                 <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -479,12 +477,13 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
             <div className="space-y-4">
               {/* Email */}
               <div>
-                <label className="block text-sm font-semibold text-white mb-2">
+                <label htmlFor={`${uid}-email`} className="block text-sm font-semibold text-white mb-2">
                   Email {data.role !== 'recruiter' && <span className="text-blue-400">(use your university email)</span>}
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                   <input
+                    id={`${uid}-email`}
                     type="email"
                     value={data.email}
                     onChange={(e) => setData(prev => ({ ...prev, email: e.target.value }))}
@@ -508,10 +507,11 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
 
               {/* Full Name */}
               <div>
-                <label className="block text-sm font-semibold text-white mb-2">Full Name</label>
+                <label htmlFor={`${uid}-fullName`} className="block text-sm font-semibold text-white mb-2">Full Name</label>
                 <div className="relative">
                   <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                   <input
+                    id={`${uid}-fullName`}
                     type="text"
                     value={data.fullName}
                     onChange={(e) => setData(prev => ({ ...prev, fullName: e.target.value }))}
@@ -523,10 +523,11 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
 
               {/* Password */}
               <div>
-                <label className="block text-sm font-semibold text-white mb-2">Password</label>
+                <label htmlFor={`${uid}-password`} className="block text-sm font-semibold text-white mb-2">Password</label>
                 <div className="relative">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                   <input
+                    id={`${uid}-password`}
                     type={showPassword ? 'text' : 'password'}
                     value={data.password}
                     onChange={(e) => setData(prev => ({ ...prev, password: e.target.value }))}
@@ -535,6 +536,8 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                   />
                   <button
                     type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition-colors"
                   >
@@ -671,10 +674,11 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                 <>
                   {/* Company Name */}
                   <div>
-                    <label className="block text-sm font-semibold text-white mb-2">Company Name</label>
+                    <label htmlFor={`${uid}-companyName`} className="block text-sm font-semibold text-white mb-2">Company Name</label>
                     <div className="relative">
                       <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                       <input
+                    id={`${uid}-companyName`}
                         type="text"
                         value={data.companyName || ''}
                         onChange={(e) => setData(prev => ({ ...prev, companyName: e.target.value }))}
@@ -686,10 +690,11 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
 
                   {/* Position */}
                   <div>
-                    <label className="block text-sm font-semibold text-white mb-2">Position</label>
+                    <label htmlFor={`${uid}-position`} className="block text-sm font-semibold text-white mb-2">Position</label>
                     <div className="relative">
                       <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                       <input
+                    id={`${uid}-position`}
                         type="text"
                         value={data.position || ''}
                         onChange={(e) => setData(prev => ({ ...prev, position: e.target.value }))}
@@ -703,10 +708,11 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                 <>
                   {/* University */}
                   <div>
-                    <label className="block text-sm font-semibold text-white mb-2">University</label>
+                    <label htmlFor={`${uid}-university`} className="block text-sm font-semibold text-white mb-2">University</label>
                     <div className="relative">
                       <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                       <input
+                    id={`${uid}-university`}
                         type="text"
                         value={data.university || data.organization?.name || ''}
                         onChange={(e) => setData(prev => ({ ...prev, university: e.target.value }))}
@@ -719,10 +725,11 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                   {/* Major & Graduation Year */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-semibold text-white mb-2">Major</label>
+                      <label htmlFor={`${uid}-major`} className="block text-sm font-semibold text-white mb-2">Major</label>
                       <div className="relative">
                         <BookOpen className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                         <input
+                    id={`${uid}-major`}
                           type="text"
                           value={data.major || ''}
                           onChange={(e) => setData(prev => ({ ...prev, major: e.target.value }))}
@@ -733,10 +740,11 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                     </div>
 
                     <div>
-                      <label className="block text-sm font-semibold text-white mb-2">Grad Year</label>
+                      <label htmlFor={`${uid}-graduationYear`} className="block text-sm font-semibold text-white mb-2">Grad Year</label>
                       <div className="relative">
                         <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                         <input
+                    id={`${uid}-graduationYear`}
                           type="number"
                           value={data.graduationYear || ''}
                           onChange={(e) => setData(prev => ({ ...prev, graduationYear: parseInt(e.target.value) || undefined }))}
@@ -752,10 +760,11 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                   {/* Location & GPA */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-semibold text-white mb-2">Location</label>
+                      <label htmlFor={`${uid}-location`} className="block text-sm font-semibold text-white mb-2">Location</label>
                       <div className="relative">
                         <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                         <input
+                    id={`${uid}-location`}
                           type="text"
                           value={data.location || ''}
                           onChange={(e) => setData(prev => ({ ...prev, location: e.target.value }))}
@@ -766,10 +775,11 @@ export default function MultiStepSignup({ onComplete }: { onComplete?: (data: Si
                     </div>
 
                     <div>
-                      <label className="block text-sm font-semibold text-white mb-2">GPA</label>
+                      <label htmlFor={`${uid}-gpa`} className="block text-sm font-semibold text-white mb-2">GPA</label>
                       <div className="relative">
                         <Star className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
                         <input
+                    id={`${uid}-gpa`}
                           type="number"
                           step="0.01"
                           value={data.gpa || ''}

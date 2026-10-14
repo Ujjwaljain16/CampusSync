@@ -81,9 +81,6 @@ export default function LoginPage() {
       setResetEmailSent(true);
       setError(null);
       toast.success('Password reset email sent successfully!');
-      
-      // Log success for debugging
-      console.log('Password reset email sent successfully to:', email.trim());
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to send reset email";
       toast.error(message);
@@ -106,7 +103,6 @@ export default function LoginPage() {
       
       // Check if user was successfully authenticated
       if (data.user && data.session) {
-        console.log('Login successful, user data:', data.user);
         toast.success('Login successful! Redirecting...');
         
         // Establish session and get redirect target in one step (avoid duplicate setSession)

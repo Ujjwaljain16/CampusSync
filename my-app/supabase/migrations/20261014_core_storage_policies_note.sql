@@ -1,0 +1,44 @@
+-- DRAFT - review against the live schema before applying; idempotent
+-- (everything below is commented out: inspect first, then decide)
+--
+-- OBSERVED (2026-10-14): the storage bucket `certificates` is PUBLIC. Anyone who knows or guesses an
+-- object URL can read certificate files (PII: names, marks, IDs) without authentication.
+--
+-- 1) Inspect buckets and policies:
+--
+--   select id, name, public, file_size_limit, allowed_mime_types from storage.buckets;
+--
+--   select policyname, cmd, roles, qual, with_check
+--   from pg_policies
+--   where schemaname = 'storage' and tablename = 'objects';
+--
+-- 2) Proposal: private bucket + per-user-folder policies. Objects are expected at
+--    `<auth.uid()>/<filename>` (verify the upload path used by the app before applying!).
+--
+--   update storage.buckets set public = false where id = 'certificates';
+--
+--   drop policy if exists "certificates_owner_read"   on storage.objects;
+--   drop policy if exists "certificates_owner_insert" on storage.objects;
+--   drop policy if exists "certificates_owner_delete" on storage.objects;
+--
+--   create policy "certificates_owner_read" on storage.objects
+--     for select to authenticated
+--     using (bucket_id = 'certificates' and (storage.foldername(name))[1] = auth.uid()::text);
+--
+--   create policy "certificates_owner_insert" on storage.objects
+--     for insert to authenticated
+--     with check (bucket_id = 'certificates' and (storage.foldername(name))[1] = auth.uid()::text);
+--
+--   create policy "certificates_owner_delete" on storage.objects
+--     for delete to authenticated
+--     using (bucket_id = 'certificates' and (storage.foldername(name))[1] = auth.uid()::text);
+--
+--   -- Faculty/admin review access: do NOT add a broad read policy. Serve files to reviewers through
+--   -- server routes that check org membership and then create short-lived signed URLs
+--   -- (supabase.storage.from('certificates').createSignedUrl(path, 60)) with the service role.
+--
+-- 3) Application impact - making the bucket private breaks any code/DB row that stores or renders a
+--    permanent public URL (getPublicUrl). Before flipping `public = false`:
+--      - grep for getPublicUrl / '/storage/v1/object/public/certificates' and stored file URLs;
+--      - migrate to storing the object path and generating signed URLs on demand;
+--      - existing public URLs stop working at the moment of the flip (plan a rollout).

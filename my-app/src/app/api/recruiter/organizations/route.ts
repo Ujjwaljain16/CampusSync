@@ -21,13 +21,14 @@ export async function GET() {
     }
 
     // Verify user is a recruiter with platform-level approval
-    const { data: roleData } = await supabase
+    const { data: roleRows } = await supabase
       .from('user_roles')
       .select('role, approval_status, organization_id')
       .eq('user_id', user.id)
       .eq('role', 'recruiter')
       .is('organization_id', null) // Check platform-level approval
-      .single();
+      .limit(1);
+    const roleData = roleRows?.[0];
 
     if (!roleData) {
       return NextResponse.json(
@@ -134,7 +135,7 @@ export async function GET() {
   } catch (error: unknown) {
     console.error('[RECRUITER-ORGANIZATIONS] Error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }

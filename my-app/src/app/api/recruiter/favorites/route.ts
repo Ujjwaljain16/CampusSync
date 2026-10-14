@@ -1,138 +1,66 @@
 import { NextRequest } from 'next/server';
-import { createSupabaseAdminClient, getServerUserWithRole } from '@/lib/supabaseServer';
-import { success, apiError, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
-import { getRequestedOrgId } from '@/lib/api/utils/recruiter';
+import { success, apiError } from '@/lib/api/utils/response';
+import { RateLimitPresets } from '@/lib/rateLimit';
+import { recruiterRoute, readJsonObject, getApprovedStudentOrgs } from '@/lib/privacy/recruiterAccess';
+import { isUuid } from '@/lib/privacy/sanitize';
 
-// GET: Fetch all favorites for current recruiter (org-scoped)
-export async function GET(req: NextRequest) {
-  const userWithRole = await getServerUserWithRole();
-  
-  if (!userWithRole) {
-    throw apiError.unauthorized();
-  }
-  
-  const { user, role } = userWithRole;
-  
-  if (role !== 'recruiter' && role !== 'admin') {
-    throw apiError.unauthorized();
-  }
+const RATE = { scope: 'recruiter-favorites', rateLimit: RateLimitPresets.relaxed };
 
-  const supabase = await createSupabaseAdminClient();
-  const requestedOrgId = getRequestedOrgId(req);
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-  
-  const { data, error} = await supabase
+// GET: student ids favourited by the current recruiter. Response: { data: { favorites: string[] } }
+export const GET = recruiterRoute(RATE, async (_req: NextRequest, access) => {
+  const { data, error } = await access.admin
     .from('recruiter_favorites')
     .select('student_id, created_at')
-    .eq('recruiter_id', user.id)
-    .in('organization_id', targetOrgIds) // Multi-org filter
-    .order('created_at', { ascending: false });
-
+    .eq('recruiter_id', access.user.id)
+    .in('organization_id', access.orgIds)
+    .order('created_at', { ascending: false })
+    .limit(1000);
   if (error) {
-    console.error('Error fetching favorites:', error);
-    throw apiError.internal('Failed to fetch favorites');
+    console.error('[recruiter-favorites] fetch failed', error);
+    return apiError.internal('Failed to fetch favorites');
   }
+  return success({ favorites: (data ?? []).map((f: { student_id: string }) => f.student_id) });
+});
 
-  // Return array of student IDs
-  return success({
-    favorites: data?.map((f: { student_id: string }) => f.student_id) || []
-  });
-}
+// POST: add a favourite (stored against the student's own organisation)
+export const POST = recruiterRoute(RATE, async (req: NextRequest, access) => {
+  const parsed = await readJsonObject(req);
+  if (!parsed.ok) return parsed.response;
+  const { studentId } = parsed.body;
+  if (!isUuid(studentId)) return apiError.badRequest('A valid studentId is required');
 
-// POST: Add a student to favorites (org-scoped)
-export async function POST(req: NextRequest) {
-  const userWithRole = await getServerUserWithRole();
-  
-  if (!userWithRole) {
-    throw apiError.unauthorized();
-  }
-  
-  const { user, role } = userWithRole;
-  
-  if (role !== 'recruiter' && role !== 'admin') {
-    throw apiError.unauthorized();
-  }
+  const studentOrgId = (await getApprovedStudentOrgs(access.admin, [studentId], access.orgIds)).get(studentId);
+  if (!studentOrgId) return apiError.notFound('Student not found');
 
-  const { studentId } = await req.json();
-  
-  if (!studentId) {
-    throw apiError.badRequest('Student ID required');
-  }
-
-  const supabase = await createSupabaseAdminClient();
-  const requestedOrgId = getRequestedOrgId(req);
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-  const targetOrgId = requestedOrgId || ('organizationId' in orgContext ? orgContext.organizationId : targetOrgIds[0]);
-  
-  // Insert favorite with organization (will fail if already exists due to unique constraint)
-  const { data, error } = await supabase
+  const { data, error } = await access.admin
     .from('recruiter_favorites')
-    .insert({
-      recruiter_id: user.id,
-      student_id: studentId,
-      organization_id: targetOrgId // Multi-org field
-    })
+    .insert({ recruiter_id: access.user.id, student_id: studentId, organization_id: studentOrgId })
     .select()
     .single();
-
   if (error) {
-    // Check if already exists
     if (error.code === '23505') {
-      return success({ 
-        message: 'Already in favorites',
-        favorite: { student_id: studentId }
-      });
+      return success({ message: 'Already in favorites', favorite: { student_id: studentId } });
     }
-    console.error('Error adding favorite:', error);
-    throw apiError.internal('Failed to add favorite');
+    console.error('[recruiter-favorites] insert failed', error);
+    return apiError.internal('Failed to add favorite');
   }
+  return success({ message: 'Added to favorites', favorite: data });
+});
 
-  return success({ 
-    message: 'Added to favorites',
-    favorite: data
-  });
-}
+// DELETE: remove a favourite (?studentId=)
+export const DELETE = recruiterRoute(RATE, async (req: NextRequest, access) => {
+  const studentId = new URL(req.url).searchParams.get('studentId');
+  if (!isUuid(studentId)) return apiError.badRequest('A valid studentId is required');
 
-// DELETE: Remove a student from favorites (org-scoped)
-export async function DELETE(req: NextRequest) {
-  const userWithRole = await getServerUserWithRole();
-  
-  if (!userWithRole) {
-    throw apiError.unauthorized();
-  }
-  
-  const { user, role } = userWithRole;
-  
-  if (role !== 'recruiter' && role !== 'admin') {
-    throw apiError.unauthorized();
-  }
-
-  const { searchParams } = new URL(req.url);
-  const studentId = searchParams.get('studentId');
-  
-  if (!studentId) {
-    throw apiError.badRequest('Student ID required');
-  }
-
-  const supabase = await createSupabaseAdminClient();
-  const requestedOrgId = getRequestedOrgId(req);
-  const orgContext = await getOrganizationContext(user, requestedOrgId);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
-  
-  const { error } = await supabase
+  const { error } = await access.admin
     .from('recruiter_favorites')
     .delete()
-    .eq('recruiter_id', user.id)
+    .eq('recruiter_id', access.user.id)
     .eq('student_id', studentId)
-    .in('organization_id', targetOrgIds); // Multi-org filter
-
+    .in('organization_id', access.orgIds);
   if (error) {
-    console.error('Error removing favorite:', error);
-    throw apiError.internal('Failed to remove favorite');
+    console.error('[recruiter-favorites] delete failed', error);
+    return apiError.internal('Failed to remove favorite');
   }
-
   return success({ message: 'Removed from favorites' });
-}
-
+});

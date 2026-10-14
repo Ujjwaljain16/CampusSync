@@ -1,77 +1,43 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { NextResponse } from 'next/server';
+import { withSuperAdmin, apiError, isUuid, writeAudit } from '@/lib/api';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
+import { getTargetRoleRow } from '@/lib/api/utils/roleIntegrity';
+import { applyRoleChange } from '@/lib/api/utils/roleMutations';
 
 /**
  * DELETE /api/v2/admin/super/organizations/[orgId]/admins/[adminId]
- * Remove an admin from an organization (super admin only)
- * Cannot remove primary admins
+ * Remove an admin from an organization (super admin only).
+ * Refused for the primary admin (transfer first) and for the last admin.
  */
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; adminId: string }> }
-) {
-  try {
-    const supabase = await createSupabaseServerClient();
+export const DELETE = withSuperAdmin<{ orgId: string; adminId: string }>(async (_request, { user, params }) => {
+  const { orgId, adminId } = params;
+  if (!isUuid(orgId) || !isUuid(adminId)) return apiError.badRequest('Invalid id');
 
-    // Check if user is super admin
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const db = await createSupabaseAdminClient();
 
-    const { data: userRole, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .single();
-
-    if (roleError || userRole?.role !== 'super_admin') {
-      return NextResponse.json({ error: 'Super admin access required' }, { status: 403 });
-    }
-
-    const { orgId, adminId } = await params;
-
-    // Check if admin exists and is not primary admin
-    const { data: adminRole, error: adminCheckError } = await supabase
-      .from('user_roles')
-      .select('role, is_primary_admin')
-      .eq('user_id', adminId)
-      .eq('organization_id', orgId)
-      .single();
-
-    if (adminCheckError || !adminRole) {
-      return NextResponse.json({ error: 'Admin not found in this organization' }, { status: 404 });
-    }
-
-    if (adminRole.is_primary_admin) {
-      return NextResponse.json(
-        { 
-          error: 'Cannot remove primary admin',
-          message: 'Primary admins cannot be removed. Transfer primary admin status first.'
-        },
-        { status: 403 }
-      );
-    }
-
-    // Remove admin role
-    const { error: deleteError } = await supabase
-      .from('user_roles')
-      .delete()
-      .eq('user_id', adminId)
-      .eq('organization_id', orgId);
-
-    if (deleteError) {
-      throw deleteError;
-    }
-
-    console.log(`[REMOVE_ADMIN] ✅ Admin removed: ${adminId} from org ${orgId}`);
-
-    return NextResponse.json({ message: 'Admin removed successfully' });
-  } catch (error: unknown) {
-    console.error('DELETE /api/v2/admin/super/organizations/[orgId]/admins/[adminId] error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to remove admin' },
-      { status: 500 }
-    );
+  const adminRole = await getTargetRoleRow(db, adminId, orgId);
+  if (!adminRole || !['org_admin', 'admin'].includes(adminRole.role)) {
+    return apiError.notFound('Admin not found in this organization');
   }
-}
+
+  // Shared guarded path: primary admin / last admin / self-removal are refused there
+  const result = await applyRoleChange(db, {
+    actorId: user.id,
+    actorRole: 'super_admin',
+    orgId,
+    targetUserId: adminId,
+    newRole: null,
+  });
+  if (!result.ok) return result.response;
+
+  await writeAudit(db, {
+    actorId: user.id,
+    action: 'org_admin_remove',
+    targetType: 'user_role',
+    targetId: adminId,
+    organizationId: orgId,
+    details: { old_role: adminRole.role },
+  });
+
+  return NextResponse.json({ message: 'Admin removed successfully' });
+});

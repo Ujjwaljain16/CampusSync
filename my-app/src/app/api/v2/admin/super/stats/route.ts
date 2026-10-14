@@ -1,73 +1,45 @@
 import { NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { withSuperAdmin, apiError } from '@/lib/api';
+import { createSupabaseAdminClient } from '@/lib/supabaseServer';
 
 /**
  * GET /api/v2/admin/super/stats
  * Get platform-wide statistics (super admin only)
  */
-export async function GET() {
+export const GET = withSuperAdmin(async () => {
+  const db = await createSupabaseAdminClient();
+
+  const count = async (table: string, apply?: (q: ReturnType<typeof base>) => ReturnType<typeof base>) => {
+    const q = apply ? apply(base(table)) : base(table);
+    const { count: c, error } = await q;
+    if (error) throw error;
+    return c || 0;
+  };
+  const base = (table: string) => db.from(table).select('*', { count: 'exact', head: true });
+
   try {
-    const supabase = await createSupabaseServerClient();
-
-    // Check if user is super admin
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { data: userRole, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .single();
-
-    if (roleError || userRole?.role !== 'super_admin') {
-      return NextResponse.json({ error: 'Super admin access required' }, { status: 403 });
-    }
-
-    // Get platform statistics
-    const { count: totalOrganizations } = await supabase
-      .from('organizations')
-      .select('*', { count: 'exact', head: true });
-
-    const { count: totalUsers } = await supabase
-      .from('user_roles')
-      .select('*', { count: 'exact', head: true });
-
-    const { count: totalStudents } = await supabase
-      .from('user_roles')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'student');
-
-    const { count: totalFaculty } = await supabase
-      .from('user_roles')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'faculty');
-
-    const { count: totalCertificates } = await supabase
-      .from('certificates')
-      .select('*', { count: 'exact', head: true });
-
-    const { count: activeVerifications } = await supabase
-      .from('certificates')
-      .select('*', { count: 'exact', head: true })
-      .eq('verification_status', 'pending');
+    const [totalOrganizations, totalUsers, totalStudents, totalFaculty, totalCertificates, activeVerifications] =
+      await Promise.all([
+        count('organizations'),
+        count('user_roles'),
+        count('user_roles', (q) => q.eq('role', 'student')),
+        count('user_roles', (q) => q.eq('role', 'faculty')),
+        count('certificates'),
+        count('certificates', (q) => q.eq('verification_status', 'pending')),
+      ]);
 
     return NextResponse.json({
       data: {
-        total_organizations: totalOrganizations || 0,
-        total_users: totalUsers || 0,
-        total_students: totalStudents || 0,
-        total_faculty: totalFaculty || 0,
-        total_certificates: totalCertificates || 0,
-        active_verifications: activeVerifications || 0
-      }
+        total_organizations: totalOrganizations,
+        total_users: totalUsers,
+        total_students: totalStudents,
+        total_faculty: totalFaculty,
+        total_certificates: totalCertificates,
+        active_verifications: activeVerifications,
+      },
     });
   } catch (error: unknown) {
     console.error('GET /api/v2/admin/super/stats error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch statistics' },
-      { status: 500 }
-    );
+    return apiError.internal('Failed to fetch statistics');
   }
-}
+});

@@ -1,71 +1,57 @@
-import { withRole, success, getOrganizationContext, isRecruiterContext } from '@/lib/api';
+import { withRole, success, apiError, resolveAdminOrg } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
-export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (_req, { user }) => {
+export const GET = withRole(['admin', 'org_admin', 'super_admin'], async (req, { user }) => {
   const supabase = await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user);
-  
-  // Super admins can see all organizations, org admins see only their org
-  // Handle both OrganizationContext and RecruiterContext
-  let orgFilter: Record<string, unknown> = {};
-  if (!orgContext.isSuperAdmin) {
-    if (isRecruiterContext(orgContext)) {
-      // Recruiters shouldn't access admin dashboard, but handle gracefully
-      if (orgContext.selectedOrganization) {
-        orgFilter = { organization_id: orgContext.selectedOrganization };
-      } else {
-        // Multiple orgs - use first accessible one or empty for safety
-        orgFilter = orgContext.accessibleOrganizations.length > 0 
-          ? { organization_id: orgContext.accessibleOrganizations[0] }
-          : {};
-      }
-    } else {
-      orgFilter = { organization_id: orgContext.organizationId };
-    }
-  }
-  
-  // Get total users in organization(s)
-  const { count: totalUsers } = await supabase
+  const requestedOrg = req.headers.get('X-Organization-ID') || new URL(req.url).searchParams.get('organization_id');
+  const scope = await resolveAdminOrg(user, requestedOrg, 'admin');
+  const allOrgs = scope.isSuperAdmin && !scope.requested;
+
+  // Org admins see only their organization; a super admin without a selection sees all
+  const orgFilter: Record<string, unknown> = allOrgs ? {} : { organization_id: scope.organizationId };
+
+  const { count: totalUsers, error: usersError } = await supabase
     .from('profiles')
     .select('*', { count: 'exact', head: true })
     .match(orgFilter);
-  
-  // Get total certificates in organization(s)
-  const { count: totalCertificates } = await supabase
+
+  const { count: totalCertificates, error: certsError } = await supabase
     .from('certificates')
     .select('*', { count: 'exact', head: true })
     .match(orgFilter);
-  
-  // Get pending role requests for organization(s)
-  const { count: pendingApprovals } = await supabase
+
+  const { count: pendingApprovals, error: pendingError } = await supabase
     .from('role_requests')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'pending')
     .match(orgFilter);
-  
-  // Get recent activity (last 10 audit logs for organization)
+
+  if (usersError || certsError || pendingError) {
+    console.error('[admin/dashboard] count errors:', { usersError, certsError, pendingError });
+    return apiError.internal('Failed to load dashboard');
+  }
+
   const { data: recentActivity } = await supabase
     .from('audit_logs')
-    .select('action, created_at, user_id')
+    .select('action, created_at, user_id, actor_id')
     .match(orgFilter)
     .order('created_at', { ascending: false })
     .limit(10);
-  
+
   return success({
     user: {
       id: user.id,
       email: user.email,
-      role: orgContext.role,
-      organizationId: isRecruiterContext(orgContext) 
-        ? orgContext.selectedOrganization || orgContext.accessibleOrganizations[0] || null
-        : orgContext.organizationId,
-      isSuperAdmin: orgContext.isSuperAdmin
+      role: scope.role,
+      organizationId: scope.organizationId,
+      isSuperAdmin: scope.isSuperAdmin
     },
     stats: {
       total_users: totalUsers || 0,
       total_certificates: totalCertificates || 0,
       pending_approvals: pendingApprovals || 0,
-      system_health: 'good'
+      // Not measured: do not claim "good"
+      system_health: null
     },
     recent_activity: recentActivity || [],
     message: 'Admin dashboard loaded successfully'

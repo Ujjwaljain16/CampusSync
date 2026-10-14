@@ -1,219 +1,51 @@
-# Error Handling Architecture - Visual Overview
+# Error handling
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         CampusSync Error Handling Flow                       │
-└─────────────────────────────────────────────────────────────────────────────┘
+What exists today, layer by layer. File references are relative to `my-app/`.
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              USER INTERFACE                                  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-        ┌───────────────────────────────────────────────┐
-        │         GLOBAL ERROR BOUNDARY                  │
-        │  (Catches all unhandled component errors)     │
-        │                                                │
-        │  • Shows fallback UI                          │
-        │  • Tracks errors                              │
-        │  • Provides recovery options                  │
-        └───────────────────────────────────────────────┘
-                                    │
-                                    ▼
-        ┌───────────────────────────────────────────────┐
-        │           TOAST PROVIDER                       │
-        │  (User feedback notifications)                │
-        │                                                │
-        │  • Success toasts                             │
-        │  • Error toasts                               │
-        │  • Warning toasts                             │
-        │  • Info toasts                                │
-        └───────────────────────────────────────────────┘
-                                    │
-                                    ▼
-        ┌───────────────────────────────────────────────┐
-        │         COMPONENT LAYER                        │
-        │                                                │
-        │  ┌──────────────────────────────────────┐    │
-        │  │  Component State Management          │    │
-        │  │  • loading: boolean                  │    │
-        │  │  • error: string | null              │    │
-        │  │  • data: T | null                    │    │
-        │  └──────────────────────────────────────┘    │
-        │                                                │
-        │  ┌──────────────────────────────────────┐    │
-        │  │  Error Handling Pattern              │    │
-        │  │  1. setLoading(true)                 │    │
-        │  │  2. setError(null)                   │    │
-        │  │  3. try { ... }                      │    │
-        │  │  4. catch { setError, toast }        │    │
-        │  │  5. finally { setLoading(false) }    │    │
-        │  └──────────────────────────────────────┘    │
-        └───────────────────────────────────────────────┘
-                                    │
-                                    ▼
-        ┌───────────────────────────────────────────────┐
-        │            API LAYER                           │
-        │                                                │
-        │  ┌──────────────────────────────────────┐    │
-        │  │  Error Handler Middleware            │    │
-        │  │  • Wraps all API routes              │    │
-        │  │  • Catches thrown errors             │    │
-        │  │  • Returns formatted responses       │    │
-        │  └──────────────────────────────────────┘    │
-        │                                                │
-        │  ┌──────────────────────────────────────┐    │
-        │  │  Standard Error Responses            │    │
-        │  │  • 400 Bad Request                   │    │
-        │  │  • 401 Unauthorized                  │    │
-        │  │  • 403 Forbidden                     │    │
-        │  │  • 404 Not Found                     │    │
-        │  │  • 422 Validation Error              │    │
-        │  │  • 500 Internal Server Error         │    │
-        │  └──────────────────────────────────────┘    │
-        └───────────────────────────────────────────────┘
-                                    │
-                                    ▼
-        ┌───────────────────────────────────────────────┐
-        │         ERROR MONITORING                       │
-        │                                                │
-        │  • Tracks all errors with severity            │
-        │  • Logs to console (dev)                      │
-        │  • Sends to external service (prod)           │
-        │  • Performance tracking                       │
-        │  • User context                               │
-        └───────────────────────────────────────────────┘
+## UI
 
+| Piece | File | Behaviour |
+|-------|------|-----------|
+| Error boundary | `src/components/ErrorBoundary.tsx`, mounted in `src/app/layout.tsx` | Catches render errors below it, shows a fallback UI, reports to `errorMonitoring`. There are no per-route `error.tsx` / `global-error.tsx` files. |
+| Toasts | `src/components/ui/toast.tsx` (`ToastProvider`, `useToast`) | Variants default/success/error/warning/info; auto-dismiss after 5 s unless a `duration` is passed. |
+| Component pattern | pages and components | `loading` / `error` state with `try { ... } catch { setError; toast } finally { setLoading(false) }`. |
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           ERROR FLOW DIAGRAM                                 │
-└─────────────────────────────────────────────────────────────────────────────┘
+## API
 
-                              User Action
-                                   │
-                                   ▼
-                        ┌──────────────────┐
-                        │  User clicks     │
-                        │  button/submit   │
-                        └──────────────────┘
-                                   │
-                                   ▼
-                        ┌──────────────────┐
-                        │  Component sets  │
-                        │  loading = true  │
-                        │  error = null    │
-                        └──────────────────┘
-                                   │
-                                   ▼
-                        ┌──────────────────┐
-                        │  API Call        │
-                        └──────────────────┘
-                                   │
-                        ┌──────────┴──────────┐
-                        │                     │
-                   Success                 Failure
-                        │                     │
-                        ▼                     ▼
-             ┌──────────────────┐  ┌──────────────────┐
-             │  Update state    │  │  Catch error     │
-             │  Show success    │  │  Set error state │
-             │  toast           │  │  Show error toast│
-             └──────────────────┘  │  Track error     │
-                        │           └──────────────────┘
-                        │                     │
-                        └──────────┬──────────┘
-                                   │
-                                   ▼
-                        ┌──────────────────┐
-                        │  finally block   │
-                        │  loading = false │
-                        └──────────────────┘
-                                   │
-                                   ▼
-                        ┌──────────────────┐
-                        │  UI Updates      │
-                        │  User sees       │
-                        │  feedback        │
-                        └──────────────────┘
+Routes return JSON through helpers in `src/lib/api/utils/response.ts`:
 
+- `success(data, message?, status = 200)` returns `{ data, message? }`.
+- `error(message, status = 500, details?)` and `apiError.{badRequest 400, unauthorized 401, forbidden 403, notFound 404,
+  validation 422, internal 500}` return `{ error, details? }`.
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       ERROR SEVERITY LEVELS                                  │
-└─────────────────────────────────────────────────────────────────────────────┘
+Wrappers in `src/lib/api/middleware/`:
 
-    LOW          MEDIUM          HIGH          CRITICAL
-     │             │              │               │
-     │             │              │               │
-     ▼             ▼              ▼               ▼
-┌─────────┐  ┌─────────┐  ┌─────────┐  ┌──────────┐
-│ Warnings│  │ Feature │  │Important│  │ System   │
-│ Non-    │  │ Failures│  │ Failures│  │ Breaking │
-│ Critical│  │         │  │         │  │          │
-└─────────┘  └─────────┘  └─────────┘  └──────────┘
-   Console      Toast        Toast        Toast +
-    Only         Only         +            Alert +
-                            Track          Track +
-                                          Email
+- `withAuth(handler)` returns 401 when there is no authenticated user and converts a thrown `Response` into the response.
+- `withRole(roles, handler)` returns 403 unless the caller holds one of the roles (see
+  [Security-Auth-flow.md](./Security-Auth-flow.md) for the exact semantics) and converts a thrown `Response`.
+- `withErrorHandler(handler)` catches any thrown error, logs it with `console.error` and maps it to a response by
+  message pattern (`JWT`/`token` to 401, `not found` to 404, `duplicate`/`unique` to 422, anything else to 500 with
+  the error message). `compose(...)` combines wrappers.
 
+Important:
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       TOAST NOTIFICATION TYPES                               │
-└─────────────────────────────────────────────────────────────────────────────┘
+- **These wrappers are opt-in. Not every route uses them** (at the time of writing `withErrorHandler` is used by no
+  route file; `withAuth` by 10 and `withRole` by 37 of the 100 route files). Routes without a wrapper handle their own
+  errors, and an uncaught exception results in Next.js's default 500.
+- `withErrorHandler` returns `err.message` for unknown errors; that can leak internal details to clients. Prefer a
+  generic message for 5xx responses.
+- The test `tests/security/route-inventory.test.ts` lists every route that has no recognised auth guard.
 
-    ┌───────────┐     ┌───────────┐     ┌───────────┐     ┌───────────┐
-    │ ✓ SUCCESS │     │ ✗ ERROR   │     │ ⚠ WARNING │     │ ⓘ INFO    │
-    │           │     │           │     │           │     │           │
-    │ Green     │     │ Red       │     │ Yellow    │     │ Blue      │
-    │ Checkmark │     │ X Circle  │     │ Triangle  │     │ Info Icon │
-    └───────────┘     └───────────┘     └───────────┘     └───────────┘
-         │                  │                  │                  │
-         └──────────────────┴──────────────────┴──────────────────┘
-                                   │
-                                   ▼
-                        Auto-dismiss after 5s
-                        (configurable duration)
+## Monitoring
 
+- `src/lib/errorMonitoring.ts` keeps the last 1000 errors **in memory** (per process), logs them to the console in
+  development and installs `window` error / unhandledrejection listeners in the browser.
+- The "send to external service" and performance-analytics hooks in that file are **placeholders**: no Sentry, no
+  alerting and no email for critical errors are configured. There is no `/api/monitoring/error` route.
+- Production visibility today is whatever your host captures from stdout/stderr (`console.*`, `src/lib/logger.ts`).
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    COMPONENT ERROR STATE MACHINE                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+## Not implemented
 
-                        ┌──────────┐
-                        │  IDLE    │
-                        └──────────┘
-                             │
-                    User Action/Mount
-                             │
-                             ▼
-                        ┌──────────┐
-                        │ LOADING  │
-                        │          │
-                        │ • Show   │
-                        │   spinner│
-                        │ • Disable│
-                        │   buttons│
-                        └──────────┘
-                             │
-                  ┌──────────┴──────────┐
-                  │                     │
-             Success                 Error
-                  │                     │
-                  ▼                     ▼
-            ┌──────────┐         ┌──────────┐
-            │ SUCCESS  │         │  ERROR   │
-            │          │         │          │
-            │ • Show   │         │ • Show   │
-            │   data   │         │   error  │
-            │ • Success│         │ • Retry  │
-            │   toast  │         │   button │
-            └──────────┘         └──────────┘
-                  │                     │
-                  └──────────┬──────────┘
-                             │
-                          Retry
-                             │
-                             ▼
-                        ┌──────────┐
-                        │ LOADING  │
-                        └──────────┘
-```
+- External error tracking and alerting.
+- A uniform API error envelope across all routes (most use the helpers above; some return ad-hoc JSON).
+- Distributed rate limiting (see the README's known limitations).

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { withRole, success, apiError, parseAndValidateBody } from '@/lib/api';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { withRole, withSuperAdmin, success, apiError, parseAndValidateBody, isUuid, writeAudit } from '@/lib/api';
+import { createSupabaseAdminClient, createSupabaseServerClient } from '@/lib/supabaseServer';
 
 interface TrustedIssuerInput {
   name: string;
@@ -11,11 +11,73 @@ interface TrustedIssuerInput {
   is_active?: boolean;
 }
 
+const HOSTNAME_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
+
+type Cleaned = Partial<{
+  name: string;
+  domain: string | null;
+  template_patterns: string[];
+  confidence_threshold: number;
+  qr_verification_url: string | null;
+  is_active: boolean;
+}>;
+
+/** Validate the fields that are present; returns an error message or the cleaned fields. */
+function validateIssuer(body: Partial<TrustedIssuerInput>, requireName: boolean): { error: string } | { value: Cleaned } {
+  const out: Cleaned = {};
+
+  if (body.name !== undefined || requireName) {
+    if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > 200) {
+      return { error: 'name must be a non-empty string (max 200 characters)' };
+    }
+    out.name = body.name.trim();
+  }
+  if (body.domain !== undefined && body.domain !== null && body.domain !== '') {
+    if (typeof body.domain !== 'string' || !HOSTNAME_RE.test(body.domain.trim())) {
+      return { error: 'domain must be a valid hostname' };
+    }
+    out.domain = body.domain.trim().toLowerCase();
+  }
+  if (body.template_patterns !== undefined) {
+    if (
+      !Array.isArray(body.template_patterns) ||
+      body.template_patterns.length > 50 ||
+      body.template_patterns.some((p) => typeof p !== 'string' || p.length > 200)
+    ) {
+      return { error: 'template_patterns must be an array of up to 50 short strings' };
+    }
+    out.template_patterns = body.template_patterns;
+  }
+  if (body.confidence_threshold !== undefined) {
+    const c = body.confidence_threshold;
+    if (typeof c !== 'number' || !Number.isFinite(c) || c < 0 || c > 1) {
+      return { error: 'confidence_threshold must be a number between 0 and 1' };
+    }
+    out.confidence_threshold = c;
+  }
+  if (body.qr_verification_url !== undefined && body.qr_verification_url !== null && body.qr_verification_url !== '') {
+    let url: URL | null = null;
+    try {
+      url = typeof body.qr_verification_url === 'string' ? new URL(body.qr_verification_url) : null;
+    } catch {
+      url = null;
+    }
+    if (!url || url.protocol !== 'https:' || body.qr_verification_url.length > 2048) {
+      return { error: 'qr_verification_url must be a valid https URL' };
+    }
+    out.qr_verification_url = url.toString();
+  }
+  if (body.is_active !== undefined) {
+    if (typeof body.is_active !== 'boolean') return { error: 'is_active must be a boolean' };
+    out.is_active = body.is_active;
+  }
+  return { value: out };
+}
+
+// Trusted issuers are GLOBAL resources (organization_id = NULL): every admin may read them...
 export const GET = withRole(['admin', 'org_admin', 'super_admin'], async () => {
   const supabase = await createSupabaseServerClient();
-  
-  // NOTE: Trusted issuers are global resources (organization_id = NULL)
-  // All admins can view trusted issuers regardless of organization
+
   const { data, error } = await supabase
     .from('trusted_issuers')
     .select('*')
@@ -24,31 +86,32 @@ export const GET = withRole(['admin', 'org_admin', 'super_admin'], async () => {
 
   if (error) {
     console.error('Error fetching trusted issuers:', error);
-    throw apiError.internal(error.message);
+    return apiError.internal('Failed to fetch trusted issuers');
   }
 
   return success(data);
 });
 
-export const POST = withRole(['admin', 'super_admin'], async (req: NextRequest) => {
+// ...but only a super_admin may change them (a tenant admin must not alter what
+// every other tenant trusts).
+export const POST = withSuperAdmin(async (req: NextRequest, { user }) => {
   const result = await parseAndValidateBody<TrustedIssuerInput>(req, ['name']);
   if (result.error) return result.error;
 
-  const body = result.data;
+  const cleaned = validateIssuer(result.data, true);
+  if ('error' in cleaned) return apiError.validation(cleaned.error);
+  const v = cleaned.value;
 
-  const supabase = await createSupabaseServerClient();
-  
-  // NOTE: Trusted issuers are global resources (organization_id = NULL)
-  // Only super_admin should create trusted issuers (global resources)
-  const { data, error } = await supabase
+  const admin = await createSupabaseAdminClient();
+  const { data, error } = await admin
     .from('trusted_issuers')
     .insert({
-      name: body.name,
-      domain: body.domain,
-      template_patterns: body.template_patterns || [],
-      confidence_threshold: body.confidence_threshold || 0.9,
-      qr_verification_url: body.qr_verification_url,
-      is_active: body.is_active !== undefined ? body.is_active : true,
+      name: v.name,
+      domain: v.domain ?? null,
+      template_patterns: v.template_patterns ?? [],
+      confidence_threshold: v.confidence_threshold ?? 0.9,
+      qr_verification_url: v.qr_verification_url ?? null,
+      is_active: v.is_active ?? true,
       organization_id: null, // Global resource
     })
     .select()
@@ -56,67 +119,82 @@ export const POST = withRole(['admin', 'super_admin'], async (req: NextRequest) 
 
   if (error) {
     console.error('Error creating trusted issuer:', error);
-    throw apiError.internal(error.message);
+    return apiError.internal('Failed to create trusted issuer');
   }
+
+  await writeAudit(admin, {
+    actorId: user.id,
+    action: 'trusted_issuer_create',
+    targetType: 'trusted_issuer',
+    targetId: data?.id ?? null,
+    details: { name: v.name },
+  });
 
   return success(data, 'Trusted issuer created successfully', 201);
 });
 
-export const PUT = withRole(['admin', 'super_admin'], async (req: NextRequest) => {
+export const PUT = withSuperAdmin(async (req: NextRequest, { user }) => {
   const result = await parseAndValidateBody<{ id: string } & TrustedIssuerInput>(req, ['id']);
   if (result.error) return result.error;
 
   const body = result.data;
+  if (!isUuid(body.id)) return apiError.validation('Invalid id');
 
-  const supabase = await createSupabaseServerClient();
-  
-  // NOTE: Only update global trusted issuers (organization_id = NULL)
-  const { data, error } = await supabase
+  const cleaned = validateIssuer(body, false);
+  if ('error' in cleaned) return apiError.validation(cleaned.error);
+
+  const admin = await createSupabaseAdminClient();
+  const { data, error } = await admin
     .from('trusted_issuers')
-    .update({
-      name: body.name,
-      domain: body.domain,
-      template_patterns: body.template_patterns,
-      confidence_threshold: body.confidence_threshold,
-      qr_verification_url: body.qr_verification_url,
-      is_active: body.is_active,
-      updated_at: new Date().toISOString(),
-    })
+    .update({ ...cleaned.value, updated_at: new Date().toISOString() })
     .eq('id', body.id)
     .is('organization_id', null) // Only update global resources
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error('Error updating trusted issuer:', error);
-    throw apiError.internal(error.message);
+    return apiError.internal('Failed to update trusted issuer');
   }
+  if (!data) return apiError.notFound('Trusted issuer not found');
+
+  await writeAudit(admin, {
+    actorId: user.id,
+    action: 'trusted_issuer_update',
+    targetType: 'trusted_issuer',
+    targetId: body.id,
+    details: { fields: Object.keys(cleaned.value) },
+  });
 
   return success(data, 'Trusted issuer updated successfully');
 });
 
-export const DELETE = withRole(['admin', 'super_admin'], async (req: NextRequest) => {
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get('id');
-  
-  if (!id) {
-    throw apiError.badRequest('Missing id parameter');
-  }
+export const DELETE = withSuperAdmin(async (req: NextRequest, { user }) => {
+  const id = new URL(req.url).searchParams.get('id');
 
-  const supabase = await createSupabaseServerClient();
-  
-  // NOTE: Only delete global trusted issuers (organization_id = NULL)
-  const { error } = await supabase
+  if (!id) return apiError.badRequest('Missing id parameter');
+  if (!isUuid(id)) return apiError.validation('Invalid id');
+
+  const admin = await createSupabaseAdminClient();
+  const { data, error } = await admin
     .from('trusted_issuers')
     .delete()
     .eq('id', id)
-    .is('organization_id', null); // Only delete global resources
+    .is('organization_id', null) // Only delete global resources
+    .select('id');
 
   if (error) {
     console.error('Error deleting trusted issuer:', error);
-    throw apiError.internal(error.message);
+    return apiError.internal('Failed to delete trusted issuer');
   }
+  if (!data || data.length === 0) return apiError.notFound('Trusted issuer not found');
+
+  await writeAudit(admin, {
+    actorId: user.id,
+    action: 'trusted_issuer_delete',
+    targetType: 'trusted_issuer',
+    targetId: id,
+  });
 
   return success({ deleted: true }, 'Trusted issuer deleted successfully');
 });
-

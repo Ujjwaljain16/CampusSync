@@ -1,13 +1,18 @@
 // Webhook system for verification callbacks
 import { NextRequest } from 'next/server';
 import { success, apiError } from '@/lib/api';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let adminClient: SupabaseClient | null = null;
+/** Created lazily so importing this module (e.g. during `next build`) needs no secrets. */
+function db() {
+  adminClient ??= createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  return adminClient;
+}
 
 // Webhook signature verification
 function verifyWebhookSignature(payload: string, signature: string, secret: string): boolean {
@@ -21,7 +26,7 @@ function verifyWebhookSignature(payload: string, signature: string, secret: stri
   return crypto.timingSafeEqual(provided, expected);
 }
 
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest) {
   const body = await request.text();
   const signature = request.headers.get('x-webhook-signature');
   const webhookSecret = process.env.WEBHOOK_SECRET;
@@ -86,7 +91,7 @@ async function handleVerificationCompleted(payload: Record<string, unknown>) {
   // Get organization from certificate if not provided
   let orgId = organizationId as string | undefined;
   if (!orgId && credentialId) {
-    const { data: cert } = await supabase
+    const { data: cert } = await db()
       .from('certificates')
       .select('organization_id')
       .eq('id', credentialId)
@@ -95,7 +100,7 @@ async function handleVerificationCompleted(payload: Record<string, unknown>) {
   }
   
   // Log verification completion with organization
-  await supabase.from('audit_logs').insert({
+  await db().from('audit_logs').insert({
     actor_id: null, // System event
     organization_id: orgId,
     target_id: credentialId,
@@ -112,7 +117,7 @@ async function handleVerificationCompleted(payload: Record<string, unknown>) {
 
   // Update any pending verification records
   if (credentialId) {
-    await supabase
+    await db()
       .from('verification_requests')
       .update({
         status: status === 'verified' ? 'completed' : 'failed',
@@ -130,7 +135,7 @@ async function handleVerificationFailed(payload: Record<string, unknown>) {
   // Get organization from certificate if not provided
   let orgId = organizationId as string | undefined;
   if (!orgId && credentialId) {
-    const { data: cert } = await supabase
+    const { data: cert } = await db()
       .from('certificates')
       .select('organization_id')
       .eq('id', credentialId)
@@ -139,7 +144,7 @@ async function handleVerificationFailed(payload: Record<string, unknown>) {
   }
   
   // Log verification failure with organization
-  await supabase.from('audit_logs').insert({
+  await db().from('audit_logs').insert({
     actor_id: null,
     organization_id: orgId,
     target_id: credentialId,
@@ -155,7 +160,7 @@ async function handleVerificationFailed(payload: Record<string, unknown>) {
 
   // Update verification status
   if (credentialId) {
-    await supabase
+    await db()
       .from('verification_requests')
       .update({
         status: 'failed',
@@ -174,7 +179,7 @@ async function handleCertificateApproved(payload: Record<string, unknown>) {
   // Get organization from certificate if not provided
   let orgId = organizationId as string | undefined;
   if (!orgId && certificateId) {
-    const { data: cert } = await supabase
+    const { data: cert } = await db()
       .from('certificates')
       .select('organization_id')
       .eq('id', certificateId)
@@ -183,7 +188,7 @@ async function handleCertificateApproved(payload: Record<string, unknown>) {
   }
   
   // Log certificate approval with organization
-  await supabase.from('audit_logs').insert({
+  await db().from('audit_logs').insert({
     actor_id: approvedBy,
     organization_id: orgId,
     target_id: certificateId,
@@ -203,7 +208,7 @@ async function handleCertificateRejected(payload: Record<string, unknown>) {
   // Get organization from certificate if not provided
   let orgId = organizationId as string | undefined;
   if (!orgId && certificateId) {
-    const { data: cert } = await supabase
+    const { data: cert } = await db()
       .from('certificates')
       .select('organization_id')
       .eq('id', certificateId)
@@ -212,7 +217,7 @@ async function handleCertificateRejected(payload: Record<string, unknown>) {
   }
   
   // Log certificate rejection with organization
-  await supabase.from('audit_logs').insert({
+  await db().from('audit_logs').insert({
     actor_id: rejectedBy,
     organization_id: orgId,
     target_id: certificateId,
@@ -232,7 +237,7 @@ async function handleVCIssued(payload: Record<string, unknown>) {
   // Get organization from certificate if not provided
   let orgId = organizationId as string | undefined;
   if (!orgId && credentialId) {
-    const { data: cert } = await supabase
+    const { data: cert } = await db()
       .from('certificates')
       .select('organization_id')
       .eq('id', credentialId)
@@ -241,7 +246,7 @@ async function handleVCIssued(payload: Record<string, unknown>) {
   }
   
   // Log VC issuance with organization
-  await supabase.from('audit_logs').insert({
+  await db().from('audit_logs').insert({
     actor_id: null,
     organization_id: orgId,
     target_id: credentialId,
@@ -262,7 +267,7 @@ async function handleVCRevoked(payload: Record<string, unknown>) {
   // Get organization from certificate if not provided
   let orgId = organizationId as string | undefined;
   if (!orgId && credentialId) {
-    const { data: cert } = await supabase
+    const { data: cert } = await db()
       .from('certificates')
       .select('organization_id')
       .eq('id', credentialId)
@@ -271,7 +276,7 @@ async function handleVCRevoked(payload: Record<string, unknown>) {
   }
   
   // Log VC revocation with organization
-  await supabase.from('audit_logs').insert({
+  await db().from('audit_logs').insert({
     actor_id: revokedBy,
     organization_id: orgId,
     target_id: credentialId,
@@ -286,6 +291,16 @@ async function handleVCRevoked(payload: Record<string, unknown>) {
 }
 
 // GET endpoint for webhook health check
+export async function POST(request: NextRequest) {
+  try {
+    return await handlePost(request);
+  } catch (err) {
+    if (err instanceof Response) return err;
+    console.error('[webhook] unexpected error', err);
+    return apiError.internal('Webhook processing failed');
+  }
+}
+
 export async function GET() {
   return success({ 
     status: 'healthy',

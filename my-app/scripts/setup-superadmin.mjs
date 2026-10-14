@@ -2,25 +2,36 @@
 
 /**
  * Setup First Superadmin User Script
- * 
- * This script creates the initial superadmin account for CampusSync.
+ *
+ * This script creates the initial superadmin account for CampusSync, or
+ * upgrades an existing user to superadmin.
  * Superadmins have system-wide access across all organizations and can:
  * - Manage all organizations
  * - Access super_admin_audit logs
- * - Bypass RLS policies
  * - Manage system settings
- * 
+ *
  * Usage:
  *   node scripts/setup-superadmin.mjs
- * 
- * Environment Variables Required:
+ *
+ * Environment (loaded from .env.local when present, Node 20.12+/22):
  *   - NEXT_PUBLIC_SUPABASE_URL
  *   - NEXT_PUBLIC_SUPABASE_ANON_KEY
  *   - SUPABASE_SERVICE_ROLE_KEY (for admin operations)
+ *
+ * The password is read without echo and is never printed.
  */
 
 import { createClient } from '@supabase/supabase-js';
 import readline from 'readline';
+import { Writable } from 'stream';
+
+// Load .env.local when the runtime supports it (Node 20.12+/22). Existing
+// environment variables win; failure (missing file / older Node) is fine.
+try {
+  process.loadEnvFile?.('.env.local');
+} catch {
+  // no .env.local - rely on the real environment
+}
 
 // Color codes for terminal output
 const colors = {
@@ -33,46 +44,130 @@ const colors = {
   cyan: '\x1b[36m',
 };
 
-// Helper function to colorize output
 function log(message, color = 'reset') {
   console.log(`${colors[color]}${message}${colors.reset}`);
 }
 
-// Create readline interface for user input
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
+// Output stream that can be muted while the password is typed
+let muted = false;
+const mutableStdout = new Writable({
+  write(chunk, encoding, callback) {
+    if (!muted) process.stdout.write(chunk, encoding);
+    callback();
+  },
 });
 
-// Promisified question function
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: mutableStdout,
+  terminal: Boolean(process.stdin.isTTY),
+});
+
 function question(query) {
-  return new Promise((resolve) => rl.question(query, resolve));
+  return new Promise((resolve) => {
+    process.stdout.write(query);
+    rl.question('', resolve);
+  });
 }
 
-// Validate email format
+// Prompt without echoing the typed characters
+function questionHidden(query) {
+  return new Promise((resolve) => {
+    process.stdout.write(query);
+    muted = true;
+    rl.question('', (answer) => {
+      muted = false;
+      process.stdout.write('\n');
+      resolve(answer);
+    });
+  });
+}
+
 function isValidEmail(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-// Validate password strength
+// At least 12 characters, with an uppercase letter, a lowercase letter and a digit
 function isValidPassword(password) {
-  // At least 8 characters, 1 uppercase, 1 lowercase, 1 number
-  return password.length >= 8;
+  return (
+    typeof password === 'string' &&
+    password.length >= 12 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /[0-9]/.test(password)
+  );
+}
+
+// Paginated lookup: auth.admin.listUsers() only returns one page at a time
+async function findUserByEmail(admin, email) {
+  const target = email.trim().toLowerCase();
+  const perPage = 1000;
+  for (let page = 1; page <= 20; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) throw new Error(`Failed to check existing users: ${error.message}`);
+    const users = data?.users ?? [];
+    const match = users.find((u) => u.email?.toLowerCase() === target);
+    if (match) return match;
+    if (users.length < perPage) return null;
+  }
+  return null;
+}
+
+// user_roles is multi-row per user with UNIQUE NULLS NOT DISTINCT (user_id, organization_id),
+// so there is no unique key on user_id alone: select, then update or insert.
+// A super admin row has organization_id NULL (that is how org context detects it).
+async function ensureSuperAdminRole(admin, userId) {
+  const now = new Date().toISOString();
+
+  const { data: rows, error: selectError } = await admin
+    .from('user_roles')
+    .select('id, role, organization_id')
+    .eq('user_id', userId);
+  if (selectError) throw new Error(`Failed to read user roles: ${selectError.message}`);
+
+  const existingRows = rows ?? [];
+  const nullOrgRow = existingRows.find((r) => r.organization_id === null);
+  // No org-less row yet: convert the user's only org-bound row (clearing organization_id)
+  const convertRow = !nullOrgRow && existingRows.length === 1 ? existingRows[0] : null;
+  const target = nullOrgRow ?? convertRow;
+
+  if (target) {
+    const { error } = await admin
+      .from('user_roles')
+      .update({
+        role: 'super_admin',
+        organization_id: null,
+        approval_status: 'approved',
+        assigned_by: userId,
+        updated_at: now,
+      })
+      .eq('id', target.id);
+    if (error) throw new Error(`Failed to update user role: ${error.message}`);
+    return;
+  }
+
+  const { error } = await admin.from('user_roles').insert({
+    user_id: userId,
+    role: 'super_admin',
+    organization_id: null,
+    approval_status: 'approved',
+    assigned_by: userId,
+    created_at: now,
+    updated_at: now,
+  });
+  if (error) throw new Error(`Failed to create user role: ${error.message}`);
 }
 
 async function setupSuperadmin() {
-  log('\n╔══════════════════════════════════════════════════════════╗', 'cyan');
-  log('║     🚀 CampusSync Superadmin Setup Script              ║', 'cyan');
-  log('╚══════════════════════════════════════════════════════════╝\n', 'cyan');
+  log('\nCampusSync Superadmin Setup Script', 'cyan');
+  log('-----------------------------------\n', 'cyan');
 
-  // Check environment variables
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
-    log('❌ Error: Missing required environment variables', 'red');
+    log('Error: Missing required environment variables', 'red');
     log('   Please ensure the following are set in your .env.local:', 'yellow');
     log('   - NEXT_PUBLIC_SUPABASE_URL', 'yellow');
     log('   - NEXT_PUBLIC_SUPABASE_ANON_KEY', 'yellow');
@@ -81,92 +176,45 @@ async function setupSuperadmin() {
     process.exit(1);
   }
 
-  // Create Supabase admin client
   const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
+    auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  log('✅ Connected to Supabase', 'green');
+  log('Connected to Supabase', 'green');
 
   try {
-    // Get user input
-    log('\n📝 Please provide the following information:\n', 'bright');
+    log('\nPlease provide the following information:\n', 'bright');
 
-    // Email
     let email = '';
     while (!email || !isValidEmail(email)) {
-      email = await question('Email address: ');
+      email = (await question('Email address: ')).trim();
       if (!isValidEmail(email)) {
-        log('   ⚠️  Invalid email format. Please try again.', 'yellow');
+        log('   Invalid email format. Please try again.', 'yellow');
       }
     }
 
-    // Password
-    let password = '';
-    while (!password || !isValidPassword(password)) {
-      password = await question('Password (min 8 characters): ');
-      if (!isValidPassword(password)) {
-        log('   ⚠️  Password must be at least 8 characters. Please try again.', 'yellow');
-      }
-    }
-
-    // Full name
-    const fullName = await question('Full Name: ');
-
-    // Phone (optional)
-    const phone = await question('Phone Number (optional): ');
-
-    log('\n🔍 Checking if user already exists...', 'blue');
-
-    // Check if user already exists by email
-    const { data: existingUsers, error: checkError } = await supabaseAdmin.auth.admin.listUsers();
-
-    if (checkError) {
-      throw new Error(`Failed to check existing users: ${checkError.message}`);
-    }
-
-    const existingUser = existingUsers.users.find((u) => u.email === email);
+    log('\nChecking if user already exists...', 'blue');
+    const existingUser = await findUserByEmail(supabaseAdmin, email);
 
     if (existingUser) {
-      log(`\n⚠️  User with email ${email} already exists!`, 'yellow');
+      log(`\nUser with email ${email} already exists.`, 'yellow');
       const proceed = await question('Do you want to upgrade this user to superadmin? (yes/no): ');
 
       if (proceed.toLowerCase() !== 'yes' && proceed.toLowerCase() !== 'y') {
-        log('\n❌ Operation cancelled', 'red');
+        log('\nOperation cancelled', 'red');
         rl.close();
         return;
       }
 
-      // Update existing user to superadmin
-      log('\n🔄 Upgrading user to superadmin...', 'blue');
+      log('\nUpgrading user to superadmin...', 'blue');
 
-      // Update user_roles table
-      const { error: roleError } = await supabaseAdmin
-        .from('user_roles')
-        .upsert(
-          {
-            user_id: existingUser.id,
-            role: 'super_admin',
-            assigned_by: existingUser.id,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: 'user_id',
-          }
-        );
+      await ensureSuperAdminRole(supabaseAdmin, existingUser.id);
 
-      if (roleError) {
-        throw new Error(`Failed to update user role: ${roleError.message}`);
-      }
-
-      // Update profiles table
       const { error: profileError } = await supabaseAdmin
         .from('profiles')
         .update({
           role: 'super_admin',
+          organization_id: null, // Superadmins are not bound to any organization
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingUser.id);
@@ -175,140 +223,129 @@ async function setupSuperadmin() {
         throw new Error(`Failed to update profile: ${profileError.message}`);
       }
 
-      // Log the action in super_admin_audit
       const { error: auditError } = await supabaseAdmin.from('super_admin_audit').insert({
         admin_id: existingUser.id,
         action: 'UPGRADE_TO_SUPERADMIN',
         target_type: 'user',
         target_id: existingUser.id,
-        details: {
-          email: existingUser.email,
-          upgraded_via_script: true,
-        },
+        details: { email: existingUser.email, upgraded_via_script: true },
         created_at: new Date().toISOString(),
       });
 
       if (auditError) {
-        log(`   ⚠️  Warning: Failed to create audit log: ${auditError.message}`, 'yellow');
+        log(`   Warning: Failed to create audit log: ${auditError.message}`, 'yellow');
       }
 
-      log('\n✅ User successfully upgraded to superadmin!', 'green');
+      log('\nUser successfully upgraded to superadmin.', 'green');
       displaySuccessInfo(email, existingUser.id);
     } else {
-      // Create new superadmin user
-      log('\n👤 Creating new superadmin user...', 'blue');
+      // Collect the remaining details only for a brand new user
+      let password = '';
+      while (!isValidPassword(password)) {
+        password = await questionHidden('Password (min 12 chars, upper + lower case + digit): ');
+        if (!isValidPassword(password)) {
+          log('   Password must be at least 12 characters and contain an uppercase letter, a lowercase letter and a digit.', 'yellow');
+          continue;
+        }
+        const confirm = await questionHidden('Confirm password: ');
+        if (confirm !== password) {
+          log('   Passwords do not match. Please try again.', 'yellow');
+          password = '';
+        }
+      }
 
-      // Create auth user
+      const fullName = (await question('Full Name: ')).trim();
+      const phone = (await question('Phone Number (optional): ')).trim();
+
+      log('\nCreating new superadmin user...', 'blue');
+
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
         email_confirm: true, // Auto-confirm email for superadmin
-        user_metadata: {
-          full_name: fullName,
-          role: 'super_admin',
-        },
+        user_metadata: { full_name: fullName },
       });
 
       if (authError) {
         throw new Error(`Failed to create auth user: ${authError.message}`);
       }
 
-      log('   ✓ Auth user created', 'green');
+      log('   Auth user created', 'green');
 
       const userId = authData.user.id;
 
-      // Create profile
-      const { error: profileError } = await supabaseAdmin.from('profiles').insert({
-        id: userId,
-        email,
-        full_name: fullName,
-        phone: phone || null,
-        role: 'super_admin',
-        organization_id: null, // Superadmins are not bound to any organization
-        email_verified: true,
-        status: 'active',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      // Profile (may already exist if a database trigger created it)
+      const { error: profileError } = await supabaseAdmin.from('profiles').upsert(
+        {
+          id: userId,
+          email,
+          full_name: fullName,
+          phone: phone || null,
+          role: 'super_admin',
+          organization_id: null,
+          email_verified: true,
+          status: 'active',
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
 
       if (profileError) {
         throw new Error(`Failed to create profile: ${profileError.message}`);
       }
 
-      log('   ✓ Profile created', 'green');
+      log('   Profile created', 'green');
 
-      // Create user_roles entry
-      const { error: roleError } = await supabaseAdmin.from('user_roles').insert({
-        user_id: userId,
-        role: 'super_admin',
-        assigned_by: userId,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      await ensureSuperAdminRole(supabaseAdmin, userId);
 
-      if (roleError) {
-        throw new Error(`Failed to create user role: ${roleError.message}`);
-      }
+      log('   Role assigned', 'green');
 
-      log('   ✓ Role assigned', 'green');
-
-      // Create audit log entry
       const { error: auditError } = await supabaseAdmin.from('super_admin_audit').insert({
         admin_id: userId,
         action: 'SUPERADMIN_CREATED',
         target_type: 'user',
         target_id: userId,
-        details: {
-          email,
-          created_via_script: true,
-        },
+        details: { email, created_via_script: true },
         created_at: new Date().toISOString(),
       });
 
       if (auditError) {
-        log(`   ⚠️  Warning: Failed to create audit log: ${auditError.message}`, 'yellow');
+        log(`   Warning: Failed to create audit log: ${auditError.message}`, 'yellow');
       }
 
-      log('\n✅ Superadmin user created successfully!', 'green');
+      log('\nSuperadmin user created successfully.', 'green');
       displaySuccessInfo(email, userId);
     }
 
-    // Show next steps
-    log('\n📋 Next Steps:', 'bright');
+    log('\nNext Steps:', 'bright');
     log('   1. Visit your CampusSync application', 'cyan');
     log('   2. Login with the credentials you just created', 'cyan');
     log('   3. You will have access to all admin features', 'cyan');
-    log('   4. You can create organizations and manage the system', 'cyan');
 
-    log('\n🔐 Security Reminder:', 'yellow');
+    log('\nSecurity Reminder:', 'yellow');
     log('   - Store these credentials securely', 'yellow');
     log('   - Consider enabling 2FA after first login', 'yellow');
     log('   - Regularly review super_admin_audit logs', 'yellow');
 
-    log('\n✨ Setup completed successfully!\n', 'green');
+    log('\nSetup completed successfully.\n', 'green');
   } catch (error) {
-    log(`\n❌ Error: ${error.message}`, 'red');
-    if (error.stack) {
-      log(`\n${error.stack}`, 'red');
-    }
-    process.exit(1);
+    // Message only: never dump stacks/objects that could contain request details
+    log(`\nError: ${error instanceof Error ? error.message : 'Unknown error'}`, 'red');
+    process.exitCode = 1;
   } finally {
     rl.close();
   }
 }
 
 function displaySuccessInfo(email, userId) {
-  log('\n╔══════════════════════════════════════════════════════════╗', 'green');
-  log('║                Account Details                           ║', 'green');
-  log('╠══════════════════════════════════════════════════════════╣', 'green');
-  log(`║ Email:    ${email.padEnd(46)}║`, 'green');
-  log(`║ User ID:  ${userId.padEnd(46)}║`, 'green');
-  log(`║ Role:     super_admin${' '.repeat(33)}║`, 'green');
-  log('╚══════════════════════════════════════════════════════════╝', 'green');
+  log('\nAccount Details', 'green');
+  log(`  Email:    ${email}`, 'green');
+  log(`  User ID:  ${userId}`, 'green');
+  log('  Role:     super_admin', 'green');
 }
 
 // Run the script
 setupSuperadmin().catch((error) => {
-  log(`\n❌ Unexpected error: ${error.message}`, 'red');
+  log(`\nUnexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'red');
   process.exit(1);
 });

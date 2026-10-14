@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { CheckCircle, Clock, AlertCircle, Eye, Trash2, User2, Edit3, Building, Calendar, GraduationCap, MapPin, ScrollText, Upload, Star, Zap, FileText } from 'lucide-react';
 import LogoutButton from '../../../components/LogoutButton';
 import { toast } from '@/components/ui/toast';
+import { apiFetchJson, ApiError } from '@/lib/apiClient';
 
 interface Row {
   id: string;
@@ -34,7 +35,6 @@ export default function StudentDashboard() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [vcStatus, setVcStatus] = useState<Record<string, { status: 'active'|'revoked'|'suspended'|'expired', reason?: string }>>({});
   const [recentUploads, setRecentUploads] = useState<Row[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -45,11 +45,8 @@ export default function StudentDashboard() {
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
     try {
-      const res = await fetch('/api/profile/complete');
-      const json = await res.json();
-      if (res.ok) {
-        setProfile(json.data);
-      }
+      const data = await apiFetchJson<Profile>('/api/profile/complete');
+      setProfile(data);
     } catch (e) {
       console.error('Failed to load profile:', e);
     } finally {
@@ -57,92 +54,42 @@ export default function StudentDashboard() {
     }
   }, []);
 
-  const fetchVcStatus = useCallback(async (credentialId: string) => {
-    try {
-      const res = await fetch(`/api/vc/status?credentialId=${encodeURIComponent(credentialId)}`);
-      const json = await res.json();
-      if (res.ok) {
-        setVcStatus(prev => ({ ...prev, [credentialId]: json.data }));
-      }
-    } catch {}
-  }, []);
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Try new documents endpoint first
+      // Prefer the documents endpoint (own rows only); fall back to legacy certificates
       let list: Row[] = [];
       try {
-        const docsRes = await fetch('/api/documents');
-        if (docsRes.ok) {
-          const docsJson = await docsRes.json();
-          const docs = (docsJson.data || []) as Array<Record<string, unknown>>;
-          list = docs.map(d => ({
-            id: d.id,
-            title: d.title,
-            institution: d.institution || '',
-            date_issued: d.issue_date || '',
-            file_url: d.file_url,
-            verification_status: d.verification_status,
-            created_at: d.created_at,
-            // Optional fields; will be filled from metadata if available
-          })) as Row[];
-        }
-      } catch {}
-
-      if (!list || list.length === 0) {
-        // Fallback to legacy certificates API
-        const res = await fetch('/api/certificates/mine');
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to load');
-        list = json.data as Row[];
+        const docs = await apiFetchJson<Array<Record<string, unknown>>>('/api/documents?scope=mine&limit=100');
+        list = (Array.isArray(docs) ? docs : []).map(d => ({
+          id: d.id,
+          title: d.title,
+          institution: d.institution || '',
+          date_issued: d.issue_date || '',
+          file_url: d.file_url,
+          verification_status: d.verification_status,
+          created_at: d.created_at,
+        })) as Row[];
+      } catch (e) {
+        console.warn('Documents endpoint unavailable, using certificates:', e);
       }
-      setRows(list);
-      
-      // Sort by created_at to get recent uploads (last 5)
-      const sortedList = list.sort((a, b) => {
+
+      if (list.length === 0) {
+        list = await apiFetchJson<Row[]>('/api/certificates/mine');
+        if (!Array.isArray(list)) list = [];
+      }
+
+      // Newest first (copy: never mutate the array that goes into state)
+      const sortedList = [...list].sort((a, b) => {
         const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
         const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return dateB - dateA; // Most recent first
+        return dateB - dateA;
       });
+      setRows(sortedList);
       setRecentUploads(sortedList.slice(0, 5));
-      
-      // Fetch metadata for confidence per cert
-      const confMap: Record<string, number> = {};
-      const detMap: Record<string, unknown> = {};
-      for (const r of list) {
-        // Prefer document metadata; fallback to certificate metadata
-        let got = false;
-        try {
-          const dmd = await fetch(`/api/documents/${encodeURIComponent(r.id)}/metadata`);
-          if (dmd.ok) {
-            const md = await dmd.json();
-            if (md?.data) {
-              const ai = md.data.ai_confidence_score;
-              confMap[r.id] = typeof ai === 'number' ? ai : (md.data.verification_details?.ai_confidence?.score ?? 0);
-              detMap[r.id] = md.data.verification_details ?? {};
-              got = true;
-            }
-          }
-        } catch {}
-        if (!got) {
-          try {
-            const mdRes = await fetch(`/api/certificates/metadata/${encodeURIComponent(r.id)}`);
-            if (mdRes.ok) {
-              const md = await mdRes.json();
-              if (md?.data) {
-                const ai = md.data.ai_confidence_score;
-                confMap[r.id] = typeof ai === 'number' ? ai : (md.data.verification_details?.ai_confidence?.score ?? 0);
-                detMap[r.id] = md.data.verification_details ?? {};
-                got = true;
-              }
-            }
-          } catch {}
-        }
-      }
     } catch (e: unknown) {
-      const errorMsg = e instanceof Error ? e.message : 'Unexpected error';
+      const errorMsg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Unexpected error';
       toast.error(errorMsg);
       setError(errorMsg);
     } finally {
@@ -163,6 +110,23 @@ export default function StudentDashboard() {
     setDeleteConfirm({ show: false, certId: null, certTitle: '' });
   }, []);
 
+  // Delete dialog: initial focus on Cancel (safe default), Esc closes, focus returns to the trigger
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!deleteConfirm.show) return;
+    lastFocusedRef.current = (document.activeElement as HTMLElement) ?? null;
+    cancelButtonRef.current?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cancelDelete();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      lastFocusedRef.current?.focus?.();
+    };
+  }, [deleteConfirm.show, cancelDelete]);
+
   const confirmDelete = useCallback(async () => {
     const certificateId = deleteConfirm.certId;
     const certificateTitle = deleteConfirm.certTitle;
@@ -173,16 +137,11 @@ export default function StudentDashboard() {
     setError(null); // Clear any previous errors
     
     try {
-      const response = await fetch('/api/certificates/delete', {
+      await apiFetchJson('/api/certificates/delete', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ certificateId }),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete certificate');
-      }
 
       // Remove from local state immediately
       setRows(prev => prev.filter(cert => cert.id !== certificateId));
@@ -296,6 +255,12 @@ export default function StudentDashboard() {
                 <Upload className="w-4 h-4 md:w-5 md:h-5 relative z-10" />
                 <span className="hidden sm:inline relative z-10">Upload Certificate</span>
                 <span className="sm:hidden relative z-10">Upload</span>
+              </a>
+              <a
+                href="/student/privacy"
+                className="text-white/90 hover:text-white underline underline-offset-4 text-sm font-medium"
+              >
+                Privacy
               </a>
               <LogoutButton variant="minimal" />
             </div>
@@ -516,12 +481,12 @@ export default function StudentDashboard() {
           </div>
           
           {loading ? (
-            <div className="p-8 text-center">
+            <div className="p-8 text-center" role="status" aria-live="polite">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
               <p className="text-white/70 mt-2">Loading certificates...</p>
             </div>
           ) : error ? (
-            <div className="p-8 text-center">
+            <div className="p-8 text-center" role="alert">
               <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-2" />
               <p className="text-red-300">{error}</p>
             </div>
@@ -578,23 +543,6 @@ export default function StudentDashboard() {
                           <div className={`px-3 py-1.5 rounded-xl text-xs font-semibold border ${getStatusColor(row.verification_status, row.auto_approved)}`}>
                             {getStatusText(row.verification_status, row.auto_approved)}
                           </div>
-                          <button
-                            onClick={() => fetchVcStatus(row.id)}
-                            className="text-[10px] text-blue-300 hover:text-blue-200 underline decoration-dotted transition-colors"
-                            title="Check VC status"
-                          >
-                            Check
-                          </button>
-                          {vcStatus[row.id] && (
-                            <span className={`px-2 py-1 rounded-lg text-[10px] font-medium border ${
-                              vcStatus[row.id].status === 'active' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
-                              vcStatus[row.id].status === 'revoked' ? 'bg-red-500/10 text-red-300 border-red-500/30' :
-                              vcStatus[row.id].status === 'suspended' ? 'bg-yellow-500/10 text-yellow-300 border-yellow-500/30' :
-                              'bg-gray-500/10 text-gray-300 border-gray-500/30'
-                            }`}>
-                              VC {vcStatus[row.id].status}
-                            </span>
-                          )}
                           {row.auto_approved && (
                             <div className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 rounded-lg text-xs text-emerald-300 font-medium border border-emerald-400/30">
                               <Zap className="w-3 h-3" />
@@ -633,6 +581,9 @@ export default function StudentDashboard() {
                               <Eye className="w-4 h-4" />
                             </a>
                           )}
+                          {row.verification_status === 'verified' && (
+                            <a href={`/student/share?cert=${encodeURIComponent(row.id)}`} className="px-2 py-1 text-xs text-emerald-300 hover:text-emerald-200 underline" title="Share selected claims of this credential">Share</a>
+                          )}
                           <button
                             onClick={() => showDeleteConfirmation(row.id, row.title)}
                             disabled={deleting === row.id}
@@ -659,7 +610,12 @@ export default function StudentDashboard() {
       {/* Delete Confirmation Modal */}
       {deleteConfirm.show && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xl">
-          <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-red-500/30 rounded-3xl p-8 max-w-md mx-4 shadow-2xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-dialog-title"
+            aria-describedby="delete-dialog-desc"
+            className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-red-500/30 rounded-3xl p-8 max-w-md mx-4 shadow-2xl">
             <div className="flex items-center gap-4 mb-6">
               <div className="relative group">
                 <div className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 rounded-xl blur-lg opacity-50" />
@@ -667,15 +623,16 @@ export default function StudentDashboard() {
                   <Trash2 className="w-6 h-6 text-red-300" />
                 </div>
               </div>
-              <h3 className="text-2xl font-bold bg-gradient-to-r from-red-400 to-orange-400 bg-clip-text text-transparent">Delete Certificate?</h3>
+              <h3 id="delete-dialog-title" className="text-2xl font-bold bg-gradient-to-r from-red-400 to-orange-400 bg-clip-text text-transparent">Delete Certificate?</h3>
             </div>
             
-            <p className="text-white/80 mb-8 text-base">
+            <p id="delete-dialog-desc" className="text-white/80 mb-8 text-base">
               Are you sure you want to delete <span className="font-bold text-white">&quot;{deleteConfirm.certTitle}&quot;</span>? This action cannot be undone.
             </p>
             
             <div className="flex gap-4 justify-end">
               <button
+                ref={cancelButtonRef}
                 onClick={cancelDelete}
                 className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-semibold transition-all duration-300 border border-white/20 hover:border-white/30 hover:scale-105"
               >
@@ -708,6 +665,7 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const uid = useId();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -715,7 +673,7 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
     setError(null);
 
     try {
-      const response = await fetch('/api/profile/complete', {
+      await apiFetchJson('/api/profile/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -727,11 +685,6 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
           gpa: formData.gpa ? Number(formData.gpa) : undefined,
         }),
       });
-
-      if (!response.ok) {
-        const json = await response.json().catch(() => ({}));
-        throw new Error(json?.error || 'Failed to save profile');
-      }
 
       toast.success('Profile updated successfully!');
       onSave();
@@ -746,16 +699,20 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-300 rounded-lg text-sm">
-          {error}
-        </div>
-      )}
+      <div aria-live="polite" role="status">
+        {error && (
+          <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-300 rounded-lg text-sm" role="alert">
+            {error}
+          </div>
+        )}
+        {loading && <span className="sr-only">Saving profile…</span>}
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-white/70 text-sm font-medium mb-2">Full Name *</label>
+          <label htmlFor={`${uid}-full_name`} className="block text-white/70 text-sm font-medium mb-2">Full Name *</label>
           <input
+            id={`${uid}-full_name`}
             type="text"
             value={formData.full_name}
             onChange={(e) => setFormData(prev => ({ ...prev, full_name: e.target.value }))}
@@ -766,8 +723,9 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
         </div>
 
         <div>
-          <label className="block text-white/70 text-sm font-medium mb-2">University</label>
+          <label htmlFor={`${uid}-university`} className="block text-white/70 text-sm font-medium mb-2">University</label>
           <input
+            id={`${uid}-university`}
             type="text"
             value={formData.university}
             onChange={(e) => setFormData(prev => ({ ...prev, university: e.target.value }))}
@@ -777,8 +735,9 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
         </div>
 
         <div>
-          <label className="block text-white/70 text-sm font-medium mb-2">Graduation Year</label>
+          <label htmlFor={`${uid}-graduation_year`} className="block text-white/70 text-sm font-medium mb-2">Graduation Year</label>
           <input
+            id={`${uid}-graduation_year`}
             type="number"
             min="1900"
             max="2100"
@@ -790,8 +749,9 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
         </div>
 
         <div>
-          <label className="block text-white/70 text-sm font-medium mb-2">Major</label>
+          <label htmlFor={`${uid}-major`} className="block text-white/70 text-sm font-medium mb-2">Major</label>
           <input
+            id={`${uid}-major`}
             type="text"
             value={formData.major}
             onChange={(e) => setFormData(prev => ({ ...prev, major: e.target.value }))}
@@ -801,8 +761,9 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
         </div>
 
         <div>
-          <label className="block text-white/70 text-sm font-medium mb-2">Location</label>
+          <label htmlFor={`${uid}-location`} className="block text-white/70 text-sm font-medium mb-2">Location</label>
           <input
+            id={`${uid}-location`}
             type="text"
             value={formData.location}
             onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
@@ -812,8 +773,9 @@ function ProfileEditForm({ profile, onSave }: { profile: Profile; onSave: () => 
         </div>
 
         <div>
-          <label className="block text-white/70 text-sm font-medium mb-2">GPA</label>
+          <label htmlFor={`${uid}-gpa`} className="block text-white/70 text-sm font-medium mb-2">GPA</label>
           <input
+            id={`${uid}-gpa`}
             type="number"
             step="0.01"
             min="0"

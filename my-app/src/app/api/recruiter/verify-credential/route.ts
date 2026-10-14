@@ -1,137 +1,50 @@
 /**
  * Verifiable Credential (VC) Verification Endpoint
- * 
+ *
  * Purpose: Cryptographically verifies W3C Verifiable Credentials using JWS signatures
- * 
- * Use Cases:
- * - Verify VC authenticity using JWS (JSON Web Signature)
- * - Validate VC structure and proof
- * - Check VC revocation status in database
- * 
- * This is different from /verify-certificate which verifies database certificate records.
- * 
- * Supports 3 verification methods:
+ * and checks their revocation status.
+ *
+ * Supports 3 verification methods (all go through the shared `verifyCredential` service):
  * 1. JWS Direct - Verify raw JWS string
- * 2. VC Object - Verify complete VC with embedded proof
- * 3. Credential ID - Lookup and verify VC from database
+ * 2. VC Object - Verify the JWS embedded in a VC (the VC's own fields are NOT trusted;
+ *    results are taken from the signed payload)
+ * 3. Credential ID - Look the VC up in the database and verify it
+ *
+ * Revocation is always checked against `verifiable_credentials.status`, and the check
+ * fails closed (unknown credential / lookup failure => valid:false).
  */
 import { NextRequest } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { getIssuerJwk, verifyCredentialJws } from '@/lib/vc';
-import type { VerifiableCredential } from '@/types/index';
 import { success, apiError } from '@/lib/api';
 import { enforceRateLimit, RateLimitPresets } from '@/lib/rateLimit';
+import { verifyCredential, toPublicResult, type VerifyInput } from '@/lib/vcVerify';
+
+type Method = 'jws_direct' | 'vc_object' | 'credential_id';
+
+async function run(input: VerifyInput, method: Method) {
+  const result = await verifyCredential(input);
+  return success({ ...toPublicResult(result), verification_method: method });
+}
 
 export async function POST(req: NextRequest) {
   const limited = enforceRateLimit(req, 'verify-credential', RateLimitPresets.relaxed);
   if (limited) return limited;
 
-  const body = await req.json() as { 
-    jws?: string; 
-    vc?: VerifiableCredential;
-    credentialId?: string;
-  };
+  const body = await req.json().catch(() => null) as {
+    jws?: unknown;
+    vc?: { proof?: { jws?: string } };
+    credentialId?: unknown;
+  } | null;
+  if (!body || typeof body !== 'object') return apiError.badRequest('Invalid JSON');
 
-  // Method 1: Verify by JWS directly
-  if (body.jws) {
-    try {
-      const jwk = await getIssuerJwk();
-      const { payload, protectedHeader } = await verifyCredentialJws(body.jws, jwk);
-      
-      return success({ 
-        valid: true, 
-        payload, 
-        protectedHeader,
-        verification_method: 'jws_direct'
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'JWS verification failed';
-      return success({ 
-        valid: false, 
-        error: message,
-        verification_method: 'jws_direct'
-      });
-    }
+  if (typeof body.jws === 'string' && body.jws) return run({ jws: body.jws }, 'jws_direct');
+  if (typeof body.vc?.proof?.jws === 'string' && body.vc.proof.jws) {
+    return run({ jws: body.vc.proof.jws }, 'vc_object');
+  }
+  if (typeof body.credentialId === 'string' && body.credentialId && body.credentialId.length <= 200) {
+    return run({ vcId: body.credentialId }, 'credential_id');
   }
 
-  // Method 2: Verify by Verifiable Credential object
-  if (body.vc?.proof?.jws) {
-    try {
-      const jwk = await getIssuerJwk();
-      const { payload, protectedHeader } = await verifyCredentialJws(body.vc.proof.jws, jwk);
-      
-      return success({ 
-        valid: true, 
-        payload, 
-        protectedHeader,
-        verification_method: 'vc_object'
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'VC verification failed';
-      return success({ 
-        valid: false, 
-        error: message,
-        verification_method: 'vc_object'
-      });
-    }
-  }
-
-  // Method 3: Verify by credential ID (lookup in database)
-  if (body.credentialId) {
-    const supabase = await createSupabaseServerClient();
-    
-    // Get the verifiable credential from database
-    const { data: vc, error: vcError } = await supabase
-      .from('verifiable_credentials')
-      .select('*')
-      .eq('id', body.credentialId)
-      .single();
-
-    if (vcError || !vc) {
-      return success({ 
-        valid: false, 
-        error: 'Credential not found',
-        verification_method: 'credential_id'
-      });
-    }
-
-    // Check if credential is revoked
-    if (vc.revoked) {
-      return success({ 
-        valid: false, 
-        error: 'Credential has been revoked',
-        verification_method: 'credential_id'
-      });
-    }
-
-    // Verify the JWS
-    try {
-      const jwk = await getIssuerJwk();
-      const { payload, protectedHeader } = await verifyCredentialJws(vc.credential.proof.jws, jwk);
-      
-      return success({ 
-        valid: true, 
-        payload, 
-        protectedHeader,
-        verification_method: 'credential_id',
-        credential_info: {
-          id: vc.id,
-          issuer: vc.issuer,
-          issuance_date: vc.issuance_date,
-          revoked: vc.revoked
-        }
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Credential verification failed';
-      return success({ 
-        valid: false, 
-        error: message,
-        verification_method: 'credential_id'
-      });
-    }
-  }
-
-  throw apiError.badRequest('Missing verification data. Provide jws, vc, or credentialId');
+  return apiError.badRequest('Missing verification data. Provide jws, vc, or credentialId');
 }
 
 // GET endpoint for public credential verification (no auth required)
@@ -143,84 +56,8 @@ export async function GET(req: NextRequest) {
   const credentialId = searchParams.get('id');
   const jws = searchParams.get('jws');
 
-  if (!credentialId && !jws) {
-    throw apiError.badRequest('Missing credential ID or JWS');
-  }
+  if (jws) return run({ jws }, 'jws_direct');
+  if (credentialId && credentialId.length <= 200) return run({ vcId: credentialId }, 'credential_id');
 
-  // If JWS provided, verify directly
-  if (jws) {
-    try {
-      const jwk = await getIssuerJwk();
-      const { payload, protectedHeader } = await verifyCredentialJws(jws, jwk);
-      
-      return success({ 
-        valid: true, 
-        payload, 
-        protectedHeader,
-        verification_method: 'jws_direct'
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'JWS verification failed';
-      return success({ 
-        valid: false, 
-        error: message,
-        verification_method: 'jws_direct'
-      });
-    }
-  }
-
-  // If credential ID provided, lookup and verify
-  if (credentialId) {
-    const supabase = await createSupabaseServerClient();
-    
-    const { data: vc, error: vcError } = await supabase
-      .from('verifiable_credentials')
-      .select('*')
-      .eq('id', credentialId)
-      .single();
-
-    if (vcError || !vc) {
-      return success({ 
-        valid: false, 
-        error: 'Credential not found',
-        verification_method: 'credential_id'
-      });
-    }
-
-    if (vc.revoked) {
-      return success({ 
-        valid: false, 
-        error: 'Credential has been revoked',
-        verification_method: 'credential_id'
-      });
-    }
-
-    try {
-      const jwk = await getIssuerJwk();
-      const { payload, protectedHeader } = await verifyCredentialJws(vc.credential.proof.jws, jwk);
-      
-      return success({ 
-        valid: true, 
-        payload, 
-        protectedHeader,
-        verification_method: 'credential_id',
-        credential_info: {
-          id: vc.id,
-          issuer: vc.issuer,
-          issuance_date: vc.issuance_date,
-          revoked: vc.revoked
-        }
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Credential verification failed';
-      return success({ 
-        valid: false, 
-        error: message,
-        verification_method: 'credential_id'
-      });
-    }
-  }
-
-  throw apiError.badRequest('Missing verification data');
+  return apiError.badRequest('Missing credential ID or JWS');
 }
-

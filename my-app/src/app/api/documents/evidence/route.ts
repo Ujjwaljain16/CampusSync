@@ -1,25 +1,21 @@
 import { NextRequest } from 'next/server';
-import { withRole, success, apiError, isValidUUID, getOrganizationContext, getTargetOrganizationIds } from '@/lib/api';
+import { withAuth, success, apiError, isValidUUID } from '@/lib/api';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { loadDocumentHead, requireApprovedReviewer } from '@/lib/documents/authz';
 
-// GET /api/documents/evidence?documentId=... - verification evidence for reviewers (org-scoped)
-export const GET = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], async (request: NextRequest, { user }) => {
+// GET /api/documents/evidence?documentId=... - verification evidence for approved reviewers of the document's org
+export const GET = withAuth(async (request: NextRequest, { user }) => {
   const { searchParams } = new URL(request.url);
   const documentId = searchParams.get('documentId');
-  if (!documentId || !isValidUUID(documentId)) throw apiError.badRequest('Valid documentId required');
+  if (!documentId || !isValidUUID(documentId)) return apiError.badRequest('Valid documentId required');
 
   const supabase = await createSupabaseServerClient();
-  const orgContext = await getOrganizationContext(user);
-  const targetOrgIds = getTargetOrganizationIds(orgContext);
 
-  // Ensure the document belongs to the reviewer's organization(s)
-  const { data: doc } = await supabase
-    .from('documents')
-    .select('id')
-    .eq('id', documentId)
-    .in('organization_id', targetOrgIds)
-    .maybeSingle();
-  if (!doc) throw apiError.notFound('Document not found');
+  const doc = await loadDocumentHead(supabase, documentId);
+  if (!doc) return apiError.notFound('Document not found');
+
+  const reviewer = await requireApprovedReviewer(user, doc.organization_id, supabase);
+  if (!reviewer) return apiError.forbidden('Only approved reviewers of this organization can view evidence');
 
   const { data, error } = await supabase
     .from('document_metadata')
@@ -29,16 +25,21 @@ export const GET = withRole(['faculty', 'admin', 'org_admin', 'super_admin'], as
     .limit(1)
     .maybeSingle();
 
-  if (error || !data) return success({});
+  if (error) {
+    console.error('Evidence fetch error:', error);
+    return apiError.internal('Failed to fetch evidence');
+  }
+  if (!data) return success({});
 
-  const details = (data as Record<string, unknown>).verification_details as Record<string, unknown> || {};
-  const out = {
+  const row = data as Record<string, unknown>;
+  const details = (row.verification_details as Record<string, unknown> | null) || {};
+  return success({
     qr: details.qr || null,
     mrz: details.mrz || null,
     logo: details.logo || null,
     policy: details.policy || null,
     extracted: details.extracted || null,
-    confidence: (data as Record<string, unknown>).ai_confidence_score ?? undefined
-  };
-  return success(out);
+    review: details.review || null,
+    confidence: row.ai_confidence_score ?? undefined,
+  });
 });

@@ -188,38 +188,20 @@ export default function FacultyDashboardPage() {
     fetchAnalytics();
   }, [fetchRows, fetchAnalytics]);
 
-  const onApprove = useCallback(async (certificateId: string, cert: PendingCert) => {
+  const onApprove = useCallback(async (certificateId: string) => {
     setActioning(certificateId);
     setError(null);
     try {
-      // 1) Approve
-      {
-        const res = await fetch('/api/certificates/approve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ certificateId, status: 'approved' }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Approve failed');
-      }
-
-      // 2) Issue VC
-      {
-        const subject = {
-          id: cert.student_id, // Fixed: Use student_id instead of user_id
-          certificateId: cert.id,
-          title: cert.title,
-          institution: cert.institution,
-          dateIssued: cert.date_issued,
-          description: cert.description,
-        };
-        const res = await fetch('/api/certificates/issue', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentialSubject: subject }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Issuance failed');
+      // Approve and issue the credential in a single idempotent server call
+      const res = await fetch('/api/certificates/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ certificateId, status: 'verified', issue: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Approve failed');
+      if (json.data?.issuance && json.data.issuance.ok === false) {
+        throw new Error(json.data.issuance.error || 'Certificate approved but credential issuance failed');
       }
 
       await fetchRows();
@@ -292,13 +274,20 @@ export default function FacultyDashboardPage() {
       const res = await fetch('/api/certificates/batch-approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ certificateIds: certIds, action: 'approve' }),
+        body: JSON.stringify({ certificateIds: certIds, status: 'verified' }),
       });
       
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Batch approval failed');
       
-      toast.success('Batch Approved', `${selectedCerts.size} certificates approved successfully`);
+      const { succeeded = 0, failed = 0 } = json.data ?? {};
+      if (failed > 0) {
+        const msg = `${succeeded} approved, ${failed} failed`;
+        setError(msg);
+        toast.error('Batch Approval Partially Failed', msg);
+      } else {
+        toast.success('Batch Approved', `${succeeded} certificates approved successfully`);
+      }
       await fetchRows();
       await fetchAnalytics(); // Refresh analytics
       setSelectedCerts(new Set());
@@ -322,13 +311,20 @@ export default function FacultyDashboardPage() {
       const res = await fetch('/api/certificates/batch-approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ certificateIds: certIds, action: 'reject' }),
+        body: JSON.stringify({ certificateIds: certIds, status: 'rejected' }),
       });
       
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Batch rejection failed');
       
-      toast.success('Batch Rejected', `${selectedCerts.size} certificates rejected`);
+      const { succeeded = 0, failed = 0 } = json.data ?? {};
+      if (failed > 0) {
+        const msg = `${succeeded} rejected, ${failed} failed`;
+        setError(msg);
+        toast.error('Batch Rejection Partially Failed', msg);
+      } else {
+        toast.success('Batch Rejected', `${succeeded} certificates rejected`);
+      }
       await fetchRows();
       await fetchAnalytics(); // Refresh analytics
       setSelectedCerts(new Set());
@@ -552,7 +548,7 @@ export default function FacultyDashboardPage() {
                     <div className="flex items-center gap-2">
                       <button 
                         className="group relative overflow-hidden flex-1 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white px-4 py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-emerald-500/50 hover:scale-105"
-                        onClick={() => onApprove(cert.id, cert)}
+                        onClick={() => onApprove(cert.id)}
                         disabled={actioning === cert.id}
                       >
                         <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/20 to-transparent" />

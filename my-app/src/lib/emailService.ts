@@ -32,6 +32,43 @@ interface NotificationData {
   };
 }
 
+/** Escape text for safe interpolation into HTML (element content and quoted attributes). */
+export function escapeHtml(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/`/g, '&#96;');
+}
+
+/**
+ * Accept only absolute http(s) URLs. Returns the normalised URL, or null when the
+ * value is missing/invalid (e.g. `javascript:`, `data:`, relative paths).
+ */
+export function safeHttpUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+/** Site URL used when a caller-supplied link is missing or invalid. */
+function siteUrlFallback(): string | null {
+  return safeHttpUrl(process.env.NEXT_PUBLIC_SITE_URL) || safeHttpUrl(process.env.NEXT_PUBLIC_BASE_URL);
+}
+
+/** Remove CR/LF so user-influenced text can never inject mail headers. */
+function singleLine(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ').trim();
+}
+
 class EmailService {
   private transporter: Transporter | null = null;
   private isConfigured = false;
@@ -76,7 +113,6 @@ class EmailService {
   async sendNotification(notification: NotificationData): Promise<boolean> {
     if (!this.isConfigured || !this.transporter) {
       logger.warn('Email service not configured, skipping notification', {
-        to: notification.to,
         template: notification.template,
         isConfigured: this.isConfigured,
         hasTransporter: !!this.transporter,
@@ -90,35 +126,47 @@ class EmailService {
       
       const fromEmail = process.env.SMTP_FROM || config.getSmtpConfig()?.user || 'noreply@campussync.com';
       const mailOptions = {
-        from: `"CampusSync" <${fromEmail}>`,
-        to: notification.to,
-        subject: notification.subject,
+        from: `"CampusSync" <${singleLine(fromEmail)}>`,
+        to: singleLine(notification.to),
+        subject: singleLine(notification.subject),
         html,
       };
 
-      console.log('[EmailService] Attempting to send email:', {
-        to: notification.to,
-        subject: notification.subject,
-        from: mailOptions.from,
-      });
-
       const result = await this.transporter.sendMail(mailOptions);
       logger.debug('Email sent successfully', {
-        to: notification.to,
-        subject: notification.subject,
+        template: notification.template,
         messageId: result.messageId,
       });
-      console.log('[EmailService] Email sent successfully:', result.messageId);
       return true;
     } catch (error) {
       logger.error('Failed to send email', error);
-      console.error('[EmailService] Failed to send email:', error);
+      console.error('[EmailService] Failed to send email:', error instanceof Error ? error.message : 'unknown error');
       return false;
     }
   }
 
   private generateEmailHTML(notification: NotificationData): string {
-    const { template, data } = notification;
+    const { template } = notification;
+    const data = notification.data;
+
+    // Everything interpolated below is escaped; URLs must be http(s).
+    const e = {
+      studentName: escapeHtml(data.studentName || 'Student'),
+      certificateTitle: escapeHtml(data.certificateTitle),
+      institution: escapeHtml(data.institution),
+      verificationMethod: (fallback: string) => escapeHtml(data.verificationMethod || fallback),
+      requestedRole: escapeHtml(data.requestedRole),
+      adminNotes: escapeHtml(data.adminNotes),
+      reason: escapeHtml(data.reason),
+      subject: escapeHtml(singleLine(notification.subject)),
+      confidencePct: Math.round((Number.isFinite(data.confidenceScore) ? (data.confidenceScore as number) : 0) * 100),
+    };
+    const fallbackUrl = siteUrlFallback();
+    const dashboardUrl = safeHttpUrl(data.dashboardUrl) || fallbackUrl;
+    const supportUrl = safeHttpUrl(data.supportUrl) || fallbackUrl;
+    const portfolioUrl = safeHttpUrl(data.portfolioUrl);
+    const link = (url: string | null, label: string) =>
+      url ? `<a href="${escapeHtml(url)}" class="button">${label}</a>` : '';
     
     const baseStyles = `
       <style>
@@ -145,9 +193,9 @@ class EmailService {
           <div class="certificate-card">
             <h3>Certificate Approved!</h3>
             <p>Great news! Your certificate has been reviewed and approved by our faculty.</p>
-            <p><strong>Certificate:</strong> ${data.certificateTitle}</p>
-            <p><strong>Institution:</strong> ${data.institution}</p>
-            <p><strong>Verification Method:</strong> ${data.verificationMethod || 'Manual Review'}</p>
+            <p><strong>Certificate:</strong> ${e.certificateTitle}</p>
+            <p><strong>Institution:</strong> ${e.institution}</p>
+            <p><strong>Verification Method:</strong> ${e.verificationMethod('Manual Review')}</p>
             <span class="status-badge approved">Approved</span>
           </div>
         `;
@@ -158,10 +206,10 @@ class EmailService {
           <div class="certificate-card">
             <h3>Certificate Auto-Approved!</h3>
             <p>Your certificate has been automatically verified and approved using our smart verification system.</p>
-            <p><strong>Certificate:</strong> ${data.certificateTitle}</p>
-            <p><strong>Institution:</strong> ${data.institution}</p>
-            <p><strong>Confidence Score:</strong> ${Math.round((data.confidenceScore || 0) * 100)}%</p>
-            <p><strong>Verification Method:</strong> ${data.verificationMethod || 'Automated Verification'}</p>
+            <p><strong>Certificate:</strong> ${e.certificateTitle}</p>
+            <p><strong>Institution:</strong> ${e.institution}</p>
+            <p><strong>Confidence Score:</strong> ${e.confidencePct}%</p>
+            <p><strong>Verification Method:</strong> ${e.verificationMethod('Automated Verification')}</p>
             <span class="status-badge auto-approved">Auto-Approved</span>
           </div>
         `;
@@ -172,8 +220,8 @@ class EmailService {
           <div class="certificate-card">
             <h3>Certificate Rejected</h3>
             <p>Unfortunately, your certificate could not be verified and has been rejected.</p>
-            <p><strong>Certificate:</strong> ${data.certificateTitle}</p>
-            <p><strong>Institution:</strong> ${data.institution}</p>
+            <p><strong>Certificate:</strong> ${e.certificateTitle}</p>
+            <p><strong>Institution:</strong> ${e.institution}</p>
             <p>Please ensure your certificate is clear, authentic, and meets our verification standards.</p>
             <span class="status-badge rejected">Rejected</span>
           </div>
@@ -185,9 +233,9 @@ class EmailService {
           <div class="certificate-card">
             <h3>Manual Review Required</h3>
             <p>Your certificate requires manual review by our faculty team.</p>
-            <p><strong>Certificate:</strong> ${data.certificateTitle}</p>
-            <p><strong>Institution:</strong> ${data.institution}</p>
-            <p><strong>Confidence Score:</strong> ${Math.round((data.confidenceScore || 0) * 100)}%</p>
+            <p><strong>Certificate:</strong> ${e.certificateTitle}</p>
+            <p><strong>Institution:</strong> ${e.institution}</p>
+            <p><strong>Confidence Score:</strong> ${e.confidencePct}%</p>
             <p>Our team will review your certificate and notify you of the decision soon.</p>
             <span class="status-badge pending">Pending Review</span>
           </div>
@@ -199,11 +247,11 @@ class EmailService {
           <div class="certificate-card">
             <h3>Role Request Approved!</h3>
             <p>Great news! Your role request has been approved by our admin team.</p>
-            <p><strong>Requested Role:</strong> ${data.requestedRole}</p>
-            <p><strong>Institution:</strong> ${data.institution}</p>
-            <p><strong>Admin Notes:</strong> ${data.adminNotes}</p>
+            <p><strong>Requested Role:</strong> ${e.requestedRole}</p>
+            <p><strong>Institution:</strong> ${e.institution}</p>
+            <p><strong>Admin Notes:</strong> ${e.adminNotes}</p>
             <p>You can now access your new dashboard and features.</p>
-            <a href="${data.dashboardUrl}" class="button">Access Dashboard</a>
+            ${link(dashboardUrl, 'Access Dashboard')}
             <span class="status-badge approved">Approved</span>
           </div>
         `;
@@ -214,11 +262,11 @@ class EmailService {
           <div class="certificate-card">
             <h3>Role Request Denied</h3>
             <p>Unfortunately, your role request has been denied.</p>
-            <p><strong>Requested Role:</strong> ${data.requestedRole}</p>
-            <p><strong>Reason:</strong> ${data.reason}</p>
-            <p><strong>Admin Notes:</strong> ${data.adminNotes}</p>
+            <p><strong>Requested Role:</strong> ${e.requestedRole}</p>
+            <p><strong>Reason:</strong> ${e.reason}</p>
+            <p><strong>Admin Notes:</strong> ${e.adminNotes}</p>
             <p>If you have questions, please contact our support team.</p>
-            <a href="${data.supportUrl}" class="button">Contact Support</a>
+            ${link(supportUrl, 'Contact Support')}
             <span class="status-badge rejected">Denied</span>
           </div>
         `;
@@ -230,7 +278,7 @@ class EmailService {
       <html>
         <head>
           <meta charset="utf-8">
-          <title>${notification.subject}</title>
+          <title>${e.subject}</title>
           ${baseStyles}
         </head>
         <body>
@@ -240,11 +288,11 @@ class EmailService {
               <p>Secure Academic Credential Verification</p>
             </div>
             <div class="content">
-              <h2>Hello ${data.studentName || 'Student'}!</h2>
+              <h2>Hello ${e.studentName}!</h2>
               ${content}
-              ${data.portfolioUrl ? `
+              ${portfolioUrl ? `
                 <p>
-                  <a href="${data.portfolioUrl}" class="button">View Your Portfolio</a>
+                  ${link(portfolioUrl, 'View Your Portfolio')}
                 </p>
               ` : ''}
               <p>Thank you for using CampusSync for your credential verification needs.</p>

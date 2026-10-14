@@ -1,0 +1,30 @@
+{
+  "name": "@campussync/verify",
+  "version": "0.1.0",
+  "description": "Offline verification of CampusSync student credentials (JWS + issuer public keys + signed revocation status list)",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "./src/verify.mjs",
+  "types": "./src/verify.d.mts",
+  "exports": {
+    ".": {
+      "types": "./src/verify.d.mts",
+      "default": "./src/verify.mjs"
+    }
+  },
+  "bin": {
+    "campussync-verify": "./bin/campussync-verify.mjs"
+  },
+  "files": [
+    "src",
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "jose": "^6.1.0"
+  }
+}

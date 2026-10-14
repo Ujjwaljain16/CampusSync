@@ -1,8 +1,15 @@
 import { success } from '@/lib/api';
 import { createClient } from '@supabase/supabase-js';
 
+/**
+ * Development-only setup diagnostics. In production this route does not exist
+ * (it would reveal which secrets/config are present).
+ */
 export async function GET() {
-  const isProd = process.env.NODE_ENV === 'production';
+  if (process.env.NODE_ENV === 'production') {
+    return new Response(null, { status: 404 });
+  }
+
   const diagnostics = {
     environment: {
       hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -74,11 +81,6 @@ export async function GET() {
 
   } catch (error) {
     diagnostics.supabase.error = `Connection error: ${error instanceof Error ? error.message : 'Unknown'}`;
-  }
-
-  // Never leak raw error text (which may include hostnames/policy names) in production
-  if (isProd && diagnostics.supabase.error) {
-    diagnostics.supabase.error = 'Supabase is not reachable or not fully configured';
   }
 
   return success(diagnostics);

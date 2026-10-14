@@ -40,7 +40,27 @@ export {
   getRequestedOrgId as getRecruiterRequestedOrgId,
 } from './utils/recruiter'
 
+// Organization-scoped authorization + role hierarchy
+export { authorizeOrg, resolveAdminOrg, assertSuperAdmin, fetchApprovedRoleRows, toErrorResponse } from './utils/authorize'
+export type { OrgAuthorization, AuthorizeOrgOptions } from './utils/authorize'
+export {
+  ROLE_RANK,
+  VALID_ROLES,
+  ADMIN_CLASS_ROLES,
+  ORG_ADMIN_ROLES,
+  rankOf,
+  isKnownRole,
+  isAdminClass,
+  pickHighestRow,
+  checkRoleChange,
+} from './utils/roles'
+export { writeAudit } from './utils/audit'
+export { findAuthUserByEmail } from './utils/authUsers'
+export { isUuid } from './utils/validation'
+
 // Authentication middleware
+export { withSession, withSuperAdmin } from './middleware/routeAuth'
+export type { SessionContext, SessionHandler } from './middleware/routeAuth'
 export { withAuth, withRole } from './middleware/auth'
 export type { ApiHandler, ApiHandlerWithRole } from './middleware/auth'
 
