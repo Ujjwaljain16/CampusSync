@@ -33,7 +33,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "critters": "^0.0.23",
-    "dotenv": "^17.2.2",
+    "dotenv": "^18.0.7",
     "html2canvas": "^1.4.1",
     "jose": "6.1.0",
     "jspdf": "^4.2.1",
