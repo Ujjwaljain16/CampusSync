@@ -18,6 +18,22 @@ docker run -d --name cs-bench -e POSTGRES_PASSWORD=bench --shm-size=1g postgres:
 for i in $(seq 1 30); do docker exec cs-bench pg_isready -U postgres >/dev/null 2>&1 && break; sleep 2; done
 
 docker exec cs-bench mkdir -p /tmp/q /tmp/mig
+
+# record the environment of THIS run (added after the run reported in docs/BENCHMARKS.md)
+{
+  echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "git_revision=$(git -C "$APP" rev-parse HEAD 2>/dev/null)"
+  echo "git_dirty=$(git -C "$APP" status --porcelain 2>/dev/null | wc -l) changed files"
+  docker --version
+  docker info --format 'docker_cpus={{.NCPU}} docker_mem_bytes={{.MemTotal}} docker_server={{.ServerVersion}} docker_os={{.OperatingSystem}}'
+  echo "image_digest=$(docker image inspect postgres:17 --format '{{index .RepoDigests 0}}' 2>/dev/null)"
+  docker exec cs-bench psql -U postgres -Atc "select 'postgres_version=' || version()"
+  for k in shared_buffers effective_cache_size work_mem max_connections fsync synchronous_commit random_page_cost; do
+    docker exec cs-bench psql -U postgres -Atc "select '$k=' || current_setting('$k')"
+  done
+  docker exec cs-bench pgbench --version
+  echo "host_cpu=$(wmic cpu get name 2>/dev/null | sed -n 2p | tr -d '' || true)"
+} > "$OUT/environment.txt" 2>&1
 docker cp "$HERE/q/." cs-bench:/tmp/q/
 for f in run.sh seed.sql explain_OLD.sql explain_NEW.sql; do docker cp "$HERE/$f" cs-bench:/tmp/$f; done
 docker cp "$APP/supabase/tests/live-schema.sql" cs-bench:/tmp/live-schema.sql
