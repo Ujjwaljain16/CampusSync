@@ -1,0 +1,18 @@
+date_utc=2026-10-15T10:40:21Z
+repeats=3
+git_revision=a704d22e498642a42486c18236627a827c86b099
+git_uncommitted_files=1
+Docker version 28.0.4, build b8034c0
+docker_cpus=4 docker_mem_bytes=16765378560 docker_server=28.0.4 docker_os=Ubuntu 24.04.5 LTS
+image_digest=postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+postgres_version=PostgreSQL 17.11 (Debian 17.11-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+shared_buffers=1GB
+effective_cache_size=3GB
+work_mem=16MB
+max_connections=100
+fsync=on
+synchronous_commit=on
+random_page_cost=4
+pgbench (PostgreSQL) 17.11 (Debian 17.11-1.pgdg13+2)
+host_cpu=INTEL(R) XEON(R) PLATINUM 8573C
+host_nproc=4

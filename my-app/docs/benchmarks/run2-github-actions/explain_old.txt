@@ -1,0 +1,33 @@
+=== review queue (pending, one organization)
+                                                                        QUERY PLAN                                                                         
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.42..3229.54 rows=50 width=188) (actual time=0.055..4.145 rows=50 loops=1)
+   Buffers: shared hit=183 read=852
+   ->  Index Scan using idx_certificates_org_created on certificates  (cost=0.42..80276.29 rows=1243 width=188) (actual time=0.054..4.139 rows=50 loops=1)
+         Index Cond: (organization_id = '31880435-70d7-460a-9992-d615c15d7193'::uuid)
+         Filter: (verification_status = 'pending'::text)
+         Rows Removed by Filter: 976
+         Buffers: shared hit=183 read=852
+ Planning:
+   Buffers: shared hit=412
+ Planning Time: 0.705 ms
+ Execution Time: 4.164 ms
+(11 rows)
+
+=== credential lookup by certificate (JSON containment)
+                                                                                         QUERY PLAN                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gather  (cost=1000.00..38337.07 rows=27 width=53) (actual time=171.244..174.370 rows=1 loops=1)
+   Workers Planned: 2
+   Workers Launched: 2
+   Buffers: shared hit=6 read=35001
+   ->  Parallel Seq Scan on verifiable_credentials  (cost=0.00..37334.37 rows=11 width=53) (actual time=169.909..170.291 rows=0 loops=3)
+         Filter: ((status = 'active'::text) AND (credential @> jsonb_build_object('credentialSubject', jsonb_build_object('certificateId', '77fafeb9-1a0a-4783-bfea-eda5656bd593'::text))))
+         Rows Removed by Filter: 93335
+         Buffers: shared hit=6 read=35001
+ Planning:
+   Buffers: shared hit=30
+ Planning Time: 0.227 ms
+ Execution Time: 174.384 ms
+(12 rows)
+
