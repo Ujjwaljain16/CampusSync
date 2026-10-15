@@ -91,6 +91,67 @@ jobs:
       - name: Migration checks
         run: npm test
 
+  migrate-runner:
+    name: Migration runner (real Postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: my-app
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway credentials of a CI-only container that is destroyed with the job; not a real database.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: my-app/.nvmrc
+
+      # Replays the whole chain (baseline files included) on a model of the production schema with the same runner that
+      # production uses. This is what validates a new migration file in every pull request. It is a model, not production:
+      # see docs/MIGRATIONS.md.
+      - name: Load the model schema (and a stand-in for the storage schema)
+        run: |
+          psql --version
+          psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f supabase/tests/live-schema.sql
+          psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f supabase/migrate/ci-storage-stub.sql
+
+      - name: Create the tracking table
+        run: node supabase/migrate/migrate.mjs init
+
+      - name: Plan
+        run: node supabase/migrate/migrate.mjs plan --replay-baseline
+
+      - name: Apply the whole chain
+        run: node supabase/migrate/migrate.mjs apply --replay-baseline
+
+      - name: Nothing may be pending afterwards (idempotency of the bookkeeping)
+        run: |
+          out="$(node supabase/migrate/migrate.mjs plan)"
+          echo "$out"
+          if [ "$out" != "Nothing pending." ]; then
+            echo "::error::migrations are still pending after a full apply"
+            exit 1
+          fi
+
+      - name: Status
+        run: node supabase/migrate/migrate.mjs status
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

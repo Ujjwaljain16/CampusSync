@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- Database hardening. APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent.
 -- Idempotent. Run in the Supabase SQL editor.
 --

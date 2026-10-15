@@ -210,7 +210,8 @@ write it; they read their own rows, organization admins read their organization'
 
 Rate limit counters: the table `public.rate_limits` and the function `rate_limit_hit` (migration
 `20261016_02_rate_limits.sql`, service role only, reached through an RPC) back the global limiter; the code works
-without them in fail-open mode (owner step, status in [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) "Migration status").
+without them in fail-open mode (applied automatically, see [MIGRATIONS.md](MIGRATIONS.md); status in
+[DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) "Migration status").
 
 Storage: bucket `certificates` (name fixed in `src/lib/services/storageUrl.ts`); files are served only through signed
 URLs (see above). There is no realtime: the `waiting`, `faculty/waiting` and `recruiter/waiting` pages poll the server
@@ -228,7 +229,8 @@ URLs (see above). There is no realtime: the `waiting`, `faculty/waiting` and `re
 - The storage bucket `certificates`: the code serves files only through short-lived signed URLs after an authorization
   check and `certificates.storage_path` is recorded for new certificates. The migration
   `20261016_01_private_certificates_bucket.sql` makes the bucket private and adds owner-folder storage policies; it is
-  an **owner step to run after the code is deployed**, and until it is applied the bucket is still public. Production
+  applied **automatically after the production deployment succeeds** (a `phase=post` migration, see
+  [MIGRATIONS.md](MIGRATIONS.md)), and until it is applied the bucket is still public. Production
   status: "Migration status" in [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md); procedure and rollback in
   [PRIVATE-STORAGE.md](PRIVATE-STORAGE.md).
 - Specifics of individual policies are intentionally not described in this public repository.
@@ -257,7 +259,7 @@ browser; a test fails if such a name contains `SERVICE`, `SECRET` or `PRIVATE`.
 
 - Rate limiting: the in-memory limiter is per instance (a best-effort brake on serverless) and covers most endpoints.
   The Postgres-backed global limiter covers login completion, signup, the email checks, OCR, public verification, the
-  public portfolio and the SD routes; it needs migration `20261016_02_rate_limits.sql` (owner step) and fails open to
+  public portfolio and the SD routes; it needs migration `20261016_02_rate_limits.sql` (applied automatically) and fails open to
   the in-memory limiter when the database call fails. Login and password reset use the in-memory limiter only. Fixed
   windows allow a burst of up to twice the limit across a window boundary.
 - The original schema is not in the repository as a baseline; behaviour that depends on policies outside the
@@ -274,6 +276,6 @@ browser; a test fails if such a name contains `SERVICE`, `SECRET` or `PRIVATE`.
   previous public key stays listed in `VC_ISSUER_PREVIOUS_PUBLIC_JWKS`, unless they are re-signed with the rotation
   tool.
 - The revocation status list, transparency log and SD-JWT are implemented but not enabled in the production deployment.
-- Certificate files: the code uses signed URLs only, but the bucket stays public until the owner applies
-  `20261016_01_private_certificates_bucket.sql` after deploying the code. A signed URL is a bearer link for up to five
+- Certificate files: the code uses signed URLs only, but the bucket stays public until the post-deploy migration
+  `20261016_01_private_certificates_bucket.sql` has been applied (automatically, see [MIGRATIONS.md](MIGRATIONS.md)). A signed URL is a bearer link for up to five
   minutes.

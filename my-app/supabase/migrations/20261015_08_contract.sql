@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- Schema cleanup, step 8 of 8: CONTRACT (remove what is dead).
 -- *** APPLY ONLY AFTER the application cleanup PR is deployed (list in docs/DATABASE-SCHEMA.md, "Code changes"). ***
 -- APPLIED to production 2026-10-15. One transaction. Plain ASCII on purpose. Requires 20261015_01..04 and authz_05a/05b to be applied.

@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent.
 --
 -- Domain squatting: nothing prevented two organizations from claiming the same

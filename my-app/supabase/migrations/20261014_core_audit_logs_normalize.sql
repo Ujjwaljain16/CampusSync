@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent.
 --
 -- PROPOSAL: normalize `audit_logs` so every insert in the app resolves.

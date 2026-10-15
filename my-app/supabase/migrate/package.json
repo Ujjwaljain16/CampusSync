@@ -1,0 +1,14 @@
+{
+  "name": "campussync-migrate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Migration runner for supabase/migrations (Node built-ins and the psql CLI only, no dependencies)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "plan": "node migrate.mjs plan",
+    "status": "node migrate.mjs status"
+  }
+}

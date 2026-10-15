@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- Schema cleanup, step 6 of 8: CREDENTIALS ARE ISSUED AND REVOKED BY THE BACKEND ONLY.
 -- *** APPLY ONLY AFTER the application change below is deployed. ***  APPLIED to production 2026-10-15. Idempotent; one transaction.
 -- Plain ASCII on purpose.

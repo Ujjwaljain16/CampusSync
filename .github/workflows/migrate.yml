@@ -1,0 +1,225 @@
+name: Apply database migrations
+
+# Applies my-app/supabase/migrations/* to the production database with my-app/supabase/migrate/migrate.mjs.
+# Setup (one time) and conventions: my-app/docs/MIGRATIONS.md.
+#
+#   push to main (migration files changed) -> job "pre"  : migrations without a directive (before/with the deploy)
+#   production deployment succeeded        -> job "post" : migrations marked "-- migrate: phase=post"
+#   manual run                             -> job "manual": plan / apply / init
+#
+# Every job uses the GitHub environment "production-db": add required reviewers to that environment to get a manual
+# approval step before anything touches the database.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'my-app/supabase/migrations/**'
+      - 'my-app/supabase/migrate/**'
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan = show what is pending (no changes), apply = run pending migrations, init = one-time setup of the tracking table'
+        type: choice
+        options: [plan, apply, init]
+        default: plan
+      phase:
+        description: 'Which phase to plan/apply (ignored by init)'
+        type: choice
+        options: [pre, post, all]
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  pre:
+    name: Apply pre migrations
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production-db
+    concurrency:
+      group: database-migrations
+      cancel-in-progress: false
+    env:
+      DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+      PHASE: pre
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check configuration
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::The secret SUPABASE_DB_URL is not set on the environment production-db. See my-app/docs/MIGRATIONS.md, section One-time setup."
+            echo "### Database migrations: not configured" >> "$GITHUB_STEP_SUMMARY"
+            echo "The secret \`SUPABASE_DB_URL\` is missing. See \`my-app/docs/MIGRATIONS.md\` (One-time setup)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          psql --version
+          node --version
+
+      - name: Plan
+        run: |
+          set -o pipefail
+          node supabase/migrate/migrate.mjs plan --phase "$PHASE" 2>&1 | tee "$RUNNER_TEMP/plan.txt"
+        working-directory: my-app
+
+      - name: Apply
+        run: |
+          set -o pipefail
+          node supabase/migrate/migrate.mjs apply --phase "$PHASE" 2>&1 | tee "$RUNNER_TEMP/apply.txt"
+        working-directory: my-app
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Database migrations (phase: $PHASE)"
+            echo '```'
+            grep -hE '^(Pending|Nothing|  (pre|post) |applied|FAILED|DRIFT|Summary|Refusing)' "$RUNNER_TEMP/plan.txt" "$RUNNER_TEMP/apply.txt" 2>/dev/null || echo "(no output)"
+            echo '```'
+            if [ "${{ job.status }}" != "success" ]; then
+              echo "The run failed. Later files were not run. Read the log of the Apply step, fix forward with a NEW migration file, see my-app/docs/MIGRATIONS.md (Troubleshooting)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # A deployment_status event fires for every deployment. Only look at production deployments that succeeded, and only
+  # ask for approval when the deployed commit actually changed migration files.
+  detect:
+    name: Did the deployed commit change migrations?
+    if: github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+          fetch-depth: 2
+
+      - id: diff
+        run: |
+          if ! git rev-parse --verify -q HEAD^ >/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only HEAD^ HEAD -- my-app/supabase/migrations | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The deployed commit did not change migration files; nothing to apply after this deployment."
+          fi
+
+  post:
+    name: Apply post migrations
+    needs: detect
+    if: github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production' && needs.detect.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: production-db
+    concurrency:
+      group: database-migrations
+      cancel-in-progress: false
+    env:
+      DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+      PHASE: post
+    steps:
+      # The files of the commit that was actually deployed, not whatever main is by now.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+
+      - name: Check configuration
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::The secret SUPABASE_DB_URL is not set on the environment production-db. See my-app/docs/MIGRATIONS.md, section One-time setup."
+            echo "### Database migrations: not configured" >> "$GITHUB_STEP_SUMMARY"
+            echo "The secret \`SUPABASE_DB_URL\` is missing. See \`my-app/docs/MIGRATIONS.md\` (One-time setup)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          psql --version
+          node --version
+
+      - name: Plan
+        run: |
+          set -o pipefail
+          node supabase/migrate/migrate.mjs plan --phase "$PHASE" 2>&1 | tee "$RUNNER_TEMP/plan.txt"
+        working-directory: my-app
+
+      - name: Apply
+        run: |
+          set -o pipefail
+          node supabase/migrate/migrate.mjs apply --phase "$PHASE" 2>&1 | tee "$RUNNER_TEMP/apply.txt"
+        working-directory: my-app
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Database migrations (phase: $PHASE)"
+            echo '```'
+            grep -hE '^(Pending|Nothing|  (pre|post) |applied|FAILED|DRIFT|Summary|Refusing)' "$RUNNER_TEMP/plan.txt" "$RUNNER_TEMP/apply.txt" 2>/dev/null || echo "(no output)"
+            echo '```'
+            if [ "${{ job.status }}" != "success" ]; then
+              echo "The run failed. Later files were not run. Read the log of the Apply step, fix forward with a NEW migration file, see my-app/docs/MIGRATIONS.md (Troubleshooting)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  manual:
+    name: Manual run (${{ inputs.mode }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production-db
+    concurrency:
+      group: database-migrations
+      cancel-in-progress: false
+    env:
+      DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+      MODE: ${{ inputs.mode }}
+      PHASE: ${{ inputs.phase }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check configuration
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::The secret SUPABASE_DB_URL is not set on the environment production-db. See my-app/docs/MIGRATIONS.md, section One-time setup."
+            echo "### Database migrations: not configured" >> "$GITHUB_STEP_SUMMARY"
+            echo "The secret \`SUPABASE_DB_URL\` is missing. See \`my-app/docs/MIGRATIONS.md\` (One-time setup)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          psql --version
+          node --version
+
+      - name: Plan
+        if: env.MODE != 'init'
+        run: |
+          set -o pipefail
+          node supabase/migrate/migrate.mjs plan --phase "$PHASE" 2>&1 | tee "$RUNNER_TEMP/plan.txt"
+        working-directory: my-app
+
+      - name: Apply
+        if: env.MODE == 'apply'
+        run: |
+          set -o pipefail
+          node supabase/migrate/migrate.mjs apply --phase "$PHASE" 2>&1 | tee "$RUNNER_TEMP/apply.txt"
+        working-directory: my-app
+
+      - name: Init (create the tracking table, record the baseline)
+        if: env.MODE == 'init'
+        run: |
+          set -o pipefail
+          node supabase/migrate/migrate.mjs init 2>&1 | tee "$RUNNER_TEMP/init.txt"
+          node supabase/migrate/migrate.mjs status 2>&1 | tee "$RUNNER_TEMP/status.txt"
+        working-directory: my-app
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Database migrations (mode: $MODE, phase: $PHASE)"
+            echo '```'
+            grep -hE '^(Pending|Nothing|  (pre|post) |applied|FAILED|DRIFT|Summary|Refusing|init:|warning:|baseline |skipped |pending-|modified |[0-9]+ applied)' "$RUNNER_TEMP"/plan.txt "$RUNNER_TEMP"/apply.txt "$RUNNER_TEMP"/init.txt "$RUNNER_TEMP"/status.txt 2>/dev/null || echo "(no output)"
+            echo '```'
+            if [ "${{ job.status }}" != "success" ]; then
+              echo "The run failed. See my-app/docs/MIGRATIONS.md (Troubleshooting)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

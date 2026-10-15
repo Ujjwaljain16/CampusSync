@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- Schema cleanup, step 1 of 5: EXPAND (additive; the application code deployed today keeps working).
 -- APPLIED to production 2026-10-15. Run 20261015_00_preflight.sql first on a new database. Idempotent; one transaction.
 -- Plain ASCII on purpose. Nothing here drops or narrows anything except the profiles.role CHECK (widened).

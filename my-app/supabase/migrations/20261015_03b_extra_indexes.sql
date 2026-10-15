@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- Schema cleanup, step 3b: drop credential indexes that step 03's new ones make redundant.
 -- Idempotent; one transaction. Plain ASCII on purpose. Safe to apply right after 20261015_03.
 --

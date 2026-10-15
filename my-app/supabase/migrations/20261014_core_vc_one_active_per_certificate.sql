@@ -1,3 +1,4 @@
+-- migrate: skip
 -- SUPERSEDED by vc_one_active_per_certificate in 20261015_03_indexes.sql. Idempotent.
 --
 -- Goal: at most ONE active verifiable credential per certificate.

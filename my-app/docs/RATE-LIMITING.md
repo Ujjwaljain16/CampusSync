@@ -53,8 +53,10 @@ Consequence: the code works before the migration is applied (in fail-open mode, 
 
 ## Applying the migration
 
-1. Deploy the application code first.
-2. Apply `supabase/migrations/20261016_02_rate_limits.sql` (SQL editor or `supabase db push`). It is idempotent and runs in one transaction.
+1. Merge the pull request. The migration `supabase/migrations/20261016_02_rate_limits.sql` is applied automatically by the
+   `pre` job of the "Apply database migrations" workflow (see [MIGRATIONS.md](./MIGRATIONS.md)); it is additive, idempotent
+   and runs in one transaction, and the code works with or without it (fail-open).
+2. Check the workflow run succeeded.
 3. Confirm the warnings stop. Quick check as the service role: `select * from public.rate_limit_hit('smoke-test', 60, 5);` returns `allowed = true`. Remove the test row with `delete from public.rate_limits where key = 'smoke-test';`.
 
 Rollback: `drop function public.rate_limit_hit(text, integer, integer); drop table public.rate_limits;` (the code simply fails open again).

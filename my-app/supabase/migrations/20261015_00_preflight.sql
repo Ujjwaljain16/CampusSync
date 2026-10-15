@@ -1,3 +1,4 @@
+-- migrate: skip
 -- Schema cleanup, step 0: PRE-FLIGHT (read-only). Run this first and read every row.
 -- Any row with ok = false is a blocker or a decision to make before applying 20261015_01 onwards.
 -- Plain ASCII on purpose (pastes cleanly into the Supabase SQL editor).
