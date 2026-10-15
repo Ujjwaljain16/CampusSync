@@ -46,7 +46,7 @@ jobs:
       DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
       PHASE: pre
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check configuration
         run: |
@@ -93,7 +93,7 @@ jobs:
     outputs:
       changed: ${{ steps.diff.outputs.changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.deployment.sha }}
           fetch-depth: 2
@@ -123,7 +123,7 @@ jobs:
       PHASE: post
     steps:
       # The files of the commit that was actually deployed, not whatever main is by now.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.deployment.sha }}
 
@@ -176,7 +176,7 @@ jobs:
       MODE: ${{ inputs.mode }}
       PHASE: ${{ inputs.phase }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check configuration
         run: |
