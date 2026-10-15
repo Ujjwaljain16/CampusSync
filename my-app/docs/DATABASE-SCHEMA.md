@@ -160,8 +160,8 @@ do not apply both. `20261014_authz_05a/b/c` must be applied before step 08 (it r
 | `20261014_tlog_transparency_log` | **not applied (optional module off)** | needed only with `TRANSPARENCY_LOG_ENABLED=true` |
 | `20261014_sd_issuances` | **not applied (optional module off)** | accounting table for `SD_JWT_ENABLED=true` |
 | `20261015_00` to `08`, `03b` | applied | the cleanup described above |
-| `20261016_01_private_certificates_bucket` | **pending: applied automatically after the production deploy succeeds (`phase=post`, see [MIGRATIONS.md](./MIGRATIONS.md))** | makes the `certificates` storage bucket private and adds owner-folder storage policies; see `docs/PRIVATE-STORAGE.md` (rollback included) |
-| `20261016_02_rate_limits` | **pending: applied automatically with the next merge (`phase=pre`, see [MIGRATIONS.md](./MIGRATIONS.md))** (the code runs without it, failing open) | `rate_limits` table and `rate_limit_hit` function for the global limiter; see `docs/RATE-LIMITING.md`; covered by the migration checks |
+| `20261016_01_private_certificates_bucket` | **applied 2026-10-15** (phase `post`, by the migration workflow; see [MIGRATIONS.md](./MIGRATIONS.md)) | makes the `certificates` storage bucket private and adds owner-folder storage policies; see `docs/PRIVATE-STORAGE.md` (rollback included) |
+| `20261016_02_rate_limits` | **applied 2026-10-15** (phase `pre`, by the migration workflow; see [MIGRATIONS.md](./MIGRATIONS.md)) | `rate_limits` table and `rate_limit_hit` function for the global limiter; see `docs/RATE-LIMITING.md`; covered by the migration checks |
 
 ### Application changes that gate the later steps
 

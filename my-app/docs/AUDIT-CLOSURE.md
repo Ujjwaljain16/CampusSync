@@ -3,7 +3,7 @@
 Independent audit of commit `91d0c77` (2026-10-14) and what was done about each finding. Statuses are deliberately
 conservative:
 
-- **Fixed in code and deployed** — merged to `main` (everything up to and including PR #26) and deployed, with tests
+- **Fixed in code and deployed** — merged to `main` (everything up to and including PR #32) and deployed, with tests
   that fail on the old behaviour.
 - **Implemented, pending deploy / owner step** — written and tested in the repository (not yet part of the deployed
   application), and/or needing a step only the owner can take (a migration, a key rotation, a setting). It is not
@@ -16,25 +16,25 @@ database, and the schema-cleanup migrations are tested against a model of the pr
 production database itself. After the deployment, public credential verification, `/.well-known/did.json` and
 `/.well-known/jwks.json` were checked on the live site.
 
-## Status as of the schema cleanup
+## Current status (2026-10-16)
 
-- **Code:** every code fix listed below is merged and deployed (PR #26 and earlier).
-- **Database:** the schema cleanup `my-app/supabase/migrations/20261015_*` (steps 00 to 08 plus 03b) has been applied to
-  production. The design and the policy model are in [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md). The earlier
-  `20261014_*` files are versioned patches, some applied and some optional; which is which is listed in the "Migration
-  status" section of that document. The migrations are not a complete baseline dump of the original schema, which is
-  still not in the repository.
+- **Code:** every code fix listed below is merged and deployed (PR #11, then PRs #26 to #32).
+- **Database:** the schema cleanup `my-app/supabase/migrations/20261015_*` and the two hardening migrations
+  `20261016_01` (private certificates bucket) and `20261016_02` (rate limits) have been applied to production. The last
+  two were applied on 2026-10-15 by the automatic migration workflow ([MIGRATIONS.md](MIGRATIONS.md)). Design and policy
+  model: [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md); status per file: its "Migration status" section. The migrations are
+  not a complete baseline dump of the original schema, which is still not in the repository.
+- **Checked on the live site after those migrations:** an existing certificate's old public object URL went from HTTP 200
+  to blocked; a public endpoint allowed 30 requests and then answered 429 with `Retry-After`; public credential
+  verification, `/.well-known/did.json` and `/.well-known/jwks.json` respond. A browser end-to-end pass of the login,
+  upload, review and recruiter flows has not been completed yet.
 - **Optional features:** the revocation status list, the transparency log and SD-JWT selective disclosure are
   implemented and unit-tested but switched off in production (their flags are off and their tables have not been
   created there).
-- **Credentials:** on 2026-10-15 the Supabase API keys were migrated to the new publishable / secret keys with the
-  legacy JWT-based keys disabled, and the Gemini API key was replaced. The credential-signing key has **not** been
-  rotated yet (owner action).
-- **Implemented, pending deploy / owner step** (see "Hardening changes after the cleanup" below): HttpOnly server-managed
-  session cookies, private certificate files through signed URLs (the bucket migration is an owner step after the
-  deploy), a global Postgres-backed rate limiter (migration is an owner step; the code fails open without it), optional
-  webhook alerting with a deep health probe, and the issuer-key re-sign tool.
-- **Still open:** rotation of the credential-signing key (owner action), tracing/metrics/dashboards, and the Next.js
+- **Credentials:** the Supabase API keys were migrated to the new publishable / secret keys with the legacy JWT-based
+  keys disabled, and the Gemini API key was replaced, both on 2026-10-15. Rotating the credential-signing key is an
+  owner action (see C-01).
+- **Still open:** C-01 (owner action), tracing/metrics/dashboards, browser end-to-end tests, and the Next.js
   major-version upgrade.
 
 ## P1 findings
@@ -74,32 +74,29 @@ specifics are intentionally not described in this public repository. Status: the
 00 to 08) is **applied** to production and the application code no longer depends on the removed objects. For each
 `20261014_*` patch see "Migration status" in [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md).
 
-Separately: the `certificates` storage bucket is **still public in the deployed system** until the owner applies
-`20261016_01_private_certificates_bucket.sql` (see below); user-client deletes on `certificates` have no policy and are
-done with a service-role client after app-level authorization.
+The `certificates` storage bucket was made private by `20261016_01` (see below); user-client deletes on `certificates`
+have no policy and are done with a service-role client after app-level authorization.
 
 ## Hardening changes after the cleanup
 
-Implemented and tested in the repository, after the deployment that the sections above describe. Status for each:
-**Implemented, pending deploy / owner step**. They are not counted as closed until the step in the last column is done;
-for migrations, production status is recorded in "Migration status" in [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md).
+All merged and deployed (PR #28 and later). Status for each: **Fixed in code and deployed**, with the verification noted.
 
-| Item | What the code does | Remaining step | Doc |
+| Item | What it does | Verification | Doc |
 |---|---|---|---|
-| HttpOnly session cookies | The session lives only in HttpOnly, SameSite=Lax cookies written by the server (Secure in production); login, logout and password reset are server routes; the browser Supabase client and realtime subscriptions are gone (waiting pages poll). Closes the "cookies are not HttpOnly" limitation. | Deploy; check the Supabase redirect allow-list (`<site>/api/auth/callback**`); run the smoke checklist. Sessions created before the deploy are rewritten HttpOnly on their next refresh. | [SESSION-COOKIES.md](SESSION-COOKIES.md), [Password-reset.md](Password-reset.md) |
-| Private certificate files (D-11) | `GET /api/certificates/[id]/file` returns a 300 s signed URL after an authorization check; the UI uses it for every view. | Deploy the code, **then** apply `20261016_01_private_certificates_bucket.sql`. Until then the bucket is public. | [PRIVATE-STORAGE.md](PRIVATE-STORAGE.md) |
-| Global rate limiting | Postgres-backed `rate_limit_hit` through the service role on login completion, signup, the email checks, OCR, public verify, public portfolio and SD routes; fails open to the in-memory limiter. All other endpoints keep the in-memory limiter. | Deploy, then apply `20261016_02_rate_limits.sql` (the code works without it, in fail-open mode). | [RATE-LIMITING.md](RATE-LIMITING.md) |
-| Monitoring and alerting | Optional throttled, redacted webhook alerts for unexpected 5xx / `logger.error`, `onRequestError`, and `GET /api/health?deep=1`. `withAuth` / `withRole` log unexpected exceptions through `logger.error`. No APM, tracing or dashboards. | Set `ALERT_WEBHOOK_URL` and an external uptime monitor; name someone who reads the channel. | [MONITORING.md](MONITORING.md) |
-| Issuer key re-sign tool | `POST /api/admin/vcs/resign` (super admin) re-signs stored active credentials with the current key so the previous public key can be dropped. | Rotate the issuer key with the runbook (owner action, C-01). | [KEY-ROTATION.md](KEY-ROTATION.md) |
-| Approval history access | `/api/certificates/approval-history` is open to faculty, admin, org_admin and super_admin within their own organization scope. | Deploy. | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| HttpOnly session cookies | The session lives only in HttpOnly, SameSite=Lax cookies written by the server (Secure in production); login, logout and password reset are server routes; the browser Supabase client and realtime subscriptions are gone (waiting pages poll). Closes the "cookies are not HttpOnly" limitation. | unit tests against a stubbed auth server; a browser end-to-end pass is still to do; sessions created before the deploy are rewritten HttpOnly on their next refresh | [SESSION-COOKIES.md](SESSION-COOKIES.md), [Password-reset.md](Password-reset.md) |
+| Private certificate files (D-11) | `GET /api/certificates/[id]/file` returns a 300 s signed URL after an authorization check; the UI uses it for every view; migration `20261016_01` made the bucket private. | an existing file's old public URL went from HTTP 200 to blocked after the migration | [PRIVATE-STORAGE.md](PRIVATE-STORAGE.md) |
+| Global rate limiting | Postgres-backed `rate_limit_hit` through the service role on login completion, signup, the email checks, OCR, public verify, public portfolio and SD routes; fails open to the in-memory limiter. All other endpoints keep the in-memory limiter. Migration `20261016_02` applied. | on the public verify endpoint 30 requests were allowed, then 429 with `Retry-After` | [RATE-LIMITING.md](RATE-LIMITING.md) |
+| Monitoring and alerting | Optional throttled, redacted webhook alerts for unexpected 5xx / `logger.error`, `onRequestError`, and `GET /api/health?deep=1`. `withAuth` / `withRole` log unexpected exceptions through `logger.error`. No APM, tracing or dashboards. The owner chooses whether to set `ALERT_WEBHOOK_URL` and an uptime monitor. | unit tests; the deep health probe answers on the live site | [MONITORING.md](MONITORING.md) |
+| Issuer key re-sign tool | `POST /api/admin/vcs/resign` (super admin) re-signs stored active credentials with the current key so a previous public key can be dropped. | unit tests; it has not been run in production | [KEY-ROTATION.md](KEY-ROTATION.md) |
+| Approval history access | `/api/certificates/approval-history` is open to faculty, admin, org_admin and super_admin within their own organization scope. | unit tests | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Automatic migrations | Pending migration files are applied in order by a gated workflow; files that must wait for the deploy are applied after it succeeds; CI replays the chain on PostgreSQL 17 for every pull request. | CI job on a real PostgreSQL; the workflow applied `20261016_01` and `_02` in production | [MIGRATIONS.md](MIGRATIONS.md) |
 
 ## Not addressed
 
-- Key rotation of the leaked credential-signing key (owner action, C-01); the re-sign tool and runbook exist.
-- Applying the two `20261016_*` migrations (private bucket, rate limits) after the code is deployed (owner steps).
+- Key rotation of the credential-signing key (owner action, C-01); the re-sign tool and runbook exist.
 - Tracing, metrics and dashboards (only the optional alert webhook and the deep health probe exist).
 - Rate limiting is global only on the endpoints listed in [RATE-LIMITING.md](RATE-LIMITING.md); the rest is per instance.
 - Next.js major-version upgrade (the dependency-audit gate lists the accepted advisories with reasons and review dates in `my-app/audit-allowlist.json`).
-- Real end-to-end tests against a Supabase test project.
+- Real end-to-end tests: a browser pass against the live site and an automated suite against a Supabase test project.
 - Pending invitations: invited users get `pending` roles and nothing activates them on acceptance yet.
 - Dependency clean-up (`critters`, `msw`, `happy-dom`, …).
