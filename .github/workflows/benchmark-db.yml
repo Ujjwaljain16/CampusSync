@@ -1,0 +1,42 @@
+name: Database benchmark (manual)
+
+# Runs the before/after database benchmark (docs/BENCHMARKS.md) on a GitHub-hosted runner. It uses a throwaway
+# PostgreSQL container with synthetic data; it never touches any real database and uses no secrets.
+# Start it from the Actions tab ("Run workflow") or:  gh workflow run benchmark-db.yml -f repeats=3
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: Rounds to run (each round runs every query on both schemas)
+        required: false
+        default: '3'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: PostgreSQL 17, about 1M certificates
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Runner resources
+        run: |
+          nproc
+          free -h
+          df -h /
+
+      - name: Run benchmark
+        run: REPEATS="${{ inputs.repeats }}" bash my-app/scripts/bench-db/orchestrate.sh
+
+      - name: Summarise (median and range across rounds)
+        run: python3 my-app/scripts/bench-db/summarize.py bench-out | tee bench-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-out
+          path: bench-out
+          retention-days: 90

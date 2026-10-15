@@ -38,7 +38,8 @@ docker exec cs-bench mkdir -p /tmp/q /tmp/mig
     docker exec cs-bench psql -U postgres -Atc "select '$k=' || current_setting('$k')"
   done
   docker exec cs-bench pgbench --version
-  echo "host_cpu=$(wmic cpu get name 2>/dev/null | sed -n 2p | tr -d '\r')"
+  echo "host_cpu=$(lscpu 2>/dev/null | sed -n "s/^Model name: *//p" | head -1)$(wmic cpu get name 2>/dev/null | sed -n 2p | tr -d "")"
+  echo "host_nproc=$(nproc 2>/dev/null)"
 } > "$OUT/environment.txt" 2>&1
 
 docker cp "$HERE/q/." cs-bench:/tmp/q/
