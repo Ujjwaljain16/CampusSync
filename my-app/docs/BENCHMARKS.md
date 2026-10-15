@@ -35,7 +35,7 @@ Differences between the two variants that matter for the results:
 | Host | Intel Core i5-13450HX (10 cores, 16 threads), 15.7 GB RAM, Windows 11 |
 | Load generator | `pgbench` 17.11 inside the container, `-n -c 8 -j 4`, custom scripts, 5 s warm-up (not recorded) then 20 s measured per query |
 | Percentiles | computed from `pgbench -l` per-transaction logs (all transactions of the 20 s run, `n` in the CSV) |
-| Repetitions | **one run per query and schema.** No variance estimate exists; treat differences under about 15 percent as noise. |
+| Repetitions | **one run per query and schema.** No variance estimate exists; treat differences under about 15 percent as noise. `orchestrate.sh` can now repeat the whole comparison (`REPEATS=3`, interleaved rounds, fixed-size insert test, plus the unbounded pending query) using `run-repeats.sh`, but no repeated run has been completed yet, so every number in this document is still a single run. |
 | Cache state | warm: the data set (about 1.6 to 2.0 GB) fits in `shared_buffers` plus the OS cache, and each query had a warm-up |
 | Data generator | `scripts/bench-db/seed.sql` (`setseed(0.42)`); counts below; loaded with triggers and foreign-key checks disabled (`session_replication_role = replica`) for speed, generated consistent |
 | Data size | 1,000,006 certificates (5 percent pending, 20 percent rejected, 75 percent verified), 1,000,003 audit rows, 280,005 credentials (every 50th revoked), 102,007 users and profiles, 43 organizations |
