@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- APPLIED to production (docs/DATABASE-SCHEMA.md, "Migration status"). Idempotent.
 --
 -- Per-student privacy switches used by the recruiter routes, the public

@@ -1,3 +1,4 @@
+-- migrate: skip
 -- Note only; superseded by 20261016_01_private_certificates_bucket.sql. Idempotent.
 -- (everything below is commented out: inspect first, then decide)
 --

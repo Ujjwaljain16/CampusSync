@@ -76,13 +76,14 @@ To rotate again:
   [`my-app/docs/DATABASE-SCHEMA.md`](my-app/docs/DATABASE-SCHEMA.md); which migrations are applied: its "Migration status"
   section.
 - The migration files are versioned patches, not a complete baseline dump of the original schema (which is not in the
-  repository). Run a migration on a staging copy first, and keep the applied SQL in version control.
+  repository). New migrations are validated in CI on a real PostgreSQL and applied by a gated workflow, never by hand
+  ([`MIGRATIONS.md`](my-app/docs/MIGRATIONS.md)); keep the applied SQL in version control.
 - Authorization comes only from `user_roles`. `audit_logs` is append-only and written only by the backend; credentials
   (`verifiable_credentials`) are issued and revoked only by the backend after authorization checks.
 - Certificate files: the code serves them only through short-lived (300 s) signed URLs after an authorization check
   ([`PRIVATE-STORAGE.md`](my-app/docs/PRIVATE-STORAGE.md)). The migration that makes the `certificates` bucket private
-  (`20261016_01_private_certificates_bucket.sql`) is an owner step to apply **after** the code is deployed; until then the
-  bucket is still public. Production status: "Migration status" in
+  (`20261016_01_private_certificates_bucket.sql`) is applied automatically **after** the production deployment succeeds
+  ([`MIGRATIONS.md`](my-app/docs/MIGRATIONS.md)); until then the bucket is still public. Production status: "Migration status" in
   [`DATABASE-SCHEMA.md`](my-app/docs/DATABASE-SCHEMA.md).
 - Specifics of individual policies are intentionally not described in this public repository.
 
@@ -95,7 +96,7 @@ To rotate again:
   same-origin requests as the user while the page is open, and the Content-Security-Policy still allows inline scripts.
 - Rate limiting: an in-memory per-instance limiter on many endpoints, plus a Postgres-backed global limiter on login
   completion, signup, the email checks, OCR, public verification, the public portfolio and the SD routes. The global
-  limiter needs migration `20261016_02_rate_limits.sql` (owner step) and fails open to the in-memory one
+  limiter needs migration `20261016_02_rate_limits.sql` (applied automatically) and fails open to the in-memory one
   ([`RATE-LIMITING.md`](my-app/docs/RATE-LIMITING.md)).
 - Monitoring: an optional webhook (`ALERT_WEBHOOK_URL`) receives throttled, redacted alerts for unexpected server errors,
   and `GET /api/health?deep=1` is meant for an external uptime monitor ([`MONITORING.md`](my-app/docs/MONITORING.md)).

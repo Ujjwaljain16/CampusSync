@@ -1,3 +1,4 @@
+-- migrate: skip
 -- Read-only: reports which migrations of this repository are reflected in the database.
 -- Run it in the SQL editor; it changes nothing. Plain ASCII on purpose.
 

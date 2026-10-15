@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- Schema cleanup, step 3 of 5: INDEXES (add what the real queries need, drop the duplicates).
 -- APPLIED to production 2026-10-15; apply after 20261015_02_integrity.sql. Idempotent; one transaction.
 -- Plain ASCII on purpose.

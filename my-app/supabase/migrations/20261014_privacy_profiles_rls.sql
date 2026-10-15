@@ -1,3 +1,4 @@
+-- migrate: skip
 -- ON HOLD, not applied in production: apply only after verifying that no page reads other
 -- users' profiles with the user-session client. Candidates to verify/move to the
 -- service-role client first (found by grep of `.from('profiles')`):

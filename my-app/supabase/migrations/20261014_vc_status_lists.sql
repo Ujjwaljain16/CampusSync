@@ -1,3 +1,4 @@
+-- migrate: skip
 -- OPTIONAL module, NOT applied in production (feature is off by default). Idempotent. Needed only with VC_STATUS_LIST_ENABLED=true.
 --
 -- Revocation status lists for src/lib/statusList.ts (only used when VC_STATUS_LIST_ENABLED=true).

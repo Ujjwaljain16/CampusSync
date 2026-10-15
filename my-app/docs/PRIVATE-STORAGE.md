@@ -41,8 +41,10 @@ always go through the server route.
 
 1. **Deploy the code** (the new route, the UI that uses it, the upload page). While the bucket is still public
    everything keeps working, because the UI already uses signed URLs (signing also works for public buckets).
-2. **Run the migration** `20261016_01_private_certificates_bucket.sql` in the SQL editor. Do not run it
-   before step 1: old links stop working the moment the bucket flips.
+2. **The migration** `20261016_01_private_certificates_bucket.sql` is applied automatically after the production
+   deployment succeeds (it is marked `-- migrate: phase=post`; see [MIGRATIONS.md](./MIGRATIONS.md)). It must never run
+   before step 1: old links stop working the moment the bucket flips. If the approval gate is enabled, approving the
+   `post` job is what flips the bucket.
 3. **Test** with real accounts:
    - a student uploads a certificate, sees the extracted fields and the "View original file" preview, and saves it;
    - the student opens the file from the dashboard (the file opens in a new tab);

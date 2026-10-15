@@ -118,8 +118,10 @@ visibility flags join verified-certificate aggregate), which is application work
 
 ## 5. Migration plan
 
-Files are in `supabase/migrations/` with the prefix `20261015_`. Apply in order, one file at a time in the SQL editor, and
-read the notices. Every file is idempotent and can be re-run at any point (tested).
+Files are in `supabase/migrations/` with the prefix `20261015_`. Steps 00 to 08 are applied in production. From now on
+migrations are applied automatically by a runner and a GitHub workflow, in the order and phase described in
+[MIGRATIONS.md](./MIGRATIONS.md) (the files in this table carry a `-- migrate: baseline` or `skip` directive and are never
+run again there). Every file is idempotent (tested).
 
 | step | file | apply when | needs a code change first? | what it does |
 |---|---|---|---|---|
@@ -158,8 +160,8 @@ do not apply both. `20261014_authz_05a/b/c` must be applied before step 08 (it r
 | `20261014_tlog_transparency_log` | **not applied (optional module off)** | needed only with `TRANSPARENCY_LOG_ENABLED=true` |
 | `20261014_sd_issuances` | **not applied (optional module off)** | accounting table for `SD_JWT_ENABLED=true` |
 | `20261015_00` to `08`, `03b` | applied | the cleanup described above |
-| `20261016_01_private_certificates_bucket` | **pending: apply after the code that serves signed URLs is deployed** | makes the `certificates` storage bucket private and adds owner-folder storage policies; see `docs/PRIVATE-STORAGE.md` (rollback included) |
-| `20261016_02_rate_limits` | **pending: apply after deploy** (the code runs without it, failing open) | `rate_limits` table and `rate_limit_hit` function for the global limiter; see `docs/RATE-LIMITING.md`; covered by the migration checks |
+| `20261016_01_private_certificates_bucket` | **pending: applied automatically after the production deploy succeeds (`phase=post`, see [MIGRATIONS.md](./MIGRATIONS.md))** | makes the `certificates` storage bucket private and adds owner-folder storage policies; see `docs/PRIVATE-STORAGE.md` (rollback included) |
+| `20261016_02_rate_limits` | **pending: applied automatically with the next merge (`phase=pre`, see [MIGRATIONS.md](./MIGRATIONS.md))** (the code runs without it, failing open) | `rate_limits` table and `rate_limit_hit` function for the global limiter; see `docs/RATE-LIMITING.md`; covered by the migration checks |
 
 ### Application changes that gate the later steps
 

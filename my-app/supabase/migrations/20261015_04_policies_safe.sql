@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- Schema cleanup, step 4 of 8: POLICIES THAT ARE SAFE TO APPLY NOW (no application change needed).
 -- APPLIED to production 2026-10-15; apply after 20261015_03_indexes.sql (and 03b). Idempotent; one transaction. Plain ASCII on purpose.
 --

@@ -1,3 +1,4 @@
+-- migrate: skip
 -- SUPERSEDED by 20261015_02 (guard_last_org_admin, protect_primary_admin); do not apply both.
 --
 -- Integrity trigger on user_roles:

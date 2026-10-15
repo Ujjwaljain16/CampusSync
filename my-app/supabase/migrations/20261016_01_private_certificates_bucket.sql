@@ -1,3 +1,4 @@
+-- migrate: phase=post
 -- Private certificates bucket. Idempotent. Plain ASCII on purpose. ONE transaction.
 --
 -- *** APPLY ONLY AFTER the application code that serves files through signed URLs is DEPLOYED

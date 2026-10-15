@@ -1,3 +1,4 @@
+-- migrate: baseline
 -- Schema cleanup, step 5 of 8: LOCK AUDIT WRITES. *** APPLY ONLY AFTER the application change below is deployed. ***
 -- APPLIED to production 2026-10-15. Idempotent; one transaction. Plain ASCII on purpose.
 --

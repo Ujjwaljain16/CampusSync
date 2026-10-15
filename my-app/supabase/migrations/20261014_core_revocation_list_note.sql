@@ -1,3 +1,4 @@
+-- migrate: skip
 -- Note only (no required effect). Idempotent.
 -- (comment-only file: it changes nothing)
 --
