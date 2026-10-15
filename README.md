@@ -121,6 +121,7 @@ Key internal documentation that explains the app flows, DB query patterns, error
 - [Database schema](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/DATABASE-SCHEMA.md) — the target data model, index design, RLS matrix, migration status and how the migrations are tested
 - [Verifiable credentials](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/VERIFIABLE-CREDENTIALS.md) — did:web issuer, JWKS, key rotation, revocation status list (optional)
 - [Selective disclosure](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/SELECTIVE-DISCLOSURE.md) and [Transparency log](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/TRANSPARENCY-LOG.md) — optional modules (off by default)
+- [Database benchmarks](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/BENCHMARKS.md) — before/after query latency on real PostgreSQL at 1M rows, migration timings, reproduction steps
 - [Audit closure report](https://github.com/Ujjwaljain16/CampusSync/blob/main/my-app/docs/AUDIT-CLOSURE.md) — what the security audit found and what is fixed
 - [Security policy](./SECURITY.md) — reporting, key rotation and the credential-exposure notice
 

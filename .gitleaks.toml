@@ -15,5 +15,10 @@ regexes = [
   '''replace-me''',
   # Migration file names listed in supabase/tests/assert-final.mjs ("07_default_pending" trips generic-api-key)
   '''[0-9]{2}_default_pending''',
+  # Synthetic fixtures in tests/lib/alerts.test.ts that prove alert redaction works: the public jwt.io example token
+  # (subject "1234567890") and an obvious placeholder key. Exact strings only, so a real secret added to that file
+  # would still be reported.
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ\.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c''',
+  '''sb_secret_AbCdEf0123456789GhIjKlMnOpQrStUv''',
   '''generate-a-long-random-string''',
 ]

@@ -1,0 +1,33 @@
+=== review queue (pending, one organization)
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.42..3137.89 rows=50 width=188) (actual time=16.508..23.297 rows=50 loops=1)
+   Buffers: shared hit=598 read=437
+   ->  Index Scan using idx_certificates_org_created on certificates  (cost=0.42..80507.83 rows=1283 width=188) (actual time=16.507..23.284 rows=50 loops=1)
+         Index Cond: (organization_id = '1fefd209-144c-4ec2-bda8-f556305d5c6a'::uuid)
+         Filter: (verification_status = 'pending'::text)
+         Rows Removed by Filter: 976
+         Buffers: shared hit=598 read=437
+ Planning:
+   Buffers: shared hit=414 read=3 dirtied=1
+ Planning Time: 0.778 ms
+ Execution Time: 23.324 ms
+(11 rows)
+
+=== credential lookup by certificate (JSON containment)
+                                                                                         QUERY PLAN                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gather  (cost=1000.00..38337.07 rows=27 width=53) (actual time=100.028..103.077 rows=1 loops=1)
+   Workers Planned: 2
+   Workers Launched: 2
+   Buffers: shared hit=35007
+   ->  Parallel Seq Scan on verifiable_credentials  (cost=0.00..37334.37 rows=11 width=53) (actual time=97.375..97.649 rows=0 loops=3)
+         Filter: ((status = 'active'::text) AND (credential @> jsonb_build_object('credentialSubject', jsonb_build_object('certificateId', 'f2a82088-63b7-43e0-9fd0-ccd059f46ee0'::text))))
+         Rows Removed by Filter: 93335
+         Buffers: shared hit=35007
+ Planning:
+   Buffers: shared hit=30 dirtied=1
+ Planning Time: 0.351 ms
+ Execution Time: 103.090 ms
+(12 rows)
+
